@@ -1,0 +1,213 @@
+# Telemetry
+
+The library emits typed events for every protocol-significant action. There is no logger dependency — you wire events into your existing observability stack via the `onEvent` callback.
+
+## Wiring up
+
+Pass `onEvent` in adapter options:
+
+```ts
+app.use(dbsc({
+  storage,
+  onEvent: (event) => {
+    logger.info({ dbsc: event });
+    metrics.increment(`dbsc.${event.type}`, { tier: event.tier });
+    if (event.type === "session_stolen") {
+      alerting.trigger("dbsc.session_stolen", {
+        sessionId: event.sessionId,
+        ip: event.ip,
+      });
+    }
+  },
+}));
+```
+
+Every event carries the same base fields:
+
+```ts
+interface TelemetryEvent {
+  sessionId: string;
+  tier: ProtectionTier;
+  timestamp: number;   // Date.now() at emit time
+}
+```
+
+Plus event-specific fields described below.
+
+## Event types
+
+### `registration`
+
+Fires after a successful registration JWS verification. Session tier is now `"dbsc"`.
+
+```ts
+interface RegistrationEvent extends TelemetryEvent {
+  type: "registration";
+  algorithm: string;   // "ES256" or "RS256"
+  ip: string;
+}
+```
+
+Useful for: counting new DBSC sessions, breaking down by algorithm, geographic distribution by IP.
+
+### `refresh`
+
+Fires after a successful refresh. The bound cookie has been re-issued, `lastRefreshAt` updated.
+
+```ts
+interface RefreshEvent extends TelemetryEvent {
+  type: "refresh";
+  ip: string;
+}
+```
+
+Useful for: refresh rate, IP changes mid-session (potential session-jumping detection), refresh latency tracking.
+
+### `verification_failure`
+
+Fires whenever JWS verification or challenge validation fails on either registration or refresh.
+
+```ts
+interface VerificationFailureEvent extends TelemetryEvent {
+  type: "verification_failure";
+  reason: string;   // ErrorCode value, e.g. "SIGNATURE_INVALID", "CHALLENGE_EXPIRED"
+  ip: string;
+}
+```
+
+Most common reasons:
+
+- `SIGNATURE_INVALID` — JWS signature does not match stored JWK. Either a stolen cookie attack or a TPM key change.
+- `JTI_MISMATCH` — challenge in JWS does not match what the server issued. Replay attempt or stale browser state.
+- `CHALLENGE_CONSUMED` — challenge already used. Concurrent refresh race or replay.
+- `CHALLENGE_EXPIRED` — challenge older than 5 minutes. Slow client or clock drift.
+- `MALFORMED_JWS` — bad JWS structure. Buggy client or middleware tampering.
+
+A spike in `SIGNATURE_INVALID` from a single IP is a strong signal of cookie theft in progress.
+
+### `session_stolen`
+
+Fires when refresh fails AND a bound key exists for the session. The cookie was valid but the proof was not — meaning someone has the cookie but not the device key.
+
+```ts
+interface SessionStolenEvent extends TelemetryEvent {
+  type: "session_stolen";
+  ip: string;
+}
+```
+
+This is the single most actionable event. Wire it to:
+
+- Force-logout the session immediately (`storage.revokeSession(sessionId)`).
+- Notify the user via email/SMS/in-app alert.
+- Page on-call if the rate exceeds N/minute.
+- Trigger a security review of the affected user account.
+
+### `fallback_tier`
+
+Fires when a session moves between tiers — typically when a WebAuthn or HMAC fallback completes after DBSC fails.
+
+```ts
+interface FallbackTierEvent extends TelemetryEvent {
+  type: "fallback_tier";
+  from: ProtectionTier;
+  to: ProtectionTier;
+  reason: string;   // "dbsc_unsupported" | "tpm_unavailable" | "webauthn_failed"
+}
+```
+
+Useful for: tracking what fraction of sessions land at each tier, identifying browsers/platforms with poor support.
+
+## OpenTelemetry mapping
+
+The library does not depend on OpenTelemetry, but the event shapes map cleanly onto OTel attributes. Suggested span/metric attribute names:
+
+```
+dbsc.session_id    = event.sessionId
+dbsc.tier          = event.tier
+dbsc.event_type    = event.type
+dbsc.ip            = event.ip
+dbsc.algorithm     = event.algorithm    (registration only)
+dbsc.failure_reason = event.reason      (verification_failure only)
+dbsc.fallback_from = event.from         (fallback_tier only)
+dbsc.fallback_to   = event.to           (fallback_tier only)
+```
+
+Example with OTel:
+
+```ts
+import { metrics, trace } from "@opentelemetry/api";
+
+const meter = metrics.getMeter("dbsc-toolkit");
+const registrationCounter = meter.createCounter("dbsc.registration.count");
+const refreshHistogram = meter.createHistogram("dbsc.refresh.duration_ms");
+const failureCounter = meter.createCounter("dbsc.verification_failure.count");
+const stolenCounter = meter.createCounter("dbsc.session_stolen.count");
+
+app.use(dbsc({
+  storage,
+  onEvent: (event) => {
+    const attrs = { tier: event.tier };
+    switch (event.type) {
+      case "registration":
+        registrationCounter.add(1, { ...attrs, algorithm: event.algorithm });
+        break;
+      case "refresh":
+        // measure refresh duration in your route handler around handleRefresh
+        break;
+      case "verification_failure":
+        failureCounter.add(1, { ...attrs, reason: event.reason });
+        break;
+      case "session_stolen":
+        stolenCounter.add(1, attrs);
+        // also fire a span event for trace correlation
+        trace.getActiveSpan()?.addEvent("dbsc.session_stolen", { sessionId: event.sessionId });
+        break;
+    }
+  },
+}));
+```
+
+## Suggested counters and histograms
+
+For dashboards:
+
+| Metric | Type | Labels |
+|--------|------|--------|
+| `dbsc.registration.count` | counter | tier, algorithm |
+| `dbsc.refresh.count` | counter | tier |
+| `dbsc.refresh.duration_ms` | histogram | tier |
+| `dbsc.verification_failure.count` | counter | tier, reason |
+| `dbsc.session_stolen.count` | counter | (none — should always be near zero) |
+| `dbsc.tier_distribution` | gauge | tier — sample periodically from storage |
+| `dbsc.fallback_tier.count` | counter | from, to, reason |
+
+## Alerting thresholds (starting points)
+
+| Condition | Severity |
+|-----------|----------|
+| `dbsc.session_stolen.count` > 0 in 5 min | High |
+| `dbsc.verification_failure.count{reason="SIGNATURE_INVALID"}` rate > 10/min from single IP | Medium |
+| `dbsc.tier_distribution{tier="dbsc"}` drops by 50% week-over-week | Medium (Chrome behavior changed?) |
+| `dbsc.refresh.duration_ms{p99}` > 500ms | Low (storage latency issue) |
+
+Tune to your traffic patterns. The first two are the ones that actually catch attacks.
+
+## Audit logging
+
+For applications with strict audit requirements (financial, healthcare), emit every event to a write-ahead log:
+
+```ts
+onEvent: (event) => {
+  await auditLog.append({
+    type: event.type,
+    sessionId: event.sessionId,
+    tier: event.tier,
+    timestamp: event.timestamp,
+    ip: event.ip,
+    payload: event,
+  });
+}
+```
+
+The Postgres storage adapter ships with a `dbsc_audit_log` table that can serve as this WAL.

@@ -1,0 +1,124 @@
+{
+  "name": "dbsc-toolkit",
+  "version": "1.0.0",
+  "description": "Server-side Device Bound Session Credentials (DBSC) for Node.js. Verified against Chrome 147.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./express": {
+      "import": "./dist/express/index.js",
+      "types": "./dist/express/index.d.ts"
+    },
+    "./fastify": {
+      "import": "./dist/fastify/index.js",
+      "types": "./dist/fastify/index.d.ts"
+    },
+    "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+    },
+    "./nextjs": {
+      "import": "./dist/nextjs/index.js",
+      "types": "./dist/nextjs/index.d.ts"
+    },
+    "./client": {
+      "import": "./dist/client/index.js",
+      "types": "./dist/client/index.d.ts"
+    },
+    "./storage/memory": {
+      "import": "./dist/storage/memory/index.js",
+      "types": "./dist/storage/memory/index.d.ts"
+    },
+    "./storage/redis": {
+      "import": "./dist/storage/redis/index.js",
+      "types": "./dist/storage/redis/index.d.ts"
+    },
+    "./storage/postgres": {
+      "import": "./dist/storage/postgres/index.js",
+      "types": "./dist/storage/postgres/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "migrations",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "^10.0.0",
+    "jose": "^5.3.0"
+  },
+  "peerDependencies": {
+    "express": ">=4.0.0",
+    "fastify": ">=4.0.0",
+    "@fastify/cookie": ">=9.0.0",
+    "hono": ">=4.0.0",
+    "next": ">=14.0.0",
+    "ioredis": ">=5.0.0",
+    "pg": ">=8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "express": { "optional": true },
+    "fastify": { "optional": true },
+    "@fastify/cookie": { "optional": true },
+    "hono": { "optional": true },
+    "next": { "optional": true },
+    "ioredis": { "optional": true },
+    "pg": { "optional": true }
+  },
+  "devDependencies": {
+    "@fastify/cookie": "^9.0.0",
+    "@simplewebauthn/browser": "^10.0.0",
+    "@types/express": "^4.17.0",
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.0.0",
+    "express": "^4.19.0",
+    "fastify": "^4.28.0",
+    "hono": "^4.0.0",
+    "ioredis": "^5.3.0",
+    "next": "^14.2.0",
+    "pg": "^8.11.0",
+    "rimraf": "^5.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  },
+  "keywords": [
+    "dbsc",
+    "device-bound-session-credentials",
+    "session",
+    "security",
+    "tpm",
+    "auth",
+    "cookies",
+    "webauthn",
+    "express",
+    "fastify",
+    "hono",
+    "nextjs"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SulimanAbdulrazzaq/dbsc-toolkit.git"
+  },
+  "homepage": "https://github.com/SulimanAbdulrazzaq/dbsc-toolkit#readme",
+  "bugs": {
+    "url": "https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/issues"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
