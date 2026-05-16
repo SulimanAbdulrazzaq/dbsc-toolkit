@@ -55,7 +55,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     path: "/",
   };
 
-  fastify.decorateRequest("dbsc", null);
+  fastify.decorateRequest<FastifyRequest["dbsc"] | null>("dbsc", null);
 
   fastify.addHook("onRequest", async (req: FastifyRequest, reply: FastifyReply) => {
     const sessionId = req.cookies?.[BOUND_COOKIE] ?? null;
