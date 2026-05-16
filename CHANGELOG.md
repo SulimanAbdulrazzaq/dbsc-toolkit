@@ -2,9 +2,9 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
-## [1.0.0] — 2026-05-15
+## [1.0.1] — 2026-05-16
 
-Initial release.
+First public release.
 
 ### Highlights
 
