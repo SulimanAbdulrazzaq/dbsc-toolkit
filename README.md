@@ -84,6 +84,44 @@ Tree-shaking eliminates anything you don't import.
 
 `tier` on `res.locals.dbsc` reads `"dbsc"` once registration completes.
 
+## Using the tier to actually defend
+
+Setting up the middleware does not protect anything on its own. The library does the negotiation and gives you a tier; **enforcing it is your responsibility**. The pattern:
+
+```ts
+app.get("/payment", (req, res) => {
+  if (res.locals.dbsc.tier !== "dbsc") {
+    return res.status(403).json({ error: "hardware-bound session required" });
+  }
+  // safe to process payment
+});
+```
+
+If you skip the tier check, a stolen cookie still works. The cookie reaches your server, the session record exists, your code happily proceeds — DBSC bought you nothing. The whole point is the demotion: when a cookie is replayed without the TPM proof, tier drops to `"none"` (or stays at the lower fallback tier) and your gate refuses the request.
+
+Suggested handling per tier in a real application:
+
+- `tier === "dbsc"`: full access. Payments, account changes, anything sensitive.
+- `tier === "webauthn"`: most access. Hardware-bound via platform authenticator.
+- `tier === "hmac"`: read-only or low-risk actions. The binding is best-effort.
+- `tier === "none"`: treat as unauthenticated. Force re-login, revoke the session, log a `session_stolen` candidate, depending on context.
+
+Putting this in a single middleware keeps it consistent:
+
+```ts
+function requireDbsc(req, res, next) {
+  if (res.locals.dbsc.tier !== "dbsc") {
+    return res.status(401).json({ error: "re-authenticate" });
+  }
+  next();
+}
+
+app.post("/payment", requireDbsc, handler);
+app.post("/account/email", requireDbsc, handler);
+```
+
+See [docs/security/best-practices.md](./docs/security/best-practices.md) for the full tier-policy guidance.
+
 ## Local testing
 
 You need HTTPS — `__Host-` cookies require it and Chrome rejects DBSC on plain HTTP. Two options:

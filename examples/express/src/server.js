@@ -97,9 +97,20 @@ app.get("/", (_req, res) => {
   res.send(`
 <!doctype html>
 <html>
-<head><title>DBSC Demo</title></head>
+<head>
+<title>DBSC Demo</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+  .banner { background: #fff3cd; border: 1px solid #ffe28a; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.9rem; color: #5b4400; }
+  button { margin-right: 0.5rem; margin-bottom: 0.5rem; padding: 0.5rem 1rem; }
+  pre { background: #f4f4f4; padding: 1rem; border-radius: 6px; overflow-x: auto; }
+</style>
+</head>
 <body>
 <h1>DBSC Toolkit Demo</h1>
+<div class="banner">
+  <strong>Heads up:</strong> this demo uses in-memory storage. Sessions are wiped on every deploy or server restart. If "Check session" returns <code>not authenticated</code> after a while, the server probably restarted &mdash; click <strong>Login</strong> again. For persistence, swap <code>MemoryStorage</code> for <code>RedisStorage</code> or <code>PostgresStorage</code>.
+</div>
 <button id="login">Login</button>
 <button id="logout">Logout</button>
 <button id="me">Check session</button>

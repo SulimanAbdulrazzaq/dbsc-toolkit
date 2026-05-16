@@ -97,6 +97,89 @@ Set in adapter options:
 app.use(dbsc({ storage, boundCookieTtl: 5 * 60 * 1000 }));
 ```
 
+## Enforcing the tier — the part that actually defends
+
+The library negotiates a tier and exposes it on the request. **The tier is information, not a gate.** Your application code is what decides whether the request proceeds, and writing that code is the step where DBSC starts protecting anything.
+
+If you forget this step, the library buys you nothing. A stolen cookie still reaches your handler, the session record still exists in storage, your code still runs. The "stolen cookie is useless" property only holds when something refuses to act on a session that has demoted to a lower tier.
+
+### What demotion looks like
+
+When an attacker copies a bound cookie to another device, this is what the server sees on the attacker's requests:
+
+1. First minute: the bound cookie is still within its TTL. Tier reads `"dbsc"` because the session record says so. The attacker has full access during this window. **Keep `boundCookieTtl` short for sensitive applications** — see the bound cookie TTL section above.
+2. After TTL expiry: Chrome on the attacker's machine tries to refresh, can't produce a JWS signed by the TPM key (it doesn't have the private key), refresh fails. The bound cookie is dropped by Chrome. On the next request, the attacker has no `__Host-dbsc-session` cookie at all. Tier reads `"none"`.
+
+The victim, on the other side, refreshes successfully every cycle and stays at `"dbsc"` indefinitely.
+
+The window between (1) and (2) is the cost of cookie theft under DBSC. Compared to "indefinite session takeover" without DBSC, it's bounded by `boundCookieTtl`. With a 60-second TTL, a stolen cookie is useful for roughly a minute.
+
+### Policy patterns
+
+Per-route gate:
+
+```ts
+function requireDbsc(req, res, next) {
+  if (res.locals.dbsc.tier !== "dbsc") {
+    return res.status(401).json({ error: "hardware-bound session required" });
+  }
+  next();
+}
+
+app.post("/payment", requireDbsc, handlePayment);
+app.post("/account/email", requireDbsc, handleEmailChange);
+app.delete("/account", requireDbsc, handleAccountDelete);
+```
+
+Read access at any tier, write access at DBSC only:
+
+```ts
+app.get("/messages", (req, res) => {
+  // any tier allowed
+  if (!res.locals.dbsc.sessionId) return res.status(401).end();
+  res.json(getMessages(req.user));
+});
+
+app.post("/messages", requireDbsc, sendMessage);
+```
+
+Tier-aware response (different defaults per tier):
+
+```ts
+app.get("/balance", (req, res) => {
+  const { tier } = res.locals.dbsc;
+  if (tier === "none") return res.status(401).end();
+  if (tier === "hmac") {
+    // best-effort binding — show without action buttons
+    return res.json({ balance: getBalance(req.user), readonly: true });
+  }
+  return res.json({ balance: getBalance(req.user), readonly: false });
+});
+```
+
+### Demotion as a signal
+
+When a logged-in session demotes from `"dbsc"` to `"none"`, that is unusual. A normal user's tier stays at `"dbsc"` as long as their device is the same. Demotion happens when:
+
+- The user cleared their cookies.
+- The user switched devices without re-authenticating (impossible if your session is bound — they would have to log in again).
+- Chrome lost the TPM key (rare).
+- **Someone is replaying a copied cookie on a different machine.**
+
+Treat a tier drop on an active session as suspicious. Options:
+
+- Force re-login: clear the session, redirect to login page.
+- Revoke immediately: `await res.locals.dbsc.revoke()` plus `await storage.revokeSession(sessionId)`.
+- Alert the user out of band (email/SMS) that a session was demoted from a new IP.
+
+Combine with the `session_stolen` telemetry event (fires when refresh fails with a valid stored JWK — strong signal of theft attempt) for a complete picture.
+
+### What to never do
+
+- **Never trust `tier === "none"` for sensitive operations.** This is the default when DBSC isn't established yet, but it's also the state of a stolen-cookie session after demotion. The two look the same to your handler.
+- **Never use the session ID alone for authorization.** The library returns `sessionId` even at tier `"none"`. If your code checks "does sessionId exist?" instead of "what tier is the session at?", you have gained nothing from DBSC.
+- **Never log only at tier `"dbsc"`.** Log demotion events too. They are how you catch theft in progress.
+
 ## Session revocation
 
 Two revocation paths:
