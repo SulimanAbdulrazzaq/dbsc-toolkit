@@ -91,7 +91,21 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
           maxAge: boundCookieTtl / 1000,
         });
         deleteCookie(c, CHALLENGE_COOKIE);
-        return c.body(null, 204);
+        return c.json(
+          {
+            session_identifier: sessionId,
+            refresh_url: refreshPath,
+            scope: { include_site: true },
+            credentials: [
+              {
+                type: "cookie",
+                name: BOUND_COOKIE,
+                attributes: `Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(boundCookieTtl / 1000)}`,
+              },
+            ],
+          },
+          200,
+        );
       } catch (err) {
         await rateLimiter.recordFailure(ip, sessionId);
         if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {
@@ -102,9 +116,10 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
     }
 
     if (c.req.method === "POST" && url.pathname === refreshPath) {
-      const sessionId = getCookie(c, BOUND_COOKIE);
+      const sessionIdHeader = c.req.header("sec-secure-session-id");
+      const sessionId = sessionIdHeader ?? getCookie(c, BOUND_COOKIE);
 
-      if (!sessionId) return c.json({ error: "no session" }, 401);
+      if (!sessionId) return c.body(null, 403);
 
       const allowed = await rateLimiter.checkRefresh(ip, sessionId);
       if (!allowed) return c.json({ error: "rate limited" }, 429);
@@ -120,7 +135,13 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
       }
 
       const expectedJti = getCookie(c, CHALLENGE_COOKIE);
-      if (!expectedJti) return c.json({ error: "missing challenge cookie" }, 400);
+      if (!expectedJti) {
+        const challenge = await issueChallenge(sessionId, storage);
+        c.header(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
+        c.header(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
+        setCookie(c, CHALLENGE_COOKIE, challenge.jti, { ...cookieOpts, maxAge: 5 * 60 });
+        return c.body(null, 403);
+      }
 
       try {
         await handleRefresh({ sessionId, secSessionResponseHeader: responseHeader, expectedJti }, storage);
@@ -135,7 +156,21 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
 
         setCookie(c, BOUND_COOKIE, sessionId, { ...cookieOpts, maxAge: boundCookieTtl / 1000 });
         deleteCookie(c, CHALLENGE_COOKIE);
-        return c.body(null, 204);
+        return c.json(
+          {
+            session_identifier: sessionId,
+            refresh_url: refreshPath,
+            scope: { include_site: true },
+            credentials: [
+              {
+                type: "cookie",
+                name: BOUND_COOKIE,
+                attributes: `Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(boundCookieTtl / 1000)}`,
+              },
+            ],
+          },
+          200,
+        );
       } catch (err) {
         await rateLimiter.recordFailure(ip, sessionId);
         if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {

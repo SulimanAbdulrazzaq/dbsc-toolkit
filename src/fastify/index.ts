@@ -111,7 +111,18 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
         maxAge: boundCookieTtl / 1000,
       });
       reply.clearCookie(CHALLENGE_COOKIE, cookieOpts);
-      return reply.status(204).send();
+      return reply.status(200).send({
+        session_identifier: sessionId,
+        refresh_url: refreshPath,
+        scope: { include_site: true },
+        credentials: [
+          {
+            type: "cookie",
+            name: BOUND_COOKIE,
+            attributes: `Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(boundCookieTtl / 1000)}`,
+          },
+        ],
+      });
     } catch (err) {
       await rateLimiter.recordFailure(ip, sessionId);
       if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {
@@ -123,9 +134,12 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
 
   fastify.post(refreshPath, async (req: FastifyRequest, reply: FastifyReply) => {
     const ip = req.ip;
-    const sessionId = req.cookies?.[BOUND_COOKIE];
+    const sessionIdHeader = req.headers["sec-secure-session-id"];
+    const sessionId =
+      (Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader) ??
+      req.cookies?.[BOUND_COOKIE];
 
-    if (!sessionId) return reply.status(401).send({ error: "no session" });
+    if (!sessionId) return reply.status(403).send();
 
     const allowed = await rateLimiter.checkRefresh(ip, sessionId);
     if (!allowed) return reply.status(429).send({ error: "rate limited" });
@@ -141,7 +155,13 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     }
 
     const expectedJti = req.cookies?.[CHALLENGE_COOKIE];
-    if (!expectedJti) return reply.status(400).send({ error: "missing challenge cookie" });
+    if (!expectedJti) {
+      const challenge = await issueChallenge(sessionId, storage);
+      reply.header(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
+      reply.header(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
+      reply.setCookie(CHALLENGE_COOKIE, challenge.jti, { ...cookieOpts, maxAge: 5 * 60 });
+      return reply.status(403).send();
+    }
 
     try {
       await handleRefresh({ sessionId, secSessionResponseHeader: responseHeader, expectedJti }, storage);
@@ -156,7 +176,18 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
 
       reply.setCookie(BOUND_COOKIE, sessionId, { ...cookieOpts, maxAge: boundCookieTtl / 1000 });
       reply.clearCookie(CHALLENGE_COOKIE, cookieOpts);
-      return reply.status(204).send();
+      return reply.status(200).send({
+        session_identifier: sessionId,
+        refresh_url: refreshPath,
+        scope: { include_site: true },
+        credentials: [
+          {
+            type: "cookie",
+            name: BOUND_COOKIE,
+            attributes: `Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(boundCookieTtl / 1000)}`,
+          },
+        ],
+      });
     } catch (err) {
       await rateLimiter.recordFailure(ip, sessionId);
       if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {

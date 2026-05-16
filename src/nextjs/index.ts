@@ -88,7 +88,19 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
           ip,
         });
 
-        const res = new NextResponse(null, { status: 204 });
+        const body = {
+          session_identifier: sessionId,
+          refresh_url: refreshPath,
+          scope: { include_site: true },
+          credentials: [
+            {
+              type: "cookie",
+              name: BOUND_COOKIE,
+              attributes: `Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(boundCookieTtl / 1000)}`,
+            },
+          ],
+        };
+        const res = NextResponse.json(body, { status: 200 });
         res.cookies.set(BOUND_COOKIE, sessionId, {
           ...cookieBase(secure),
           maxAge: boundCookieTtl / 1000,
@@ -105,10 +117,11 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
     }
 
     if (req.method === "POST" && url === refreshPath) {
-      const sessionId = req.cookies.get(BOUND_COOKIE)?.value;
+      const sessionIdHeader = req.headers.get("sec-secure-session-id");
+      const sessionId = sessionIdHeader ?? req.cookies.get(BOUND_COOKIE)?.value;
 
       if (!sessionId) {
-        return NextResponse.json({ error: "no session" }, { status: 401 });
+        return new NextResponse(null, { status: 403 });
       }
 
       const allowed = await rateLimiter.checkRefresh(ip, sessionId);
@@ -134,7 +147,15 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
 
       const expectedJti = req.cookies.get(CHALLENGE_COOKIE)?.value;
       if (!expectedJti) {
-        return NextResponse.json({ error: "missing challenge cookie" }, { status: 400 });
+        const challenge = await issueChallenge(sessionId, storage);
+        const res = new NextResponse(null, { status: 403 });
+        res.headers.set(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
+        res.headers.set(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
+        res.cookies.set(CHALLENGE_COOKIE, challenge.jti, {
+          ...cookieBase(secure),
+          maxAge: 5 * 60,
+        });
+        return res;
       }
 
       try {
@@ -148,7 +169,19 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
           ip,
         });
 
-        const res = new NextResponse(null, { status: 204 });
+        const body = {
+          session_identifier: sessionId,
+          refresh_url: refreshPath,
+          scope: { include_site: true },
+          credentials: [
+            {
+              type: "cookie",
+              name: BOUND_COOKIE,
+              attributes: `Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(boundCookieTtl / 1000)}`,
+            },
+          ],
+        };
+        const res = NextResponse.json(body, { status: 200 });
         res.cookies.set(BOUND_COOKIE, sessionId, {
           ...cookieBase(secure),
           maxAge: boundCookieTtl / 1000,
