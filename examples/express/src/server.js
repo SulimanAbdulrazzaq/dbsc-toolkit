@@ -6,6 +6,7 @@ import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 import { buildRegistrationHeader, issueChallenge } from "dbsc-toolkit";
 
 const app = express();
+app.set("trust proxy", true);
 const storage = new MemoryStorage();
 
 app.use(cookieParser());
@@ -39,6 +40,23 @@ app.use((req, res, next) => {
   res.on("finish", () => {
     console.log(JSON.stringify({ t: "res-done", path: req.path, status: res.statusCode }));
   });
+
+  if (req.path === "/dbsc/registration" || req.path === "/dbsc/refresh") {
+    const origJson = res.json.bind(res);
+    res.json = (body) => {
+      console.log(JSON.stringify({ t: "res-body", path: req.path, body }));
+      return origJson(body);
+    };
+  }
+
+  console.log(JSON.stringify({
+    t: "req-meta",
+    path: req.path,
+    protocol: req.protocol,
+    host: req.get("host"),
+    xForwardedProto: req.get("x-forwarded-proto"),
+    xForwardedHost: req.get("x-forwarded-host"),
+  }));
 
   next();
 });
