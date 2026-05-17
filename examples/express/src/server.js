@@ -8,6 +8,11 @@ import { buildRegistrationHeader, issueChallenge } from "dbsc-toolkit";
 const app = express();
 const storage = new MemoryStorage();
 
+// app-level session store, kept separate from DBSC.
+// The DBSC bound cookie is for tier negotiation only.
+// Authentication identity lives in __Host-app-session.
+const appSessions = new Map(); // appSessionId -> { userId, dbscSessionId }
+
 app.use(cookieParser());
 app.use("/dbsc/registration", express.text({ type: "*/*", limit: "100kb" }));
 app.use("/dbsc/refresh", express.text({ type: "*/*", limit: "100kb" }));
@@ -24,6 +29,12 @@ app.use(
   }),
 );
 
+function getAppSession(req) {
+  const id = req.cookies?.["__Host-app-session"];
+  if (!id) return null;
+  return appSessions.get(id) ?? null;
+}
+
 app.post("/login", async (req, res) => {
   const { username } = req.body;
   if (!username) {
@@ -31,11 +42,12 @@ app.post("/login", async (req, res) => {
     return;
   }
 
-  const sessionId = randomUUID();
+  const dbscSessionId = randomUUID();
+  const appSessionId = randomUUID();
   const now = Date.now();
 
   await storage.setSession({
-    id: sessionId,
+    id: dbscSessionId,
     userId: username,
     tier: "none",
     createdAt: now,
@@ -43,7 +55,9 @@ app.post("/login", async (req, res) => {
     lastRefreshAt: 0,
   });
 
-  const challenge = await issueChallenge(sessionId, storage);
+  appSessions.set(appSessionId, { userId: username, dbscSessionId });
+
+  const challenge = await issueChallenge(dbscSessionId, storage);
 
   const regHeader = buildRegistrationHeader({
     refreshPath: "/dbsc/registration",
@@ -53,7 +67,15 @@ app.post("/login", async (req, res) => {
   res.setHeader("Sec-Session-Registration", regHeader);
   res.setHeader("Secure-Session-Registration", regHeader);
 
-  res.cookie("__Host-dbsc-reg", sessionId, {
+  res.cookie("__Host-app-session", appSessionId, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 24 * 60 * 60 * 1000,
+  });
+
+  res.cookie("__Host-dbsc-reg", dbscSessionId, {
     httpOnly: true,
     secure: true,
     sameSite: "lax",
@@ -69,11 +91,14 @@ app.post("/login", async (req, res) => {
     maxAge: 5 * 60 * 1000,
   });
 
-  res.json({ ok: true, sessionId });
+  res.json({ ok: true, user: username });
 });
 
 app.post("/logout", async (_req, res) => {
+  const appSessionId = _req.cookies?.["__Host-app-session"];
+  if (appSessionId) appSessions.delete(appSessionId);
   await res.locals.dbsc.revoke();
+  res.clearCookie("__Host-app-session", { path: "/" });
   res.json({ ok: true });
 });
 
@@ -84,13 +109,39 @@ app.post("/clear-cookies", (req, res) => {
   res.json({ ok: true, cleared: Object.keys(req.cookies ?? {}) });
 });
 
-app.get("/me", (_req, res) => {
-  const { sessionId, tier } = res.locals.dbsc;
-  if (!sessionId) {
+app.get("/me", (req, res) => {
+  const appSession = getAppSession(req);
+  if (!appSession) {
     res.status(401).json({ error: "not authenticated" });
     return;
   }
-  res.json({ sessionId, tier });
+
+  const { tier } = res.locals.dbsc;
+  res.json({
+    user: appSession.userId,
+    tier,
+    bound: tier === "dbsc",
+  });
+});
+
+app.post("/payment", (req, res) => {
+  const appSession = getAppSession(req);
+  if (!appSession) {
+    res.status(401).json({ error: "not authenticated" });
+    return;
+  }
+
+  const { tier } = res.locals.dbsc;
+  if (tier !== "dbsc") {
+    res.status(403).json({
+      error: "hardware-bound session required",
+      tier,
+      hint: "this is the demotion gate. A stolen cookie reaches /me but fails here.",
+    });
+    return;
+  }
+
+  res.json({ ok: true, charged: 9.99, user: appSession.userId });
 });
 
 app.get("/", (_req, res) => {
@@ -100,22 +151,30 @@ app.get("/", (_req, res) => {
 <head>
 <title>DBSC Demo</title>
 <style>
-  body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
-  .banner { background: #fff3cd; border: 1px solid #ffe28a; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.9rem; color: #5b4400; }
-  button { margin-right: 0.5rem; margin-bottom: 0.5rem; padding: 0.5rem 1rem; }
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { margin-bottom: 0.25rem; }
+  p.lead { color: #555; margin-top: 0; }
+  button { margin-right: 0.5rem; margin-bottom: 0.5rem; padding: 0.5rem 1rem; cursor: pointer; }
   pre { background: #f4f4f4; padding: 1rem; border-radius: 6px; overflow-x: auto; }
+  .tier-dbsc { color: #0a7d2a; font-weight: 600; }
+  .tier-none { color: #b00020; font-weight: 600; }
+  .actions { margin: 1rem 0; }
 </style>
 </head>
 <body>
 <h1>DBSC Toolkit Demo</h1>
-<div class="banner">
-  <strong>Heads up:</strong> this demo uses in-memory storage. Sessions are wiped on every deploy or server restart. If "Check session" returns <code>not authenticated</code> after a while, the server probably restarted &mdash; click <strong>Login</strong> again. For persistence, swap <code>MemoryStorage</code> for <code>RedisStorage</code> or <code>PostgresStorage</code>.
+<p class="lead">Authentication lives in <code>__Host-app-session</code>. Hardware binding lives in <code>__Host-dbsc-session</code>. The two are intentionally separate.</p>
+
+<div class="actions">
+  <button id="login">Login as alice</button>
+  <button id="logout">Logout</button>
+  <button id="me">Check session</button>
+  <button id="payment">Make payment</button>
+  <button id="clear">Clear cookies</button>
 </div>
-<button id="login">Login</button>
-<button id="logout">Logout</button>
-<button id="me">Check session</button>
-<button id="clear">Clear cookies</button>
-<pre id="out"></pre>
+
+<pre id="out">Click "Login" to begin.</pre>
+
 <script>
 async function req(method, path, body) {
   const r = await fetch(path, {
@@ -124,25 +183,20 @@ async function req(method, path, body) {
     body: body ? JSON.stringify(body) : undefined,
     credentials: 'include',
   });
-  return r.json().catch(() => r.status);
+  let data;
+  try { data = await r.json(); } catch { data = { status: r.status }; }
+  return { status: r.status, data };
 }
-document.getElementById('login').onclick = async () => {
-  const res = await req('POST', '/login', { username: 'alice' });
-  document.getElementById('out').textContent = JSON.stringify(res, null, 2);
-};
-document.getElementById('logout').onclick = async () => {
-  const res = await req('POST', '/logout');
-  document.getElementById('out').textContent = JSON.stringify(res, null, 2);
-};
-document.getElementById('me').onclick = async () => {
-  const res = await req('GET', '/me');
-  document.getElementById('out').textContent = JSON.stringify(res, null, 2);
-};
-document.getElementById('clear').onclick = async () => {
-  const res = await req('POST', '/clear-cookies');
-  document.getElementById('out').textContent = JSON.stringify(res, null, 2);
-};
+function show(r) {
+  document.getElementById('out').textContent = JSON.stringify(r, null, 2);
+}
+document.getElementById('login').onclick = async () => show(await req('POST', '/login', { username: 'alice' }));
+document.getElementById('logout').onclick = async () => show(await req('POST', '/logout'));
+document.getElementById('me').onclick = async () => show(await req('GET', '/me'));
+document.getElementById('payment').onclick = async () => show(await req('POST', '/payment'));
+document.getElementById('clear').onclick = async () => show(await req('POST', '/clear-cookies'));
 </script>
+
 </body>
 </html>
   `);
