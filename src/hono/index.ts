@@ -132,8 +132,8 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
 
       if (!responseHeader) {
         const challenge = await issueChallenge(sessionId, storage);
-        c.header(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
-        c.header(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
+        c.header(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
+        c.header(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
         setCookie(c, CHALLENGE_COOKIE, challenge.jti, { ...cookieOpts, maxAge: 5 * 60 });
         return c.body(null, 403);
       }
@@ -141,8 +141,8 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
       const expectedJti = getCookie(c, CHALLENGE_COOKIE);
       if (!expectedJti) {
         const challenge = await issueChallenge(sessionId, storage);
-        c.header(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
-        c.header(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
+        c.header(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
+        c.header(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
         setCookie(c, CHALLENGE_COOKIE, challenge.jti, { ...cookieOpts, maxAge: 5 * 60 });
         return c.body(null, 403);
       }

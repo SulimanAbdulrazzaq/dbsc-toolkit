@@ -183,8 +183,8 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
 
     if (!responseHeader) {
       const challenge = await issueChallenge(sessionId, storage);
-      res.setHeader(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
-      res.setHeader(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
+      res.setHeader(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
+      res.setHeader(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
       res.setHeader(
         "Set-Cookie",
         serializeCookie(COOKIES.challenge, challenge.jti, cookieOpts(5 * 60 * 1000, secure)),
@@ -196,8 +196,8 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
     const expectedJti = req.cookies?.[COOKIES.challenge] as string | undefined;
     if (!expectedJti) {
       const challenge = await issueChallenge(sessionId, storage);
-      res.setHeader(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
-      res.setHeader(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
+      res.setHeader(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
+      res.setHeader(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
       res.setHeader(
         "Set-Cookie",
         serializeCookie(COOKIES.challenge, challenge.jti, cookieOpts(5 * 60 * 1000, secure)),

@@ -2,6 +2,22 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.4] — 2026-05-17
+
+### Fixed
+
+- **`Secure-Session-Challenge` response header now includes the `;id="<sessionId>"` parameter required by the spec.** § 8.7 of the DBSC draft says the header is a Structured Fields list where each entry is an sf-string plus an optional `id` parameter, and that an entry without `id` is silently skipped by step 6 of the cache-challenge algorithm. The library was sending just `"<jti>"` with no parameter, so Chrome accepted the 403, parsed the header, dropped the challenge because no session was associated with it, and never sent the signed proof. From the outside it looked like Chrome ignored the challenge — what actually happened is the challenge never got cached against the session.
+
+  With `;id="<sessionId>"` appended on all four adapters, Chrome caches the challenge against the right session, signs it with the TPM key on the retry, and the refresh round-trip completes.
+
+- `buildChallengeHeader(jti, sessionId?)` now takes an optional second argument. Existing callers that pass only the jti still compile — they just produce a header Chrome will ignore.
+
+### Demo
+
+- `examples/express/src/server.js` now calls `app.set("trust proxy", true)`. Without it, Express returns `req.protocol === "http"` behind Render/Cloudflare even when the client connected over HTTPS, so the registration response went out with `scope.origin = "http://..."`. The DBSC spec same-site / scheme checks in § 8.9 step 9 reject that, terminating the session silently before refresh can ever fire.
+
+This and the 1.2.3 fix together close the chain that made the Render-deployed demo silently fail: 1.2.3 fixed the response body shape so Chrome stored the session and tried to refresh it, 1.2.4 fixes the challenge header so the refresh actually completes instead of dying on the 403.
+
 ## [1.2.3] — 2026-05-17
 
 ### Fixed

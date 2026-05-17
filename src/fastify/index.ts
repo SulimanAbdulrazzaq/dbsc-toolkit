@@ -160,8 +160,8 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
 
     if (!responseHeader) {
       const challenge = await issueChallenge(sessionId, storage);
-      reply.header(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
-      reply.header(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
+      reply.header(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
+      reply.header(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
       reply.setCookie(CHALLENGE_COOKIE, challenge.jti, { ...cookieOpts, maxAge: 5 * 60 });
       return reply.status(403).send();
     }
@@ -169,8 +169,8 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     const expectedJti = req.cookies?.[CHALLENGE_COOKIE];
     if (!expectedJti) {
       const challenge = await issueChallenge(sessionId, storage);
-      reply.header(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
-      reply.header(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
+      reply.header(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
+      reply.header(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
       reply.setCookie(CHALLENGE_COOKIE, challenge.jti, { ...cookieOpts, maxAge: 5 * 60 });
       return reply.status(403).send();
     }

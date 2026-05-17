@@ -140,8 +140,8 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
       if (!responseHeader) {
         const challenge = await issueChallenge(sessionId, storage);
         const res = new NextResponse(null, { status: 403 });
-        res.headers.set(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
-        res.headers.set(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
+        res.headers.set(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
+        res.headers.set(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
         res.cookies.set(CHALLENGE_COOKIE, challenge.jti, {
           ...cookieBase(secure),
           maxAge: 5 * 60,
@@ -153,8 +153,8 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
       if (!expectedJti) {
         const challenge = await issueChallenge(sessionId, storage);
         const res = new NextResponse(null, { status: 403 });
-        res.headers.set(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
-        res.headers.set(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti));
+        res.headers.set(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
+        res.headers.set(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
         res.cookies.set(CHALLENGE_COOKIE, challenge.jti, {
           ...cookieBase(secure),
           maxAge: 5 * 60,

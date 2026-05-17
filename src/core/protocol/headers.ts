@@ -12,8 +12,9 @@ export function buildRegistrationHeader(opts: RegistrationHeaderOptions): string
   return parts.join(";");
 }
 
-export function buildChallengeHeader(jti: string): string {
-  return `"${jti}"`;
+export function buildChallengeHeader(jti: string, sessionId?: string): string {
+  const base = `"${jti}"`;
+  return sessionId ? `${base};id="${sessionId}"` : base;
 }
 
 export function parseSessionResponseHeader(raw: string): string {
