@@ -95,12 +95,16 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
           {
             session_identifier: sessionId,
             refresh_url: refreshPath,
-            scope: { include_site: true },
+            scope: {
+              origin: url.origin,
+              include_site: true,
+              scope_specification: [],
+            },
             credentials: [
               {
                 type: "cookie",
                 name: BOUND_COOKIE,
-                attributes: `Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(boundCookieTtl / 1000)}`,
+                attributes: "Path=/; Secure; HttpOnly; SameSite=Lax",
               },
             ],
           },
@@ -160,12 +164,16 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
           {
             session_identifier: sessionId,
             refresh_url: refreshPath,
-            scope: { include_site: true },
+            scope: {
+              origin: url.origin,
+              include_site: true,
+              scope_specification: [],
+            },
             credentials: [
               {
                 type: "cookie",
                 name: BOUND_COOKIE,
-                attributes: `Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(boundCookieTtl / 1000)}`,
+                attributes: "Path=/; Secure; HttpOnly; SameSite=Lax",
               },
             ],
           },

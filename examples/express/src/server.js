@@ -108,10 +108,16 @@ app.post("/logout", async (_req, res) => {
 });
 
 app.post("/clear-cookies", (req, res) => {
-  for (const name of Object.keys(req.cookies ?? {})) {
-    res.clearCookie(name, { path: "/" });
+  const names = Object.keys(req.cookies ?? {});
+  for (const name of names) {
+    res.clearCookie(name, {
+      path: "/",
+      secure: true,
+      httpOnly: true,
+      sameSite: "lax",
+    });
   }
-  res.json({ ok: true, cleared: Object.keys(req.cookies ?? {}) });
+  res.json({ ok: true, cleared: names });
 });
 
 app.get("/me", (_req, res) => {

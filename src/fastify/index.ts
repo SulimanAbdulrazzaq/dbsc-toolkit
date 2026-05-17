@@ -118,15 +118,20 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
         maxAge: boundCookieTtl / 1000,
       });
       reply.clearCookie(CHALLENGE_COOKIE, cookieOpts);
+      const origin = `${req.protocol}://${req.hostname}`;
       return reply.status(200).send({
         session_identifier: sessionId,
         refresh_url: refreshPath,
-        scope: { include_site: true },
+        scope: {
+          origin,
+          include_site: true,
+          scope_specification: [],
+        },
         credentials: [
           {
             type: "cookie",
             name: BOUND_COOKIE,
-            attributes: `Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(boundCookieTtl / 1000)}`,
+            attributes: "Path=/; Secure; HttpOnly; SameSite=Lax",
           },
         ],
       });
@@ -183,15 +188,20 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
 
       reply.setCookie(BOUND_COOKIE, sessionId, { ...cookieOpts, maxAge: boundCookieTtl / 1000 });
       reply.clearCookie(CHALLENGE_COOKIE, cookieOpts);
+      const origin = `${req.protocol}://${req.hostname}`;
       return reply.status(200).send({
         session_identifier: sessionId,
         refresh_url: refreshPath,
-        scope: { include_site: true },
+        scope: {
+          origin,
+          include_site: true,
+          scope_specification: [],
+        },
         credentials: [
           {
             type: "cookie",
             name: BOUND_COOKIE,
-            attributes: `Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(boundCookieTtl / 1000)}`,
+            attributes: "Path=/; Secure; HttpOnly; SameSite=Lax",
           },
         ],
       });

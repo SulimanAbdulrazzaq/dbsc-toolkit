@@ -2,6 +2,22 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.3] — 2026-05-17
+
+### Fixed
+
+- **Registration response body now matches the Chrome 147 / W3C DBSC spec shape, so Chrome actually stores the session config.** Two divergences from the canonical example were enough for Chrome to silently terminate the session at registration time without surfacing any error: the `credentials[].attributes` string included a `Max-Age=…` token that isn't in the spec's cookie-matching set (spec § 8.6 limits the match to Domain, Path, Secure, HttpOnly, SameSite), and `scope` was missing the `origin` field that both the W3C example and Chrome's own docs always include. With Max-Age stripped from the attributes string and `scope.origin` populated from the request, Chrome stores the JSON session instruction and automatically initiates `/dbsc/refresh` when the bound cookie expires.
+
+- The Set-Cookie header is unchanged; `Max-Age` still controls cookie lifetime on the wire. It just no longer leaks into the JSON match-set where the spec says it doesn't belong.
+
+- `scope.scope_specification: []` added alongside the new `origin` field to match the canonical shape from § 9.6 exactly. An empty array is spec-valid and avoids any future ambiguity.
+
+This was the actual root cause behind the symptom reported against 1.2.2: registration responded 200 with the bound cookie set, but no `/dbsc/refresh` ever fired because Chrome had silently dropped the session before storing it. The 1.2.2 SameSite-casing fix was real and necessary, but it was masking this second wire-format bug.
+
+### Tests
+
+- New `src/express/response-shape.test.ts` boots a real Express server, runs registration end-to-end, and asserts the response body has `scope.origin`, has `scope.scope_specification`, and that `credentials[0].attributes` contains exactly Path/Secure/HttpOnly/SameSite — never Max-Age or Expires. Same assertion for the Set-Cookie SameSite casing to lock the 1.2.2 fix in place.
+
 ## [1.2.2] — 2026-05-17
 
 ### Fixed

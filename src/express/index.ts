@@ -126,15 +126,20 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
         serializeCookie(COOKIES.challenge, "", { ...cookieOpts(0, secure), maxAge: 0 }),
       ]);
       res.setHeader("Content-Type", "application/json");
+      const origin = `${req.protocol}://${req.get("host")}`;
       res.status(200).json({
         session_identifier: sessionId,
         refresh_url: refreshPath,
-        scope: { include_site: true },
+        scope: {
+          origin,
+          include_site: true,
+          scope_specification: [],
+        },
         credentials: [
           {
             type: "cookie",
             name: COOKIES.bound,
-            attributes: `Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(boundCookieTtl / 1000)}`,
+            attributes: "Path=/; Secure; HttpOnly; SameSite=Lax",
           },
         ],
       });
@@ -217,15 +222,20 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
         serializeCookie(COOKIES.challenge, "", { ...cookieOpts(0, secure), maxAge: 0 }),
       ]);
       res.setHeader("Content-Type", "application/json");
+      const origin = `${req.protocol}://${req.get("host")}`;
       res.status(200).json({
         session_identifier: sessionId,
         refresh_url: refreshPath,
-        scope: { include_site: true },
+        scope: {
+          origin,
+          include_site: true,
+          scope_specification: [],
+        },
         credentials: [
           {
             type: "cookie",
             name: COOKIES.bound,
-            attributes: `Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(boundCookieTtl / 1000)}`,
+            attributes: "Path=/; Secure; HttpOnly; SameSite=Lax",
           },
         ],
       });
