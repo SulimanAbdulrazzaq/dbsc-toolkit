@@ -71,7 +71,14 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
 
     if (sessionId) {
       const session = await storage.getSession(sessionId);
-      if (session) req.dbsc.tier = session.tier;
+      if (session) {
+        const staleAfter = session.lastRefreshAt + boundCookieTtl;
+        if (session.tier === "dbsc" && Date.now() > staleAfter) {
+          req.dbsc.tier = "none";
+        } else {
+          req.dbsc.tier = session.tier;
+        }
+      }
     }
   });
 

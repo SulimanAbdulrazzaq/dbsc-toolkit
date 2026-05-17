@@ -291,7 +291,12 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
     if (sessionId) {
       const session = await storage.getSession(sessionId);
       if (session) {
-        res.locals.dbsc.tier = session.tier;
+        const staleAfter = session.lastRefreshAt + boundCookieTtl;
+        if (session.tier === "dbsc" && Date.now() > staleAfter) {
+          res.locals.dbsc.tier = "none";
+        } else {
+          res.locals.dbsc.tier = session.tier;
+        }
       }
     }
 

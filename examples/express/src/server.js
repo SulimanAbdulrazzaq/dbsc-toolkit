@@ -69,7 +69,7 @@ app.post("/login", async (req, res) => {
     maxAge: 5 * 60 * 1000,
   });
 
-  res.json({ ok: true, sessionId });
+  res.json({ ok: true });
 });
 
 app.post("/logout", async (_req, res) => {

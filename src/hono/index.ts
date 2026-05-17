@@ -186,7 +186,14 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
 
     if (sessionId) {
       const session = await storage.getSession(sessionId);
-      if (session) c.set("dbscTier", session.tier);
+      if (session) {
+        const staleAfter = session.lastRefreshAt + boundCookieTtl;
+        if (session.tier === "dbsc" && Date.now() > staleAfter) {
+          c.set("dbscTier", "none");
+        } else {
+          c.set("dbscTier", session.tier);
+        }
+      }
     }
 
     await next();

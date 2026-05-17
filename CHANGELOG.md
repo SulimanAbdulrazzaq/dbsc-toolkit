@@ -2,6 +2,34 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] — 2026-05-17
+
+### Security
+
+This release closes a class of cookie-replay issues uncovered during a manual cookie-theft test on the demo.
+
+- **Tier demotion on stale bound cookie.** Adapters now compare `session.lastRefreshAt + boundCookieTtl` against the current time before returning `tier: "dbsc"`. If the bound cookie's window has elapsed without a successful refresh, the request sees `tier: "none"`. A stolen `__Host-dbsc-session` value pasted onto a second device gets one bound-cookie TTL of access (same window Chrome itself enforces) and then automatically degrades — because the attacker has no TPM key, refresh can never succeed, so the freshness check stays false forever. Previously the stored `tier` only flipped on registration, so a stolen cookie inherited the victim's tier permanently.
+
+- **Failed refresh demotes the stored tier.** When `verifyDbscJws` rejects a refresh with `SIGNATURE_INVALID`, the session's stored tier is now set to `"none"` before the error is re-thrown. The next read of the session from any route or any adapter sees the demotion. This is what gives the `session_stolen` telemetry event teeth — observability used to log the theft but the session state stayed `"dbsc"`.
+
+- **Re-registration blocked.** A second registration attempt against a session that already has a bound key throws `SESSION_ALREADY_REGISTERED` (new error code). Previously the second `setBoundKey` would silently overwrite the first, enabling a takeover if an attacker could replay `__Host-dbsc-reg` + `__Host-dbsc-challenge` cookies during the registration window.
+
+- **Algorithm-confusion check at registration.** `parseRegistrationJws` now calls `detectAlgorithm(jwk)` and rejects with `UNKNOWN_ALGORITHM` if the JWS header's `alg` doesn't match the JWK's shape (e.g. `alg=RS256` claimed against an EC P-256 key).
+
+- **Successful refresh restores tier to `"dbsc"`.** Paired with the demotion fix above, so a legitimate refresh after a transient failure brings the session back. Previously refresh only updated `lastRefreshAt` and never touched `tier`.
+
+### Demo
+
+- The `/login` route no longer echoes the session id back in the response body. That id was readable from JavaScript, defeating the point of `HttpOnly`. Login response is now `{ ok: true }`.
+
+### Behavior change to be aware of
+
+Application code that hard-checks `tier === "dbsc"` will start seeing `"none"` for the brief window after the bound cookie expires and before Chrome's refresh completes. For most apps this is invisible — Chrome's auto-refresh happens before the next user-driven request — but apps that poll an endpoint faster than the bound TTL may see flips. The fix is to treat a transient `"none"` as "wait for refresh, don't log out the user." See `docs/security/best-practices.md` for the recommended pattern.
+
+### Fixed (type-level)
+
+- `ParsedDbscJws.jwk` is now required (`JsonWebKey`) instead of optional. The field was always populated by `parseRegistrationJws`; the optional marker was a type error.
+
 ## [1.2.0] — 2026-05-17
 
 ### Notice

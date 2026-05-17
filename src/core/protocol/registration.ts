@@ -40,6 +40,14 @@ export async function handleRegistration(
     throw new DbscVerificationError(ErrorCodes.JTI_MISMATCH, "jti does not match challenge");
   }
 
+  const existingKey = await storage.getBoundKey(req.sessionId);
+  if (existingKey) {
+    throw new DbscVerificationError(
+      ErrorCodes.SESSION_ALREADY_REGISTERED,
+      "session already has a bound key; cannot register again",
+    );
+  }
+
   const consumed = await storage.consumeChallenge(req.expectedJti);
   if (!consumed) {
     throw new DbscVerificationError(ErrorCodes.CHALLENGE_CONSUMED, "challenge already consumed");

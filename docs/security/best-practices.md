@@ -107,12 +107,15 @@ If you forget this step, the library buys you nothing. A stolen cookie still rea
 
 When an attacker copies a bound cookie to another device, this is what the server sees on the attacker's requests:
 
-1. First minute: the bound cookie is still within its TTL. Tier reads `"dbsc"` because the session record says so. The attacker has full access during this window. **Keep `boundCookieTtl` short for sensitive applications** — see the bound cookie TTL section above.
-2. After TTL expiry: Chrome on the attacker's machine tries to refresh, can't produce a JWS signed by the TPM key (it doesn't have the private key), refresh fails. The bound cookie is dropped by Chrome. On the next request, the attacker has no `__Host-dbsc-session` cookie at all. Tier reads `"none"`.
+1. First request, within the bound cookie's TTL: the freshness check passes (`session.lastRefreshAt + boundCookieTtl` is still in the future), so tier reads `"dbsc"`. The attacker has full access during this window. **Keep `boundCookieTtl` short for sensitive applications** — see the bound cookie TTL section above.
 
-The victim, on the other side, refreshes successfully every cycle and stays at `"dbsc"` indefinitely.
+2. As soon as the window elapses, the adapter's freshness check fails — tier reads `"none"` on every subsequent request from the attacker, even though the stored session is still `"dbsc"`. The attacker still has the cookie value, but it no longer buys them anything.
 
-The window between (1) and (2) is the cost of cookie theft under DBSC. Compared to "indefinite session takeover" without DBSC, it's bounded by `boundCookieTtl`. With a 60-second TTL, a stolen cookie is useful for roughly a minute.
+3. Independently, the attacker's Chrome auto-refreshes when the bound cookie's `Max-Age` elapses. That refresh fails (no TPM key, JWS signature invalid). The library demotes the stored tier to `"none"` immediately. Now even the victim's own requests would see `"none"` until the victim's Chrome completes the next successful refresh and re-promotes the session.
+
+4. The victim's next request triggers a refresh, signs with their real TPM key, succeeds — stored tier is restored to `"dbsc"`. Legitimate use is uninterrupted.
+
+The window in step (1) is the cost of cookie theft under DBSC. Compared to "indefinite session takeover" without DBSC, it's bounded by `boundCookieTtl`. With a 60-second TTL, a stolen cookie is useful for roughly a minute.
 
 ### Policy patterns
 

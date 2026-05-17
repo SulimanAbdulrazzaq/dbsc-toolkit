@@ -13,9 +13,17 @@ Method: STRIDE. Scope: DBSC Toolkit server-side library.
 ### Spoofing
 
 **S1: Cookie theft + replay**
-An attacker steals a bound cookie and replays it from a different device.
+An attacker steals a bound cookie value (XSS, malicious extension, DevTools access on the victim's machine, MITM on a misconfigured proxy) and pastes it onto a different device.
 
-Mitigation: The bound cookie expires in ≤10 minutes. Refresh requires a JWS signed by the TPM-resident private key. Without the key, the attacker cannot refresh. Residual risk: zero in DBSC tier, low in WebAuthn tier, moderate in HMAC tier.
+Mitigation: enforced in two layers.
+
+1. **Per-request freshness check.** Adapters compare `session.lastRefreshAt + boundCookieTtl` against the current time. If the bound cookie's window has elapsed since the last successful refresh, the request sees `tier: "none"` even if the stored tier is still `"dbsc"`. An attacker with a cookie value but no TPM key cannot refresh, so their reads degrade automatically after one TTL.
+
+2. **Tier demotion on failed refresh.** When the attacker's browser auto-refreshes (Chrome does this whenever the bound cookie is gone), the JWS signature check fails. The library demotes the stored tier to `"none"` before re-throwing. From that moment every adapter and every route sees the demoted tier — including reads on the victim's device. The victim's next refresh re-promotes the session via a valid JWS signature, so legitimate use is uninterrupted.
+
+Application code must enforce `tier === "dbsc"` on sensitive routes for this to matter — see [best-practices.md](./best-practices.md#enforcing-the-tier--the-part-that-actually-defends).
+
+Residual risk: up to `boundCookieTtl` seconds of attacker access on their first request (default 10 min, configurable to 60s or less for sensitive deployments), then degraded. Compare to no-DBSC: full access until the app session expires or the user manually logs out.
 
 **S2: JWK substitution**
 An attacker substitutes their own public key during registration.

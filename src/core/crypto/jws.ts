@@ -1,6 +1,6 @@
 import { importJWK, jwtVerify, decodeProtectedHeader, type JWTPayload, type JWK } from "jose";
 import { DbscVerificationError, ErrorCodes } from "../errors.js";
-import { validateJwk } from "./jwk.js";
+import { validateJwk, detectAlgorithm } from "./jwk.js";
 
 const DBSC_TYPE = "dbsc+jwt";
 const SUPPORTED_ALGS = ["ES256", "RS256"] as const;
@@ -11,7 +11,7 @@ export interface DbscJwsClaims extends JWTPayload {
 
 export interface ParsedDbscJws {
   claims: DbscJwsClaims;
-  jwk?: JsonWebKey;
+  jwk: JsonWebKey;
 }
 
 export async function verifyDbscJws(
@@ -102,6 +102,14 @@ export async function parseRegistrationJws(token: string): Promise<{
   }
 
   validateJwk(jwk);
+
+  const expectedAlg = detectAlgorithm(jwk);
+  if (expectedAlg !== alg) {
+    throw new DbscVerificationError(
+      ErrorCodes.UNKNOWN_ALGORITHM,
+      `algorithm ${alg} does not match JWK shape (expected ${expectedAlg})`,
+    );
+  }
 
   let key: Awaited<ReturnType<typeof importJWK>>;
   try {

@@ -39,7 +39,17 @@ export async function handleRefresh(
   }
 
   const token = req.secSessionResponseHeader.trim();
-  await verifyDbscJws(token, key.jwk, req.expectedJti);
+  try {
+    await verifyDbscJws(token, key.jwk, req.expectedJti);
+  } catch (err) {
+    if (err instanceof DbscVerificationError && err.code === ErrorCodes.SIGNATURE_INVALID) {
+      const session = await storage.getSession(req.sessionId);
+      if (session) {
+        await storage.setSession({ ...session, tier: "none" });
+      }
+    }
+    throw err;
+  }
 
   const consumed = await storage.consumeChallenge(req.expectedJti);
   if (!consumed) {
@@ -48,7 +58,7 @@ export async function handleRefresh(
 
   const session = await storage.getSession(req.sessionId);
   if (session) {
-    await storage.setSession({ ...session, lastRefreshAt: Date.now() });
+    await storage.setSession({ ...session, tier: "dbsc", lastRefreshAt: Date.now() });
   }
 
   return {
