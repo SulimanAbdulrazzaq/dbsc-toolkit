@@ -2,6 +2,26 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-05-17
+
+### Added
+
+- New `resolveSessionId` option on all four adapter middlewares (Express, Fastify, Hono, Next.js). Pass a function `(req) => string | null` and the middleware will use that to look up the DBSC session instead of reading the bound cookie. This is the supported way to wire DBSC into an application that already has its own session cookie.
+
+  Without a resolver the middleware fell back to reading only the bound `__Host-dbsc-session` cookie, which is short-lived and Chrome-managed and frequently absent during normal operation (between refresh cycles, after a refresh failure, etc.). Applications that gated identity on the middleware's `sessionId` saw spurious "not authenticated" results even for valid users.
+
+  With a resolver the recommended pattern is: authentication identity lives in the app's own session cookie, tier negotiation lives in the bound cookie, the two are intentionally separate.
+
+- `getDbscSession()` on the Next.js adapter accepts an optional `resolveSessionId` third argument with the same semantics.
+
+### Fixed
+
+- The Express demo (`examples/express`) previously used the DBSC bound cookie as the authentication identity. That worked until the bound cookie expired or refresh failed, after which `/me` returned not-authenticated for legitimate users. The demo now uses a separate `__Host-app-session` cookie for identity and wires the new `resolveSessionId` option, plus a `/payment` endpoint that demonstrates a real tier-gated route.
+
+### Compatibility
+
+`resolveSessionId` is optional. Existing code without it behaves exactly as before.
+
 ## [1.0.2] — 2026-05-17
 
 ### Fixed

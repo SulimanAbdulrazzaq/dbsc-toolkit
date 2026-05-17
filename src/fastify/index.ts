@@ -35,6 +35,7 @@ const DEFAULT_BOUND_TTL = 10 * 60;
 
 export interface DbscFastifyOptions extends DbscOptions {
   secure?: boolean;
+  resolveSessionId?: (req: FastifyRequest) => string | null | Promise<string | null>;
 }
 
 const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts) => {
@@ -46,6 +47,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     rateLimiter = new NoopRateLimiter(),
     onEvent,
     secure = true,
+    resolveSessionId,
   } = opts;
 
   const cookieOpts = {
@@ -58,7 +60,8 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
   fastify.decorateRequest<FastifyRequest["dbsc"] | null>("dbsc", null);
 
   fastify.addHook("onRequest", async (req: FastifyRequest, reply: FastifyReply) => {
-    const sessionId = req.cookies?.[BOUND_COOKIE] ?? null;
+    const resolvedId = resolveSessionId ? await resolveSessionId(req) : null;
+    const sessionId = resolvedId ?? req.cookies?.[BOUND_COOKIE] ?? null;
 
     req.dbsc = {
       sessionId,

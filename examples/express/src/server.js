@@ -18,22 +18,23 @@ app.use("/dbsc/registration", express.text({ type: "*/*", limit: "100kb" }));
 app.use("/dbsc/refresh", express.text({ type: "*/*", limit: "100kb" }));
 app.use(express.json());
 
-app.use(
-  dbsc({
-    storage,
-    secure: true,
-    boundCookieTtl: 60 * 1000,
-    onEvent: (event) => {
-      console.log(`[dbsc] ${event.type} session=${event.sessionId} tier=${event.tier}`);
-    },
-  }),
-);
-
 function getAppSession(req) {
   const id = req.cookies?.["__Host-app-session"];
   if (!id) return null;
   return appSessions.get(id) ?? null;
 }
+
+app.use(
+  dbsc({
+    storage,
+    secure: true,
+    boundCookieTtl: 60 * 1000,
+    resolveSessionId: (req) => getAppSession(req)?.dbscSessionId ?? null,
+    onEvent: (event) => {
+      console.log(`[dbsc] ${event.type} session=${event.sessionId} tier=${event.tier}`);
+    },
+  }),
+);
 
 app.post("/login", async (req, res) => {
   const { username } = req.body;

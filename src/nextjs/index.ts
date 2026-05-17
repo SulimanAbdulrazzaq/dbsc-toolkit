@@ -26,6 +26,7 @@ const DEFAULT_REG_TTL = 24 * 60 * 60;
 
 export interface DbscNextOptions extends DbscOptions {
   secure?: boolean;
+  resolveSessionId?: (req: NextRequest) => string | null | Promise<string | null>;
 }
 
 function cookieBase(secure: boolean) {
@@ -209,8 +210,10 @@ export interface DbscSessionInfo {
 export async function getDbscSession(
   req: NextRequest,
   storage: DbscOptions["storage"],
+  resolveSessionId?: (req: NextRequest) => string | null | Promise<string | null>,
 ): Promise<DbscSessionInfo> {
-  const sessionId = req.cookies.get(BOUND_COOKIE)?.value ?? null;
+  const resolvedId = resolveSessionId ? await resolveSessionId(req) : null;
+  const sessionId = resolvedId ?? req.cookies.get(BOUND_COOKIE)?.value ?? null;
   if (!sessionId) return { sessionId: null, tier: "none" };
 
   const session = await storage.getSession(sessionId);

@@ -122,6 +122,24 @@ app.post("/account/email", requireDbsc, handler);
 
 See [docs/security/best-practices.md](./docs/security/best-practices.md) for the full tier-policy guidance.
 
+## Pairing with your existing app session
+
+By default the middleware reads the session id from the bound `__Host-dbsc-session` cookie. That cookie is short-lived and Chrome-managed, so it disappears between refresh cycles and during failures. If your application has its own session cookie (it almost certainly does — DBSC is a binding layer, not an authentication system), pass a resolver so the middleware can look up the right DBSC session from your auth state:
+
+```ts
+app.use(dbsc({
+  storage,
+  resolveSessionId: (req) => {
+    const appSession = getMyAppSession(req); // your existing auth lookup
+    return appSession?.dbscSessionId ?? null;
+  },
+}));
+```
+
+This is the recommended setup. Authentication identity lives in your app's session cookie. DBSC tier negotiation lives in the bound cookie. The two are intentionally separate so an attacker who steals one cookie still cannot reach the privileged tier.
+
+The resolver is supported on the Express, Fastify, Hono, and Next.js adapters with the same signature (the `req` / `c` argument is whatever the framework normally passes to a route handler).
+
 ## Local testing
 
 You need HTTPS — `__Host-` cookies require it and Chrome rejects DBSC on plain HTTP. Two options:

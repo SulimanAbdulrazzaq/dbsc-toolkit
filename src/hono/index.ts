@@ -24,6 +24,7 @@ const DEFAULT_BOUND_TTL = 10 * 60;
 
 export interface DbscHonoOptions extends DbscOptions {
   secure?: boolean;
+  resolveSessionId?: (c: Context) => string | null | Promise<string | null>;
 }
 
 declare module "hono" {
@@ -42,6 +43,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
     rateLimiter = new NoopRateLimiter(),
     onEvent,
     secure = true,
+    resolveSessionId,
   } = opts;
 
   const cookieOpts = {
@@ -180,7 +182,8 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
       }
     }
 
-    const sessionId = getCookie(c, BOUND_COOKIE) ?? null;
+    const resolvedId = resolveSessionId ? await resolveSessionId(c) : null;
+    const sessionId = resolvedId ?? getCookie(c, BOUND_COOKIE) ?? null;
     c.set("dbscSessionId", sessionId);
     c.set("dbscTier", "none");
 

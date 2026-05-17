@@ -32,6 +32,7 @@ const DEFAULT_REG_TTL = 24 * 60 * 60 * 1000;
 
 export interface DbscExpressOptions extends DbscOptions {
   secure?: boolean;
+  resolveSessionId?: (req: Request) => string | null | Promise<string | null>;
 }
 
 export interface DbscLocals {
@@ -80,6 +81,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
     rateLimiter = new NoopRateLimiter(),
     onEvent,
     secure = true,
+    resolveSessionId,
   } = opts;
 
   const hmacSecret = nodeRandomBytes(32);
@@ -269,7 +271,8 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       return;
     }
 
-    const sessionId = req.cookies?.[COOKIES.bound] as string | undefined;
+    const resolvedId = resolveSessionId ? await resolveSessionId(req) : null;
+    const sessionId = resolvedId ?? (req.cookies?.[COOKIES.bound] as string | undefined);
 
     res.locals.dbsc = {
       sessionId: sessionId ?? null,
