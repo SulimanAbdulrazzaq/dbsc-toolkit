@@ -13,13 +13,43 @@ app.use("/dbsc/registration", express.text({ type: "*/*", limit: "100kb" }));
 app.use("/dbsc/refresh", express.text({ type: "*/*", limit: "100kb" }));
 app.use(express.json());
 
+app.use((req, res, next) => {
+  const dbscHeaders = {};
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (k.includes("session") || k.includes("dbsc") || k.startsWith("sec-") || k.startsWith("secure-")) {
+      dbscHeaders[k] = v;
+    }
+  }
+  console.log(JSON.stringify({
+    t: "req",
+    method: req.method,
+    path: req.path,
+    cookies: Object.keys(req.cookies ?? {}),
+    dbscHeaders,
+  }));
+
+  const origSetHeader = res.setHeader.bind(res);
+  res.setHeader = (name, value) => {
+    if (name.toLowerCase() === "set-cookie" || name.toLowerCase().startsWith("secure-") || name.toLowerCase().startsWith("sec-session")) {
+      console.log(JSON.stringify({ t: "res-header", path: req.path, name, value }));
+    }
+    return origSetHeader(name, value);
+  };
+
+  res.on("finish", () => {
+    console.log(JSON.stringify({ t: "res-done", path: req.path, status: res.statusCode }));
+  });
+
+  next();
+});
+
 app.use(
   dbsc({
     storage,
     secure: true,
     boundCookieTtl: 60 * 1000,
     onEvent: (event) => {
-      console.log(`[dbsc] ${event.type} session=${event.sessionId} tier=${event.tier}`);
+      console.log(JSON.stringify({ t: "dbsc-event", ...event }));
     },
   }),
 );

@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "cookie-parser": "^1.4.6",
-    "dbsc-toolkit": "^1.0.1",
+    "dbsc-toolkit": "^1.2.2",
     "express": "^5.2.1"
   }
 }
