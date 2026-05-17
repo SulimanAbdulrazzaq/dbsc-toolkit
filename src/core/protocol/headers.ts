@@ -26,7 +26,8 @@ export function buildSessionIdCookie(
 ): string {
   const parts = [`__Secure-Session-Id=${sessionId}`, "HttpOnly", "Path=/"];
   if (opts.secure) parts.push("Secure");
-  parts.push(`SameSite=${opts.sameSite}`);
+  const sameSite = opts.sameSite.charAt(0).toUpperCase() + opts.sameSite.slice(1);
+  parts.push(`SameSite=${sameSite}`);
   return parts.join("; ");
 }
 

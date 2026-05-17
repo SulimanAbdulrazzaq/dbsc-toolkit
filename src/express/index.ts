@@ -63,7 +63,8 @@ function serializeCookie(name: string, value: string, opts: ReturnType<typeof co
   const parts = [`${name}=${value}`];
   parts.push("HttpOnly");
   if (opts.secure) parts.push("Secure");
-  parts.push(`SameSite=${opts.sameSite}`);
+  const sameSite = opts.sameSite.charAt(0).toUpperCase() + opts.sameSite.slice(1);
+  parts.push(`SameSite=${sameSite}`);
   parts.push(`Max-Age=${opts.maxAge}`);
   parts.push(`Path=${opts.path}`);
   return parts.join("; ");

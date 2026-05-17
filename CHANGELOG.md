@@ -2,6 +2,16 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.2] — 2026-05-17
+
+### Fixed
+
+- **Express adapter: `SameSite` casing mismatch caused silent session termination.** The custom cookie serializer wrote `SameSite=lax` (lowercase) while the JSON session config declared `SameSite=Lax` (capital). Chrome compares the two strictly and terminates the DBSC session when they don't match, which is why registration appeared to succeed but no refresh request ever arrived. Fastify, Hono, and Next.js were not affected because they delegate to framework cookie helpers that emit `SameSite=Lax` already.
+
+- Same casing fix applied to the unused `buildSessionIdCookie` helper in `core/protocol/headers.ts` for consistency.
+
+This was the root cause of the cookie-theft test reported against 1.2.0/1.2.1: the freshness check in 1.2.1 was correct, but because Chrome was silently terminating the session at registration time, no refresh ever happened on either device, so the demotion path never engaged. With the casing fixed, the 1.2.1 freshness check finally does what the changelog says.
+
 ## [1.2.1] — 2026-05-17
 
 ### Security
