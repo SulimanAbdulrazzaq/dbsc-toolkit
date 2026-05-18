@@ -43,23 +43,41 @@ npm install express cookie-parser pg
 ```ts
 import express from "express";
 import cookieParser from "cookie-parser";
-import { dbsc } from "dbsc-toolkit/express";
+import { randomUUID } from "node:crypto";
+import { dbsc, bindSession } from "dbsc-toolkit/express";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
 const app = express();
+app.set("trust proxy", true);
 app.use(cookieParser());
-app.use(dbsc({ storage: new MemoryStorage() }));
+app.use(express.json());
 
-app.get("/me", (req, res) => {
-  res.json(res.locals.dbsc);
+const storage = new MemoryStorage();
+app.use(dbsc({ storage }));
+
+app.post("/login", async (req, res) => {
+  const sessionId = randomUUID();
+  await bindSession(res, sessionId, storage, { userId: req.body.username });
+  res.json({ ok: true });
 });
+
+app.get("/me", (req, res) => res.json(res.locals.dbsc));
 
 app.listen(3000);
 ```
 
-That single `app.use(dbsc(...))` mounts `POST /dbsc/registration` and `POST /dbsc/refresh` automatically. Chrome drives both — your application code never sees those requests.
+`app.use(dbsc(...))` mounts `POST /dbsc/registration` and `POST /dbsc/refresh` automatically — Chrome drives both, your code never sees them. `bindSession()` is the one-liner you add to your login route: it writes the session row, issues a challenge, builds the registration header (both legacy + new names), and sets the two short-lived cookies Chrome needs to complete binding.
 
-A full `/login` flow with cookie issuance is in [examples/express/src/server.js](./examples/express/src/server.js).
+A full demo with `/me`, `/logout`, and `/clear-cookies` is in [examples/express/src/server.js](./examples/express/src/server.js).
+
+## Adding DBSC to an existing app
+
+If you already have a working session cookie and login route (Express-session, NextAuth, your own table — doesn't matter), DBSC slots in beside what you have. You don't migrate the session store and you don't rewrite login. Two patterns:
+
+- Add one `bindSession()` call at the end of your existing login.
+- Or set `autoBind` on the middleware and never touch login at all — DBSC binds users on their next page load.
+
+Full integration story, per-route policy table, and rollout timeline in [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md).
 
 ## Subpath imports
 

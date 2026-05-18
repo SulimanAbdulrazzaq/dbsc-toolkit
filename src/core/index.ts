@@ -8,6 +8,7 @@ export type {
   StorageAdapter,
   RateLimiter,
   DbscOptions,
+  AutoBindResult,
   AnyTelemetryEvent,
   TelemetryEvent,
   RegistrationEvent,

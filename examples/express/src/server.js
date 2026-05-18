@@ -1,9 +1,8 @@
 import express from "express";
 import cookieParser from "cookie-parser";
 import { randomUUID } from "node:crypto";
-import { dbsc } from "dbsc-toolkit/express";
+import { dbsc, bindSession } from "dbsc-toolkit/express";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
-import { buildRegistrationHeader, issueChallenge } from "dbsc-toolkit";
 
 const app = express();
 app.set("trust proxy", true);
@@ -14,40 +13,9 @@ app.use("/dbsc/registration", express.text({ type: "*/*", limit: "100kb" }));
 app.use("/dbsc/refresh", express.text({ type: "*/*", limit: "100kb" }));
 app.use(express.json());
 
-app.use((req, res, next) => {
-  const dbscHeaders = {};
-  for (const [k, v] of Object.entries(req.headers)) {
-    if (k.includes("session") || k.includes("dbsc") || k.startsWith("sec-") || k.startsWith("secure-")) {
-      dbscHeaders[k] = v;
-    }
-  }
-  console.log(JSON.stringify({
-    t: "req",
-    method: req.method,
-    path: req.path,
-    cookies: Object.keys(req.cookies ?? {}),
-    dbscHeaders,
-  }));
-
-  const origSetHeader = res.setHeader.bind(res);
-  res.setHeader = (name, value) => {
-    if (name.toLowerCase() === "set-cookie" || name.toLowerCase().startsWith("secure-") || name.toLowerCase().startsWith("sec-session")) {
-      console.log(JSON.stringify({ t: "res-header", path: req.path, name, value }));
-    }
-    return origSetHeader(name, value);
-  };
-
-  res.on("finish", () => {
-    console.log(JSON.stringify({ t: "res-done", path: req.path, status: res.statusCode }));
-  });
-
-  next();
-});
-
 app.use(
   dbsc({
     storage,
-    secure: true,
     boundCookieTtl: 60 * 1000,
     onEvent: (event) => {
       console.log(JSON.stringify({ t: "dbsc-event", ...event }));
@@ -63,43 +31,7 @@ app.post("/login", async (req, res) => {
   }
 
   const sessionId = randomUUID();
-  const now = Date.now();
-
-  await storage.setSession({
-    id: sessionId,
-    userId: username,
-    tier: "none",
-    createdAt: now,
-    expiresAt: now + 24 * 60 * 60 * 1000,
-    lastRefreshAt: 0,
-  });
-
-  const challenge = await issueChallenge(sessionId, storage);
-
-  const regHeader = buildRegistrationHeader({
-    refreshPath: "/dbsc/registration",
-    challenge: challenge.jti,
-    cookieName: "__Host-dbsc-session",
-  });
-  res.setHeader("Sec-Session-Registration", regHeader);
-  res.setHeader("Secure-Session-Registration", regHeader);
-
-  res.cookie("__Host-dbsc-reg", sessionId, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 24 * 60 * 60 * 1000,
-  });
-
-  res.cookie("__Host-dbsc-challenge", challenge.jti, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 5 * 60 * 1000,
-  });
-
+  await bindSession(res, sessionId, storage, { userId: username });
   res.json({ ok: true });
 });
 

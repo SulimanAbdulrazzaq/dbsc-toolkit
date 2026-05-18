@@ -18,9 +18,11 @@ import {
   DbscVerificationError,
   ErrorCodes,
   type DbscOptions,
+  type StorageAdapter,
   type Session,
   type ProtectionTier,
   type SkippedEntry,
+  type AutoBindResult,
 } from "../core/index.js";
 
 const cookieNames = (secure: boolean) => ({
@@ -31,6 +33,7 @@ const cookieNames = (secure: boolean) => ({
 
 const DEFAULT_BOUND_TTL = 10 * 60 * 1000;
 const DEFAULT_REG_TTL = 24 * 60 * 60 * 1000;
+const DEFAULT_SESSION_TTL = 24 * 60 * 60 * 1000;
 
 export interface DbscExpressOptions extends DbscOptions {
   secure?: boolean;
@@ -41,7 +44,6 @@ export interface DbscLocals {
   tier: ProtectionTier;
   skipped: SkippedEntry[];
   revoke: () => Promise<void>;
-  requireBound: () => void;
 }
 
 declare global {
@@ -73,20 +75,75 @@ function serializeCookie(name: string, value: string, opts: ReturnType<typeof co
   return parts.join("; ");
 }
 
+export interface BindSessionOptions {
+  userId: string;
+  secure?: boolean;
+  registrationPath?: string;
+  registrationCookieTtl?: number;
+  sessionTtl?: number;
+}
+
+export async function bindSession(
+  res: Response,
+  sessionId: string,
+  storage: StorageAdapter,
+  opts: BindSessionOptions,
+): Promise<void> {
+  const secure = opts.secure ?? true;
+  const registrationPath = opts.registrationPath ?? "/dbsc/registration";
+  const regCookieTtl = opts.registrationCookieTtl ?? DEFAULT_REG_TTL;
+  const sessionTtl = opts.sessionTtl ?? DEFAULT_SESSION_TTL;
+  const COOKIES = cookieNames(secure);
+
+  const existing = await storage.getSession(sessionId);
+  const now = Date.now();
+  if (!existing) {
+    await storage.setSession({
+      id: sessionId,
+      userId: opts.userId,
+      tier: "none",
+      createdAt: now,
+      expiresAt: now + sessionTtl,
+      lastRefreshAt: 0,
+    });
+  }
+
+  const challenge = await issueChallenge(sessionId, storage);
+  const regHeader = buildRegistrationHeader({
+    refreshPath: registrationPath,
+    challenge: challenge.jti,
+    cookieName: COOKIES.bound,
+  });
+
+  res.setHeader(REGISTRATION_HEADER, regHeader);
+  res.setHeader(LEGACY_REGISTRATION_HEADER, regHeader);
+
+  const prior = res.getHeader("Set-Cookie");
+  const priorList: string[] = Array.isArray(prior)
+    ? prior.map(String)
+    : prior !== undefined
+      ? [String(prior)]
+      : [];
+  res.setHeader("Set-Cookie", [
+    ...priorList,
+    serializeCookie(COOKIES.reg, sessionId, cookieOpts(regCookieTtl, secure)),
+    serializeCookie(COOKIES.challenge, challenge.jti, cookieOpts(5 * 60 * 1000, secure)),
+  ]);
+}
+
 export function dbsc(opts: DbscExpressOptions): RequestHandler {
   const {
     storage,
-    fallback = "webauthn",
     registrationPath = "/dbsc/registration",
     refreshPath = "/dbsc/refresh",
     boundCookieTtl = DEFAULT_BOUND_TTL,
     registrationCookieTtl = DEFAULT_REG_TTL,
     rateLimiter = new NoopRateLimiter(),
     onEvent,
+    autoBind,
     secure = true,
   } = opts;
 
-  const hmacSecret = nodeRandomBytes(32);
   const COOKIES = cookieNames(secure);
 
   async function handleRegistrationRoute(req: Request, res: Response): Promise<void> {
@@ -296,12 +353,6 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
           serializeCookie(COOKIES.bound, "", { ...cookieOpts(0, secure), maxAge: 0 }),
         ]);
       },
-      requireBound: () => {
-        if (!sessionId) {
-          res.status(401).json({ error: "authentication required" });
-          throw new Error("unauthenticated");
-        }
-      },
     };
 
     if (sessionId) {
@@ -314,9 +365,18 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
           res.locals.dbsc.tier = session.tier;
         }
       }
+    } else if (autoBind && !(req.cookies?.[COOKIES.reg])) {
+      const result = await autoBind(req);
+      if (result) {
+        await bindSession(res, result.sessionId, storage, {
+          userId: result.userId,
+          secure,
+          registrationPath,
+          registrationCookieTtl,
+        });
+      }
     }
 
     next();
   };
 }
-

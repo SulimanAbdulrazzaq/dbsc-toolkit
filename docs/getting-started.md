@@ -29,11 +29,11 @@ Save as `server.js`:
 import express from "express";
 import cookieParser from "cookie-parser";
 import { randomUUID } from "node:crypto";
-import { dbsc } from "dbsc-toolkit/express";
+import { dbsc, bindSession } from "dbsc-toolkit/express";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
-import { buildRegistrationHeader, issueChallenge } from "dbsc-toolkit";
 
 const app = express();
+app.set("trust proxy", true);   // required behind Render, Fly, Cloudflare, nginx, etc.
 const storage = new MemoryStorage();
 
 app.use(cookieParser());
@@ -41,33 +41,11 @@ app.use("/dbsc/registration", express.text({ type: "*/*" }));
 app.use("/dbsc/refresh", express.text({ type: "*/*" }));
 app.use(express.json());
 
-app.use(dbsc({ storage, secure: true }));
+app.use(dbsc({ storage }));
 
 app.post("/login", async (req, res) => {
   const sessionId = randomUUID();
-  const now = Date.now();
-
-  await storage.setSession({
-    id: sessionId,
-    userId: req.body.username,
-    tier: "none",
-    createdAt: now,
-    expiresAt: now + 24 * 60 * 60 * 1000,
-    lastRefreshAt: 0,
-  });
-
-  const challenge = await issueChallenge(sessionId, storage);
-  const regHeader = buildRegistrationHeader({
-    refreshPath: "/dbsc/registration",
-    challenge: challenge.jti,
-    cookieName: "__Host-dbsc-session",
-  });
-
-  res.setHeader("Sec-Session-Registration", regHeader);
-  res.setHeader("Secure-Session-Registration", regHeader);
-  res.cookie("__Host-dbsc-reg", sessionId, { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 24 * 60 * 60 * 1000 });
-  res.cookie("__Host-dbsc-challenge", challenge.jti, { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 5 * 60 * 1000 });
-
+  await bindSession(res, sessionId, storage, { userId: req.body.username });
   res.json({ ok: true });
 });
 
@@ -79,6 +57,8 @@ app.get("/me", (_req, res) => {
 
 app.listen(3000);
 ```
+
+`bindSession()` does five things for you: writes the session row, issues a challenge, builds the registration header, sets both header names (legacy + new), and sets the two short-lived cookies Chrome needs to complete registration. That used to be ~25 lines hand-rolled before 1.4.0.
 
 ## HTTPS is non-negotiable
 
@@ -109,6 +89,7 @@ From this point forward your application code never has to think about DBSC. The
 
 ## Next steps
 
+- Bolting DBSC onto an existing app with its own session cookie? See [integrating with existing auth](./integrating-existing-auth.md).
 - Switch to a real storage adapter — see [storage](./storage.md).
 - Read [protocol](./protocol.md) to understand exactly what Chrome and the server exchange.
 - Use `tier` to gate sensitive operations — see [fallback tiers](./fallback-tiers.md).

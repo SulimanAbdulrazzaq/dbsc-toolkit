@@ -2,6 +2,52 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] — 2026-05-18
+
+### Added
+
+- **`bindSession()` helper per adapter** — Express, Fastify, Hono, Next.js. Before 1.4.0, wiring DBSC into a login route meant writing about 25 lines by hand: create the session row, issue a challenge, build the registration header, set both the new and legacy header names, set the two short-lived cookies Chrome needs (`__Host-dbsc-reg`, `__Host-dbsc-challenge`). All of that collapses to one call:
+
+  ```js
+  await bindSession(res, sessionId, storage, { userId: user.id });
+  ```
+
+  The helper is idempotent for an existing session id — if the row is already there it preserves your `userId` and `expiresAt` rather than clobbering them, so re-binding mid-session is safe.
+
+- **`autoBind` option on `DbscOptions`** for transparent migration. Provide an `autoBind(req)` callback that returns `{ sessionId, userId }` or `null`. On every request that doesn't already have the bound cookie, the middleware calls it. If you return an id, the response gets the registration header and the two cookies, and Chrome triggers `/dbsc/registration` on its next page load. Zero changes to your existing login route. Once binding is in flight (`__Host-dbsc-reg` present), the callback is skipped on subsequent requests so it doesn't fire on every hit.
+
+- **New documentation: `docs/integrating-existing-auth.md`.** The integration story the docs were missing — how to add DBSC to a site that already has its own session cookie and login route without touching the session store or rewriting login. Covers the two-cookie picture, both adoption patterns (explicit `bindSession` vs. `autoBind`), a per-route policy table (Reddit-style), the realistic rollout timeline, what happens for non-Chrome users, and how to tear down both layers on logout.
+
+### Changed
+
+- **Hono adapter session shape unified with Express/Fastify.** Read everything as `c.get("dbsc")` — a single object with `{ sessionId, tier, skipped, revoke }`. The previous three context-variable keys (`dbscSessionId`, `dbscTier`, `dbscSkipped`) still resolve in 1.x and are marked `@deprecated`. They'll be removed in 2.0.0.
+
+- **Fastify and Hono now honor `registrationCookieTtl`.** Before 1.4.0 both adapters declared the option but quietly ignored it. The Fastify and Hono registration cookies were always set to whatever the helper code happened to pass. They now read the option you set on `dbsc(...)` and apply it to the `__Host-dbsc-reg` cookie's `max-age`.
+
+- **`getDbscSession()` (Next.js) returns `revoke()` and accepts an optional response.** Pass `{ res: NextResponse }` if you want `revoke()` to clear the bound cookie for you. Otherwise it only deletes the server-side session and bound key, and you handle the cookie. Aligns Next with the other three adapters.
+
+- All four adapters now swap cookie names (`__Host-dbsc-*` vs `dbsc-*`) based on the `secure` option, the way Express already did. This makes `secure: false` work on plain-HTTP localhost without Hono/Fastify rejecting `__Host-` cookies on the missing Secure flag.
+
+### Removed
+
+- **`fallback` option removed from `DbscOptions`.** It was declared in the interface but no adapter ever wired it up — `fallback` defaulted to `"webauthn"` in Express and was then thrown away. Real fallback negotiation lives in `negotiateTier()` and is a separate concern from session binding. The option was a no-op at runtime, so removing it changes no behavior. TypeScript users who passed `fallback: "..."` will get an unknown-property error and should just delete the line.
+
+- **`requireBound()` removed from Express `DbscLocals`.** It only existed on Express, not on the other three adapters, and the one-liner it replaced is the same length:
+
+  ```js
+  if (res.locals.dbsc.tier !== "dbsc") return res.status(401).end();
+  ```
+
+  Adding consistency across adapters meant either porting it to three more places or dropping it. Dropping it kept the surface smaller. Replace with the tier-check pattern shown in `docs/integrating-existing-auth.md`.
+
+### Documentation
+
+- `docs/api-reference.md` brought current with the 1.3.0 + 1.4.0 surface: `parseSessionSkippedHeader`, `SKIPPED_HEADER`, `LEGACY_SKIPPED_HEADER`, `SkippedEntry`, `SkippedReason`, the `;id?` second arg to `buildChallengeHeader`, the `skipped` field on every adapter's session object, `bindSession` per adapter, `autoBind` on `DbscOptions`. The dead `fallback` option is gone from the docs too.
+
+- `docs/getting-started.md` shrunk from ~80 lines of `server.js` to ~25, using `bindSession()`. Now also calls out `app.set("trust proxy", true)` — it was missing from getting-started and is known to silently break Render/Cloudflare/nginx deploys because `req.protocol` returns `http` and the spec § 8.9 scheme check fails.
+
+- README quick-start collapsed to use `bindSession()`. New subsection links to the integration guide.
+
 ## [1.3.0] — 2026-05-18
 
 ### Added

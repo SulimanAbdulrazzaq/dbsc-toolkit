@@ -84,15 +84,22 @@ interface RateLimiter {
 
 interface DbscOptions {
   storage: StorageAdapter;
-  fallback?: "webauthn" | "hmac" | "none";
   registrationPath?: string;        // default "/dbsc/registration"
   refreshPath?: string;             // default "/dbsc/refresh"
   boundCookieTtl?: number;          // default 600000 (10 min, in ms)
   registrationCookieTtl?: number;   // default 86400000 (24h, in ms)
   rateLimiter?: RateLimiter;
   onEvent?: (event: AnyTelemetryEvent) => void;
+  autoBind?: (req: any) => Promise<AutoBindResult | null> | AutoBindResult | null;
+}
+
+interface AutoBindResult {
+  sessionId: string;
+  userId: string;
 }
 ```
+
+`autoBind` is the transparent-migration hook. The middleware calls it on every request that does not carry the bound cookie yet, passing the framework-native request. Return a `{ sessionId, userId }` to start binding, or `null` to skip. See [integrating-existing-auth.md](./integrating-existing-auth.md).
 
 ### Telemetry events
 
@@ -144,11 +151,22 @@ interface RegistrationHeaderOptions {
   cookieName?: string;
 }
 function buildRegistrationHeader(opts: RegistrationHeaderOptions): string;
-function buildChallengeHeader(jti: string): string;
+function buildChallengeHeader(jti: string, sessionId?: string): string;
 function parseSessionResponseHeader(raw: string): string;
 function buildSessionIdCookie(sessionId: string, opts: { secure: boolean; sameSite: string }): string;
 function readSessionResponseHeader(headers: Record<string, string | string[] | undefined>): string | undefined;
+
+const SKIPPED_HEADER: "Secure-Session-Skipped";
+const LEGACY_SKIPPED_HEADER: "Sec-Session-Skipped";
+
+type SkippedReason = "unreachable" | "server_error" | "quota_exceeded";
+interface SkippedEntry { reason: SkippedReason; sessionId?: string }
+function parseSessionSkippedHeader(headers: Record<string, string | string[] | undefined>): SkippedEntry[];
 ```
+
+`buildChallengeHeader` takes an optional `sessionId` that becomes a `;id="..."` parameter on the header value. Chrome 147+ requires it on `Secure-Session-Challenge` responses or it silently drops the challenge.
+
+`parseSessionSkippedHeader` reads the browser's diagnostic header that explains why a request arrived without the bound credential. See [troubleshooting.md](./troubleshooting.md) for what each reason means.
 
 ### Protocol functions
 
@@ -223,8 +241,8 @@ interface DbscExpressOptions extends DbscOptions {
 interface DbscLocals {
   sessionId: string | null;
   tier: ProtectionTier;
+  skipped: SkippedEntry[];
   revoke: () => Promise<void>;
-  requireBound: () => void;
 }
 
 declare global {
@@ -234,9 +252,23 @@ declare global {
 }
 
 function dbsc(opts: DbscExpressOptions): RequestHandler;
+
+interface BindSessionOptions {
+  userId: string;
+  secure?: boolean;
+  registrationPath?: string;
+  registrationCookieTtl?: number;
+  sessionTtl?: number;
+}
+function bindSession(
+  res: Response,
+  sessionId: string,
+  storage: StorageAdapter,
+  opts: BindSessionOptions,
+): Promise<void>;
 ```
 
-After mount, every request has `res.locals.dbsc` populated.
+After mount, every request has `res.locals.dbsc` populated. Call `bindSession` once on your login response to start a new binding — it writes the session row, issues a challenge, sets both registration headers (legacy + new), and sets the two short-lived cookies Chrome needs.
 
 ---
 
@@ -252,15 +284,23 @@ declare module "fastify" {
     dbsc: {
       sessionId: string | null;
       tier: ProtectionTier;
+      skipped: SkippedEntry[];
       revoke(): Promise<void>;
     };
   }
 }
 
 const dbsc: FastifyPluginAsync<DbscFastifyOptions>;
+
+function bindSession(
+  reply: FastifyReply,
+  sessionId: string,
+  storage: StorageAdapter,
+  opts: BindSessionOptions,
+): Promise<void>;
 ```
 
-Register with `await fastify.register(dbsc, { storage })`.
+Register with `await fastify.register(dbsc, { storage })`. `registrationCookieTtl` is honored as of 1.4.0.
 
 ---
 
@@ -271,17 +311,36 @@ interface DbscHonoOptions extends DbscOptions {
   secure?: boolean;
 }
 
+interface DbscHonoSession {
+  sessionId: string | null;
+  tier: ProtectionTier;
+  skipped: SkippedEntry[];
+  revoke: () => Promise<void>;
+}
+
 declare module "hono" {
   interface ContextVariableMap {
+    dbsc: DbscHonoSession;
+    /** @deprecated read c.get("dbsc").sessionId. Removed in 2.0.0. */
     dbscSessionId: string | null;
+    /** @deprecated read c.get("dbsc").tier. Removed in 2.0.0. */
     dbscTier: ProtectionTier;
+    /** @deprecated read c.get("dbsc").skipped. Removed in 2.0.0. */
+    dbscSkipped: SkippedEntry[];
   }
 }
 
 function dbsc(opts: DbscHonoOptions): MiddlewareHandler;
+
+function bindSession(
+  c: Context,
+  sessionId: string,
+  storage: StorageAdapter,
+  opts: BindSessionOptions,
+): Promise<void>;
 ```
 
-Read tier with `c.get("dbscTier")` and session ID with `c.get("dbscSessionId")`.
+Read everything as `c.get("dbsc")` — a single object matching the Express/Fastify shape. The three legacy keys (`dbscSessionId`, `dbscTier`, `dbscSkipped`) still resolve in 1.x for back-compat and will be removed in 2.0.0. `registrationCookieTtl` is honored as of 1.4.0.
 
 ---
 
@@ -295,13 +354,27 @@ interface DbscNextOptions extends DbscOptions {
 interface DbscSessionInfo {
   sessionId: string | null;
   tier: ProtectionTier;
+  skipped: SkippedEntry[];
+  revoke: () => Promise<void>;
 }
 
 function createDbscMiddleware(opts: DbscNextOptions): (req: NextRequest) => Promise<NextResponse>;
-function getDbscSession(req: NextRequest, storage: StorageAdapter): Promise<DbscSessionInfo>;
+
+function getDbscSession(
+  req: NextRequest,
+  storage: StorageAdapter,
+  opts?: { boundCookieTtl?: number; res?: NextResponse; secure?: boolean },
+): Promise<DbscSessionInfo>;
+
+function bindSession(
+  res: NextResponse,
+  sessionId: string,
+  storage: StorageAdapter,
+  opts: BindSessionOptions,
+): Promise<void>;
 ```
 
-Export `createDbscMiddleware` from `middleware.ts` for the App Router. Use `getDbscSession` inside route handlers.
+Export `createDbscMiddleware` from `middleware.ts` for the App Router. Use `getDbscSession` inside route handlers. Pass `res` if you want `revoke()` to clear the cookie for you; otherwise it only deletes the server-side session and you clear cookies yourself.
 
 ---
 
