@@ -237,6 +237,8 @@ app.get("/payment", (req, res) => {
 
 Reasons defined by the spec: `unreachable` (couldn't reach the refresh endpoint), `server_error` (refresh got a 5xx), `quota_exceeded` (browser's anti-abuse throttle). These are diagnostics from Chrome — your server cannot disable them, but it can react to them.
 
+The quota is scoped per `(browser install, origin)`, not per origin globally. A site with a million users has a million separate quota buckets — one user spamming logins on their own Chrome cannot drain quota for anyone else. In production with normal login-once-and-stay-logged-in behavior, registration runs once per user and `quota_exceeded` essentially never trips. You hit it during development because the test loop logs in and out on the same browser dozens of times in a few minutes. To recover during testing, clear site data for the origin (`chrome://settings/clearBrowserData` → last hour → cookies and site data) or test in a fresh Incognito window.
+
 ## Header naming
 
 The W3C draft renamed the headers from `Sec-Session-*` to `Secure-Session-*`. Chrome 147 acts on the new names. The middleware reads both and writes both for compatibility. If you build response headers manually, send both:
