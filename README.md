@@ -9,13 +9,15 @@ Server-side implementation of [Device Bound Session Credentials](https://w3c.git
 
 DBSC is a W3C draft that binds session cookies to a hardware-resident private key inside the browser. A stolen cookie is useless without that key — which never leaves the user's device.
 
-Chrome 147+ supports DBSC natively. This library handles the server side. Verified end-to-end against Chrome 147 on Windows.
+Chromium 145+ supports DBSC natively — that includes Chrome, Edge, Brave, Opera, Arc, Vivaldi, and any other Chromium-based browser. Works across Windows (TPM 2.0), macOS Apple Silicon (Secure Enclave on M1/M2/M3/M4+), and Android (Keystore). This library handles the server side. Verified end-to-end against Chrome 147 on Windows with a real TPM 2.0.
+
+**New here?** Read [HOW-IT-WORKS.md](./HOW-IT-WORKS.md) first. It walks through the threat model, the on-the-wire protocol, where the library fits in your app, and tier semantics in ~15 minutes. Skip it only if you already know DBSC.
 
 ## Live demo
 
 Try it: <https://dbsc-toolkit.onrender.com/>
 
-Open in Chrome 147+, click **Login**, then **Check session** — `tier` reads `"dbsc"` once the TPM key is bound. The demo uses a 60-second bound-cookie TTL so refresh kicks in fast — watch DevTools Network for the automatic `POST /dbsc/refresh` after the cookie expires. Use **Clear cookies** to reset and replay the flow. Source in [examples/express/](./examples/express/).
+Open in any Chromium-based browser version 145+ (Chrome, Edge, Brave, Opera), click **Login**, then **Check session** — `tier` reads `"dbsc"` once the hardware-backed key is bound. The demo uses a 60-second bound-cookie TTL so refresh kicks in fast — watch DevTools Network for the automatic `POST /dbsc/refresh` after the cookie expires. Use **Clear cookies** to reset and replay the flow. Source in [examples/express/](./examples/express/).
 
 > Heads up: the demo runs on in-memory storage. Render restarts wipe sessions, so if "Check session" returns `not authenticated` after a while, the instance probably restarted — click **Login** again.
 
@@ -98,11 +100,13 @@ Tree-shaking eliminates anything you don't import.
 ## How a verified flow looks
 
 1. User hits `POST /login`. Server creates a session, issues a challenge, sets `Secure-Session-Registration` response header and two short-lived cookies (`__Host-dbsc-reg`, `__Host-dbsc-challenge`).
-2. Chrome immediately POSTs to `/dbsc/registration` with `Secure-Session-Response: <jws>`. The JWS carries the device public key signed by the matching private key (TPM).
+2. The browser immediately POSTs to `/dbsc/registration` with `Secure-Session-Response: <jws>`. The JWS carries the device public key signed by the matching private key (held in the platform's hardware key store).
 3. Middleware verifies the JWS, stores the public key bound to the session, sets `__Host-dbsc-session` cookie, returns DBSC session config JSON.
-4. From now on, every refresh cycle (default 10 min) Chrome signs a fresh challenge with the TPM key. A copied cookie cannot pass refresh — the attacker has no key.
+4. From now on, every refresh cycle (default 10 min) the browser signs a fresh challenge with the hardware-resident key. A copied cookie cannot pass refresh — the attacker has no key.
 
 `tier` on `res.locals.dbsc` reads `"dbsc"` once registration completes.
+
+For a complete walk-through of the protocol with every header value and timing detail, see [HOW-IT-WORKS.md](./HOW-IT-WORKS.md).
 
 ## Using the tier to actually defend
 
@@ -117,7 +121,7 @@ app.get("/payment", (req, res) => {
 });
 ```
 
-If you skip the tier check, a stolen cookie still works. The cookie reaches your server, the session record exists, your code happily proceeds — DBSC bought you nothing. The whole point is the demotion: when a cookie is replayed without the TPM proof, tier drops to `"none"` (or stays at the lower fallback tier) and your gate refuses the request.
+If you skip the tier check, a stolen cookie still works. The cookie reaches your server, the session record exists, your code happily proceeds — DBSC bought you nothing. The whole point is the demotion: when a cookie is replayed without the hardware-signed proof, tier drops to `"none"` (or stays at the lower fallback tier) and your gate refuses the request.
 
 Suggested handling per tier in a real application:
 
@@ -186,12 +190,12 @@ The library negotiates the strongest available binding per session:
 
 | Tier | Mechanism | Protection |
 |------|-----------|------------|
-| `dbsc` | Hardware-backed key, Chrome 147+ | Hardware binding — exfiltrated cookie is useless |
+| `dbsc` | Hardware-backed key, Chromium 145+ | Hardware binding — exfiltrated cookie is useless |
 | `webauthn` | Platform authenticator | Hardware binding via platform authenticator |
 | `hmac` | HMAC + browser signals | Best-effort context binding, not hardware |
 | `none` | Standard cookie | No additional binding |
 
-The tier is available at `res.locals.dbsc.tier` (Express), `c.get("dbscTier")` (Hono), `req.dbsc.tier` (Fastify), and via `getDbscSession()` (Next.js). Use it to apply different authorization policies per tier — for example, block payment flows when `tier !== "dbsc"`.
+The tier is available at `res.locals.dbsc.tier` (Express), `c.get("dbsc").tier` (Hono — legacy `c.get("dbscTier")` still works in 1.x, removed in 2.0.0), `req.dbsc.tier` (Fastify), and via `getDbscSession()` (Next.js). Use it to apply different authorization policies per tier — for example, block payment flows when `tier !== "dbsc"`.
 
 ## Storage
 
@@ -259,7 +263,7 @@ The quota is scoped per `(browser install, origin)`, not per origin globally. A 
 
 ## Header naming
 
-The W3C draft renamed the headers from `Sec-Session-*` to `Secure-Session-*`. Chrome 147 acts on the new names. The middleware reads both and writes both for compatibility. If you build response headers manually, send both:
+The W3C draft renamed the headers from `Sec-Session-*` to `Secure-Session-*`. Chromium 145+ acts on the new names. The middleware reads both and writes both for compatibility. If you build response headers manually, send both:
 
 ```ts
 res.setHeader("Secure-Session-Registration", header);
@@ -277,8 +281,35 @@ See [SECURITY.md](./SECURITY.md) for reporting vulnerabilities.
 ## Project status
 
 - Single package on npm: `dbsc-toolkit`
-- Verified end-to-end on Chrome 147 / Windows / TPM 2.0
+- Support floor: Chromium 145+ (Chrome, Edge, Brave, Opera, Arc, etc.) on Windows / macOS Apple Silicon / Android
+- Verified end-to-end on Chrome 147 / Windows / TPM 2.0 (other Chromium browsers and platforms should work but not independently verified)
 - No third-party security audit yet
+
+## Production readiness
+
+Honest table — what you're getting and where the rough edges are.
+
+| Area | Status | Confidence |
+|------|--------|-----------|
+| Core protocol (registration + refresh + verification) | Stable | High — verified against real Chrome 147 + TPM 2.0 |
+| Express adapter | Stable | High — used in the live demo, exercised on Render |
+| Fastify / Hono / Next.js adapters | Stable | Medium — unit tests pass, share core code with Express, not battle-tested in production |
+| `MemoryStorage` | Dev / test only | N/A — explicitly non-production |
+| `RedisStorage` | Stable | Medium — atomic challenge consume via Lua, tested locally |
+| `PostgresStorage` | Stable | Medium — migrations included, tested locally |
+| Fallback tiers (WebAuthn, HMAC) | Implemented, lightly tested | Low — protocol shape correct, real-world step-up flows TBD |
+| Security audit | None | — |
+| W3C spec stability | Draft, library tracks Chromium's implementation | Spec may evolve; expect occasional wire-format adjustments |
+
+**Should you use this in production?** Yes, with three conditions:
+
+1. **Use Redis or Postgres storage**, not memory. Memory storage on a server that ever restarts (Render free tier, serverless, autoscaling) produces a broken loop where browsers hold cookies that no longer match any stored key.
+2. **Treat it as defense-in-depth**, never the only auth layer. Your existing session cookie, password, MFA, rate limiting — all still required. DBSC raises the floor on session-replay attacks; it doesn't replace anything else.
+3. **Pin a version.** The W3C spec is still draft and the library tracks Chromium's implementation. Wire-format changes are unlikely but possible. Pin `dbsc-toolkit@~1.5.0` (patch updates only) and read the changelog before bumping.
+
+Rough readiness estimate: **~85%** for the Express + Redis path (core protocol + main adapter + production storage all solid). **~70%** for Fastify / Hono / Next.js (same core, less production mileage). **~60%** for the fallback tier flows (WebAuthn/HMAC code is there, real-world step-up UX is on the user).
+
+The realistic adoption pattern: ship it as the second layer behind your existing auth on Chromium-supporting routes. Don't lock non-Chromium users out. Gate genuinely high-value actions (payments, password change, admin) on `tier === "dbsc"`; leave everything else permissive. That's the recipe a Reddit-style site would use — see [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md).
 
 ## License
 

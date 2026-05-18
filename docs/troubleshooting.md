@@ -45,7 +45,7 @@ const fastify = Fastify({ trustProxy: true });  // Fastify
 
 Hono and Next.js derive origin from the runtime's request URL and don't need a flag.
 
-**Registration response shape is wrong for Chrome 147.** The endpoint must return 200 with this exact shape:
+**Registration response shape is wrong for Chromium 145+.** The endpoint must return 200 with this exact shape:
 
 ```json
 {
@@ -87,7 +87,7 @@ Chrome sent a request to your origin without the bound credential and included a
 - `unreachable` — Chrome couldn't reach your refresh endpoint.
 - `server_error` — your refresh endpoint returned 5xx.
 
-You cannot disable Chrome's quota from the server. It's a browser-side defense against fingerprinting via TPM probing. To recover during development:
+You cannot disable the browser's quota from the server. It's a browser-side defense against fingerprinting via hardware-key probing. To recover during development:
 
 1. Clear site data: `chrome://settings/clearBrowserData` → time range "Last hour" → "Cookies and other site data".
 2. Stop test loops that login/logout in rapid succession — every cycle counts toward the quota.
@@ -245,7 +245,7 @@ A net-export capture is the most useful diagnostic — if your origin's session 
 
 ## When to file a bug
 
-If you see a `MALFORMED_JWS` or `INVALID_JWK` from a normal Chrome 147 client with no middleware in between, it's likely a Chrome bug. File at <https://crbug.com> with the net-export log attached.
+If you see a `MALFORMED_JWS` or `INVALID_JWK` from a normal Chromium 145+ client (Chrome, Edge, Brave) with no middleware in between, it's likely a Chromium bug. File at <https://crbug.com> with the net-export log attached.
 
 For library bugs, open an issue at <https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/issues> with:
 

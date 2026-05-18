@@ -4,7 +4,7 @@ Method: STRIDE. Scope: DBSC Toolkit server-side library.
 
 ## Assets
 
-- Session binding: the association between a session ID and a TPM-resident public key
+- Session binding: the association between a session ID and a hardware-resident public key (TPM on Windows, Secure Enclave on Apple Silicon macOS, Keystore on Android)
 - Challenge confidentiality: challenges must be single-use and short-lived
 - Storage integrity: the key store must not be writable by untrusted parties
 
@@ -17,7 +17,7 @@ An attacker steals a bound cookie value (XSS, malicious extension, DevTools acce
 
 Mitigation: enforced in two layers.
 
-1. **Per-request freshness check.** Adapters compare `session.lastRefreshAt + boundCookieTtl` against the current time. If the bound cookie's window has elapsed since the last successful refresh, the request sees `tier: "none"` even if the stored tier is still `"dbsc"`. An attacker with a cookie value but no TPM key cannot refresh, so their reads degrade automatically after one TTL.
+1. **Per-request freshness check.** Adapters compare `session.lastRefreshAt + boundCookieTtl` against the current time. If the bound cookie's window has elapsed since the last successful refresh, the request sees `tier: "none"` even if the stored tier is still `"dbsc"`. An attacker with a cookie value but no hardware key cannot refresh, so their reads degrade automatically after one TTL.
 
 2. **Tier demotion on failed refresh.** When the attacker's browser auto-refreshes (Chrome does this whenever the bound cookie is gone), the JWS signature check fails. The library demotes the stored tier to `"none"` before re-throwing. From that moment every adapter and every route sees the demoted tier — including reads on the victim's device. The victim's next refresh re-promotes the session via a valid JWS signature, so legitimate use is uninterrupted.
 
@@ -92,4 +92,4 @@ Mitigation: The library documents tier semantics clearly. `tier === "hmac"` is e
 | Cookie theft + replay | Mitigated | Mitigated | Partial |
 | MFA bypass | Mitigated | Mitigated | Partial |
 | Signal spoofing | N/A | N/A | Unmitigated |
-| Key exfiltration | Mitigated (TPM) | Mitigated (platform) | N/A |
+| Key exfiltration | Mitigated (hardware key store) | Mitigated (platform) | N/A |

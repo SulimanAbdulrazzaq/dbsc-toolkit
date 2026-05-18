@@ -7,14 +7,24 @@ Each framework adapter is a thin wrapper that translates the framework's request
 ```ts
 import express from "express";
 import cookieParser from "cookie-parser";
-import { dbsc } from "dbsc-toolkit/express";
+import { randomUUID } from "node:crypto";
+import { dbsc, bindSession } from "dbsc-toolkit/express";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
 const app = express();
+const storage = new MemoryStorage();
+
 app.use(cookieParser());
 app.use("/dbsc/registration", express.text({ type: "*/*" }));
 app.use("/dbsc/refresh", express.text({ type: "*/*" }));
-app.use(dbsc({ storage: new MemoryStorage() }));
+app.use(express.json());
+app.use(dbsc({ storage }));
+
+app.post("/login", async (req, res) => {
+  const sessionId = randomUUID();
+  await bindSession(res, sessionId, storage, { userId: req.body.username });
+  res.json({ ok: true });
+});
 
 app.get("/protected", (_req, res) => {
   if (res.locals.dbsc.tier !== "dbsc") {
@@ -32,9 +42,20 @@ The `text` body parsers on the protocol routes are required — Chrome sends the
 {
   sessionId: string | null;
   tier: "dbsc" | "webauthn" | "hmac" | "none";
-  revoke(): Promise<void>;        // server-side revocation + Set-Cookie clear
-  requireBound(): void;           // throws + 401 if no session
+  skipped: SkippedEntry[];        // Chrome's diagnostic entries (quota_exceeded, etc.)
+  revoke: () => Promise<void>;    // server-side revocation + Set-Cookie clear
 }
+```
+
+To gate a route on the hardware-bound tier, do an explicit check (no helper method — keeps the surface small):
+
+```ts
+app.post("/payment", (req, res, next) => {
+  if (res.locals.dbsc.tier !== "dbsc") {
+    return res.status(401).json({ error: "re-authenticate" });
+  }
+  next();
+}, paymentHandler);
 ```
 
 ## Fastify
@@ -74,7 +95,7 @@ const app = new Hono();
 app.use("*", dbsc({ storage: new MemoryStorage() }));
 
 app.get("/protected", (c) => {
-  if (c.get("dbscTier") !== "dbsc") {
+  if (c.get("dbsc").tier !== "dbsc") {
     return c.json({ error: "hardware-bound session required" }, 403);
   }
   return c.json({ ok: true });
@@ -83,7 +104,9 @@ app.get("/protected", (c) => {
 export default app;
 ```
 
-`c.get("dbscTier")` and `c.get("dbscSessionId")` are typed via Hono's `ContextVariableMap` augmentation.
+`c.get("dbsc")` returns `{ sessionId, tier, skipped, revoke }` — the same shape as `res.locals.dbsc` on Express and `req.dbsc` on Fastify.
+
+The 1.3.x split keys `c.get("dbscSessionId")`, `c.get("dbscTier")`, `c.get("dbscSkipped")` are deprecated aliases that still work in 1.x for back-compat. They will be removed in 2.0.0 — migrate to `c.get("dbsc")` for new code.
 
 ## Next.js (App Router)
 
@@ -249,7 +272,7 @@ export function dbscHandler(storage: StorageAdapter, boundTtlMs = 600_000) {
 
 **Header write order.** Send both `Secure-Session-Registration` and `Sec-Session-Registration` on responses for compatibility with older Chrome builds.
 
-**Registration response body.** Chrome 147+ requires a JSON session config with `session_identifier`, `refresh_url`, `scope`, and `credentials`. A bare `204 No Content` causes Chrome to silently terminate the session — registration appears to succeed but no refresh ever happens.
+**Registration response body.** Chromium 145+ requires a JSON session config with `session_identifier`, `refresh_url`, `scope`, and `credentials`. A bare `204 No Content` causes the browser to silently terminate the session — registration appears to succeed but no refresh ever happens.
 
 **Cookie attributes match.** The `attributes` string in the `credentials[].attributes` field must match what your `Set-Cookie` header actually sets (Domain, Path, Secure, HttpOnly, SameSite). Chrome compares them and terminates the session on mismatch. The `__Host-` prefix forces no-Domain, Path=/, Secure — make sure your attributes string omits Domain.
 

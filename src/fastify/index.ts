@@ -29,7 +29,7 @@ declare module "fastify" {
       sessionId: string | null;
       tier: ProtectionTier;
       skipped: SkippedEntry[];
-      revoke(): Promise<void>;
+      revoke: () => Promise<void>;
     };
   }
 }

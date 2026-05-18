@@ -1,10 +1,10 @@
 # Protocol reference
 
-The exact wire format Chrome 147 speaks. Everything in this document is a verbatim record of what crosses the network — what headers, what JSON shapes, what status codes.
+The exact wire format Chromium 145+ (Chrome, Edge, Brave, Opera, Arc, etc.) speaks. Everything in this document is a verbatim record of what crosses the network — what headers, what JSON shapes, what status codes. Verified against Chrome 147 on Windows; other Chromium-based browsers inherit the same implementation.
 
 ## Header names
 
-Chrome 147 renamed every header during the W3C draft cycle. The old names work as fallback in some adapter code, but everything new uses the `Secure-Session-*` prefix. The session ID header on refresh requests is the odd one out: `Sec-Secure-Session-Id` — both prefixes.
+Chromium 145+ renamed every header during the W3C draft cycle. The old names work as fallback in some adapter code, but everything new uses the `Secure-Session-*` prefix. The session ID header on refresh requests is the odd one out: `Sec-Secure-Session-Id` — both prefixes.
 
 | Direction | Header | Purpose |
 |-----------|--------|---------|
@@ -210,7 +210,7 @@ Failing any of these makes Chrome silently drop the cookie. The library uses `__
 
 ## Algorithm support
 
-ES256 and RS256 only. ES256 (EC P-256) is what Chrome's TPM uses. RS256 is supported for software fallback or non-Chrome browsers that may eventually implement DBSC with RSA-only TPMs.
+ES256 and RS256 only. ES256 (EC P-256) is what Chromium's hardware key stores use (TPM on Windows, Secure Enclave on Apple Silicon macOS, Keystore on Android — all support EC P-256). RS256 is supported for software fallback or other browsers that may eventually implement DBSC with RSA-only hardware backends.
 
 The `validateJwk` core function rejects RSA keys under 2048 bits and any unsupported curves.
 

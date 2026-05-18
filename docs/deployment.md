@@ -6,7 +6,7 @@ DBSC requires HTTPS and a stable HTTP layer. This guide covers the platforms we 
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| Render | Verified end-to-end with Chrome 147 | Edge terminates HTTPS, requires `trust proxy` (see below) |
+| Render | Verified end-to-end with Chrome 147 (other Chromium 145+ browsers should work) | Edge terminates HTTPS, requires `trust proxy` (see below) |
 | Railway | Worked in earlier rounds of testing | Same trust-proxy requirement |
 | Fly.io | Should work (same architecture as Render/Railway) | Untested in 1.x |
 | Cloudflare Workers | Works with Hono adapter | Storage must be Redis (Upstash) or KV |

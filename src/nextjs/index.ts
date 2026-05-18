@@ -28,8 +28,8 @@ const cookieNames = (secure: boolean) => ({
   challenge: secure ? "__Host-dbsc-challenge" : "dbsc-challenge",
 });
 
-const DEFAULT_BOUND_TTL = 10 * 60;
-const DEFAULT_REG_TTL = 24 * 60 * 60;
+const DEFAULT_BOUND_TTL_MS = 10 * 60 * 1000;
+const DEFAULT_REG_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface DbscNextOptions extends DbscOptions {
@@ -61,7 +61,7 @@ export async function bindSession(
 ): Promise<void> {
   const secure = opts.secure ?? true;
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
-  const regCookieTtl = opts.registrationCookieTtl ?? DEFAULT_REG_TTL * 1000;
+  const regCookieTtl = opts.registrationCookieTtl ?? DEFAULT_REG_TTL_MS;
   const sessionTtl = opts.sessionTtl ?? DEFAULT_SESSION_TTL_MS;
 
   const existing = await storage.getSession(sessionId);
@@ -103,8 +103,8 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
     storage,
     registrationPath = "/dbsc/registration",
     refreshPath = "/dbsc/refresh",
-    boundCookieTtl = DEFAULT_BOUND_TTL * 1000,
-    registrationCookieTtl = DEFAULT_REG_TTL * 1000,
+    boundCookieTtl = DEFAULT_BOUND_TTL_MS,
+    registrationCookieTtl = DEFAULT_REG_TTL_MS,
     rateLimiter = new NoopRateLimiter(),
     onEvent,
     autoBind,
@@ -321,7 +321,7 @@ export async function getDbscSession(
   const session = await storage.getSession(sessionId);
   if (!session) return { sessionId: null, tier: "none", skipped, revoke };
 
-  const boundCookieTtl = opts.boundCookieTtl ?? DEFAULT_BOUND_TTL * 1000;
+  const boundCookieTtl = opts.boundCookieTtl ?? DEFAULT_BOUND_TTL_MS;
   const staleAfter = session.lastRefreshAt + boundCookieTtl;
   if (session.tier === "dbsc" && Date.now() > staleAfter) {
     return { sessionId, tier: "none", skipped, revoke };

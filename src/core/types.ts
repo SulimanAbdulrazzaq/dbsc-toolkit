@@ -114,7 +114,7 @@ export interface DbscOptions {
    * Optional callback for transparent migration. On every request that does not
    * carry the bound cookie yet, the middleware calls this with the
    * framework-native request. If it returns a userId string, the response gets
-   * the registration header + the two short-lived cookies, so Chrome 147+
+   * the registration header + the two short-lived cookies, so Chromium 145+
    * triggers /dbsc/registration on its own. Return null to skip.
    * The sessionId used is whatever your existing auth says — supply both via
    * the result type below.

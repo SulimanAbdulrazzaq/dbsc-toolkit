@@ -7,7 +7,7 @@ If this changes anything on the wire (header name, parameter, cookie, JWS field)
 ## Verification
 - [ ] `npm run build` passes
 - [ ] `npm test` passes
-- [ ] If wire-format affected: ran `examples/express` against real Chrome 147 and confirmed `tier === "dbsc"` after registration
+- [ ] If wire-format affected: ran `examples/express` against a real Chromium 145+ browser and confirmed `tier === "dbsc"` after registration
 
 ## Changelog
 - [ ] Updated `CHANGELOG.md`

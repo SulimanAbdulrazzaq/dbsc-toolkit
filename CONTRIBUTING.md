@@ -24,9 +24,9 @@ When you change a header name, cookie name, or anything on the wire, update:
 3. The example in `examples/express/src/server.js`
 4. README and CHANGELOG
 
-## Verifying against Chrome
+## Verifying against a Chromium browser
 
-Unit tests cover the protocol logic in isolation. They do not exercise a real browser. Before merging anything that touches the wire format, run the demo against Chrome 147+:
+Unit tests cover the protocol logic in isolation. They do not exercise a real browser. Before merging anything that touches the wire format, run the demo against any Chromium 145+ browser (Chrome, Edge, Brave, Opera):
 
 1. Deploy `examples/express` somewhere with HTTPS (Railway works).
 2. Click Login, wait a few seconds, click Check Session. `tier` must read `"dbsc"`.

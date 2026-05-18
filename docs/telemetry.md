@@ -77,7 +77,7 @@ interface VerificationFailureEvent extends TelemetryEvent {
 
 Most common reasons:
 
-- `SIGNATURE_INVALID` — JWS signature does not match stored JWK. Either a stolen cookie attack or a TPM key change.
+- `SIGNATURE_INVALID` — JWS signature does not match stored JWK. Either a stolen cookie attack or a hardware-key change.
 - `JTI_MISMATCH` — challenge in JWS does not match what the server issued. Replay attempt or stale browser state.
 - `CHALLENGE_CONSUMED` — challenge already used. Concurrent refresh race or replay.
 - `CHALLENGE_EXPIRED` — challenge older than 5 minutes. Slow client or clock drift.

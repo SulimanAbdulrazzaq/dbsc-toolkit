@@ -7,7 +7,7 @@ Most production sites already have a working session story: a login route, a ses
 After integration your responses set two HttpOnly cookies, not one:
 
 - Your existing session cookie (`sid`, `connect.sid`, whatever) — unchanged. Still drives your auth middleware, still keyed to your user row.
-- `__Host-dbsc-session` — added by DBSC. Same value as the session id you pass in. Chrome refreshes it every 10 minutes with a TPM signature.
+- `__Host-dbsc-session` — added by DBSC. Same value as the session id you pass in. The browser refreshes it every 10 minutes with a hardware-key signature (TPM on Windows, Secure Enclave on Apple Silicon macOS, Keystore on Android).
 
 Browsers send both on every request. Your existing middleware keeps working. The DBSC middleware adds `res.locals.dbsc.tier` (Express), `req.dbsc.tier` (Fastify), `c.get("dbsc").tier` (Hono), or the value of `getDbscSession(...)` (Next.js). You read that tier on routes that need it.
 
@@ -81,9 +81,9 @@ app.use(
 );
 ```
 
-Now every logged-in user on Chrome 147+ gets bound the next time they load any page. Zero change to /login. Zero new endpoints. Users on other browsers are unaffected — they just don't receive a registration header.
+Now every logged-in user on a Chromium 145+ browser (Chrome, Edge, Brave, Opera, etc.) gets bound the next time they load any page. Zero change to /login. Zero new endpoints. Users on other browsers (Firefox, Safari) are unaffected — they just don't receive a registration header.
 
-`autoBind` only fires when there is no bound cookie AND no registration-in-flight cookie. Once Chrome has the bound cookie, the callback is skipped so you don't pay the storage hit on every request.
+`autoBind` only fires when there is no bound cookie AND no registration-in-flight cookie. Once the browser has the bound cookie, the callback is skipped so you don't pay the storage hit on every request.
 
 ## Per-route policy
 
@@ -116,14 +116,14 @@ app.post("/comment", requireTier("hmac"), commentHandler);
 app.post("/settings/email", requireTier("dbsc"), emailHandler);
 ```
 
-## Non-Chrome users
+## Non-Chromium users
 
-Firefox, Safari, older Chrome — these don't know what DBSC is. They ignore the registration header entirely and stay at `tier: "none"` (or the tier their fallback achieves if you wire WebAuthn or HMAC).
+Firefox, Safari, older Chromium versions — these don't know what DBSC is. They ignore the registration header entirely and stay at `tier: "none"` (or the tier their fallback achieves if you wire WebAuthn or HMAC).
 
 Decide your policy:
 
-- **Permissive:** accept `none` for non-sensitive routes. This is the only choice if you can't force users to use Chrome 147+. Most sites pick this.
-- **Strict:** require `dbsc` everywhere. Excludes everyone not on Chrome 147+. Only viable for internal tools.
+- **Permissive:** accept `none` for non-sensitive routes. This is the only choice if you can't force users onto Chromium 145+. Most sites pick this.
+- **Strict:** require `dbsc` everywhere. Excludes anyone not on a Chromium 145+ browser (Chrome, Edge, Brave, Opera, etc.). Only viable for internal tools.
 
 You can't detect "this browser supports DBSC" from the server cleanly. The tier on first request reflects what binding actually happened — `none` means either "no DBSC support" or "DBSC not bound yet." Both look the same and that's fine: you just gate on the tier you got.
 

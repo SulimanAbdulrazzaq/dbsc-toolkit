@@ -1,12 +1,12 @@
 # Fallback tiers
 
-DBSC works only on Chrome 147+ with a usable TPM. The library negotiates a tier per session so your application can apply different policies depending on what level of binding the browser actually achieved.
+DBSC works only on Chromium 145+ (Chrome, Edge, Brave, Opera, Arc, etc.) with a usable hardware-backed key store (TPM 2.0 on Windows, Secure Enclave on Apple Silicon macOS, Keystore on Android). The library negotiates a tier per session so your application can apply different policies depending on what level of binding the browser actually achieved.
 
 ## The four tiers
 
 | Tier | Mechanism | Hardware-bound | Cookie theft useless? |
 |------|-----------|----------------|------------------------|
-| `dbsc` | TPM-resident EC P-256 key, Chrome auto-refresh | Yes | Yes |
+| `dbsc` | Hardware-resident EC P-256 key (TPM / Secure Enclave / Keystore), Chromium auto-refresh | Yes | Yes |
 | `webauthn` | Platform authenticator (TouchID, Windows Hello, etc.) | Yes (where available) | Mostly — depends on RP policy |
 | `hmac` | HMAC over browser signal bundle | No | No — best-effort only |
 | `none` | Standard cookie | No | No |
@@ -17,7 +17,7 @@ The tier is stored on the `Session` object and exposed on every request via the 
 |---------|---------------|
 | Express | `res.locals.dbsc.tier` |
 | Fastify | `req.dbsc.tier` |
-| Hono | `c.get("dbscTier")` |
+| Hono | `c.get("dbsc").tier` |
 | Next.js | `(await getDbscSession(req, storage)).tier` |
 
 ## Tier negotiation
@@ -26,9 +26,9 @@ The library decides which tier a session lands at based on the protocol exchange
 
 ```
 1. Login response always sends Secure-Session-Registration header.
-2. If Chrome supports DBSC and TPM is available:
+2. If the browser is Chromium 145+ and a hardware key store is available:
      → POSTs JWS to /dbsc/registration → tier = "dbsc"
-3. If Chrome does not support DBSC (Firefox, Safari, older Chrome):
+3. If the browser does not support DBSC (Firefox, Safari, older Chromium):
      → No registration JWS arrives within ~3 seconds.
      → Server-emitted page can call dbscClient.init() from dbsc-toolkit/client to
        drive WebAuthn registration → tier = "webauthn" on success.
@@ -55,7 +55,7 @@ app.post("/checkout", (req, res) => {
   if (tier === "hmac") {
     return res.status(403).json({
       error: "hardware-bound session required for payments",
-      hint: "Use Chrome 147+ with DBSC enabled, or register a passkey",
+      hint: "Use a Chromium 145+ browser (Chrome, Edge, Brave) with DBSC enabled, or register a passkey",
     });
   }
 

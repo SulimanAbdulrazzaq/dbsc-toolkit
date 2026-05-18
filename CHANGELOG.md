@@ -2,6 +2,33 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] — 2026-05-18
+
+### Added
+
+- **`HOW-IT-WORKS.md`** — single-page walk-through covering the threat model, on-the-wire protocol with full HTTP timeline, where the library fits in your app, tier semantics, storage behavior, cross-browser story, and FAQ. Linked prominently from the README for first-time readers. ~400 lines, no theory — concrete enough that a developer who's never touched DBSC can read it once and integrate confidently.
+- **Production readiness section** in README. Honest per-area status table (core protocol, each adapter, each storage, fallback tiers, audit status, spec stability) with confidence levels and a "should you use this in production" answer with three explicit conditions.
+
+### Changed
+
+- **Browser + platform support description.** The library has always worked on any Chromium 145+ browser (Chrome, Edge, Brave, Opera, Arc, Vivaldi) across Windows (TPM 2.0), macOS Apple Silicon (Secure Enclave on M1/M2/M3/M4+), and Android (Keystore). Previous docs and the package description over-narrowed this to "Chrome 147+" and "TPM." Swept all user-facing copy to reflect actual Chromium-wide / multi-platform support. Verification claims still cite Chrome 147 on Windows TPM because that's the configuration that was actually tested end-to-end.
+- **README restructured** so first-time readers hit the pitch → pointer to HOW-IT-WORKS.md → live demo → install in that order. Previously the demo banner buried the conceptual explanation.
+- **Hono adapter docs** now consistently show the unified `c.get("dbsc")` shape. The 1.3.x split keys (`c.get("dbscTier")` etc.) are still functional in 1.x but flagged deprecated in the API reference, the README tier table, and the adapter guide. Removal target: 2.0.0.
+- **Express adapter doc (`docs/adapters.md`)** updated to reflect 1.4.0 removals. The example object no longer lists `requireBound()` (which was removed in 1.4.0) and now includes the `skipped` field. New code sample shows `bindSession()` use in a login route.
+
+### Fixed
+
+- **Doc / code drift.** Adapter type examples in `docs/adapters.md` were stale relative to 1.4.0 — they still referenced `requireBound()` and listed Hono context vars without deprecation. Copy-pasting from these would produce TypeScript errors. Now matches the code.
+- **README tier table** pointed Hono users at `c.get("dbscTier")` without noting it's a deprecated alias. Now shows `c.get("dbsc").tier` with an inline migration note for 1.3.x users.
+- **Next.js TTL constant naming.** `DEFAULT_BOUND_TTL` and `DEFAULT_REG_TTL` were declared in seconds while Express, Fastify, and Hono use milliseconds. The Next.js code worked because every usage multiplied by 1000, but the inconsistency made diff-reading across adapters confusing. Renamed to `DEFAULT_BOUND_TTL_MS` / `DEFAULT_REG_TTL_MS` in milliseconds. No runtime behavior change.
+- **Fastify `revoke` signature.** Was declared as `revoke(): Promise<void>` (method syntax) while Express, Hono, and Next.js use `revoke: () => Promise<void>` (arrow property). Both behave identically at runtime, but the inconsistency made the Fastify declaration look different in TypeScript autocomplete. Aligned all four to arrow property.
+
+### Notes
+
+No breaking changes. No new dependencies. All 48 existing tests pass unchanged. The version bump is minor because of the visible README restructure and new HOW-IT-WORKS.md — both add user-facing surface area, even though no API changed.
+
+---
+
 ## [1.4.0] — 2026-05-18
 
 ### Added

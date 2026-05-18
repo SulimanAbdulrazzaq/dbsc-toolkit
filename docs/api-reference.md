@@ -164,7 +164,7 @@ interface SkippedEntry { reason: SkippedReason; sessionId?: string }
 function parseSessionSkippedHeader(headers: Record<string, string | string[] | undefined>): SkippedEntry[];
 ```
 
-`buildChallengeHeader` takes an optional `sessionId` that becomes a `;id="..."` parameter on the header value. Chrome 147+ requires it on `Secure-Session-Challenge` responses or it silently drops the challenge.
+`buildChallengeHeader` takes an optional `sessionId` that becomes a `;id="..."` parameter on the header value. Chromium 145+ requires it on `Secure-Session-Challenge` responses or it silently drops the challenge.
 
 `parseSessionSkippedHeader` reads the browser's diagnostic header that explains why a request arrived without the bound credential. See [troubleshooting.md](./troubleshooting.md) for what each reason means.
 
