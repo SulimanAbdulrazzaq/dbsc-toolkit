@@ -6,6 +6,7 @@ import {
   issueChallenge,
   buildChallengeHeader,
   readSessionResponseHeader,
+  parseSessionSkippedHeader,
   CHALLENGE_HEADER,
   LEGACY_CHALLENGE_HEADER,
   NoopRateLimiter,
@@ -14,6 +15,7 @@ import {
   DbscVerificationError,
   type DbscOptions,
   type ProtectionTier,
+  type SkippedEntry,
 } from "../core/index.js";
 
 const BOUND_COOKIE = "__Host-dbsc-session";
@@ -30,6 +32,7 @@ declare module "hono" {
   interface ContextVariableMap {
     dbscSessionId: string | null;
     dbscTier: ProtectionTier;
+    dbscSkipped: SkippedEntry[];
   }
 }
 
@@ -189,8 +192,13 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
     }
 
     const sessionId = getCookie(c, BOUND_COOKIE) ?? null;
+    const skippedRaw: Record<string, string | undefined> = {
+      "secure-session-skipped": c.req.header("secure-session-skipped"),
+      "sec-session-skipped": c.req.header("sec-session-skipped"),
+    };
     c.set("dbscSessionId", sessionId);
     c.set("dbscTier", "none");
+    c.set("dbscSkipped", parseSessionSkippedHeader(skippedRaw));
 
     if (sessionId) {
       const session = await storage.getSession(sessionId);

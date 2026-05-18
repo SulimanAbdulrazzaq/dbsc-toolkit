@@ -7,6 +7,7 @@ import {
   issueChallenge,
   buildChallengeHeader,
   readSessionResponseHeader,
+  parseSessionSkippedHeader,
   CHALLENGE_HEADER,
   LEGACY_CHALLENGE_HEADER,
   NoopRateLimiter,
@@ -15,6 +16,7 @@ import {
   DbscVerificationError,
   type DbscOptions,
   type ProtectionTier,
+  type SkippedEntry,
 } from "../core/index.js";
 
 declare module "fastify" {
@@ -22,6 +24,7 @@ declare module "fastify" {
     dbsc: {
       sessionId: string | null;
       tier: ProtectionTier;
+      skipped: SkippedEntry[];
       revoke(): Promise<void>;
     };
   }
@@ -59,10 +62,12 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
 
   fastify.addHook("onRequest", async (req: FastifyRequest, reply: FastifyReply) => {
     const sessionId = req.cookies?.[BOUND_COOKIE] ?? null;
+    const skipped = parseSessionSkippedHeader(req.headers as Record<string, string | string[] | undefined>);
 
     req.dbsc = {
       sessionId,
       tier: "none",
+      skipped,
       revoke: async () => {
         if (sessionId) await storage.revokeSession(sessionId);
         reply.clearCookie(BOUND_COOKIE, cookieOpts);

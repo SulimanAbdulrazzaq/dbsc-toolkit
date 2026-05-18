@@ -27,15 +27,19 @@ export {
   buildRegistrationHeader,
   buildChallengeHeader,
   parseSessionResponseHeader,
+  parseSessionSkippedHeader,
   buildSessionIdCookie,
   readSessionResponseHeader,
   REGISTRATION_HEADER,
   RESPONSE_HEADER,
   CHALLENGE_HEADER,
+  SKIPPED_HEADER,
   LEGACY_REGISTRATION_HEADER,
   LEGACY_RESPONSE_HEADER,
   LEGACY_CHALLENGE_HEADER,
+  LEGACY_SKIPPED_HEADER,
 } from "./protocol/headers.js";
+export type { SkippedEntry, SkippedReason } from "./protocol/headers.js";
 export { handleRegistration } from "./protocol/registration.js";
 export { handleRefresh } from "./protocol/refresh.js";
 

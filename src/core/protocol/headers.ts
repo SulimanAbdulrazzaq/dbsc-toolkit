@@ -35,10 +35,12 @@ export function buildSessionIdCookie(
 export const REGISTRATION_HEADER = "Secure-Session-Registration";
 export const RESPONSE_HEADER = "Secure-Session-Response";
 export const CHALLENGE_HEADER = "Secure-Session-Challenge";
+export const SKIPPED_HEADER = "Secure-Session-Skipped";
 
 export const LEGACY_REGISTRATION_HEADER = "Sec-Session-Registration";
 export const LEGACY_RESPONSE_HEADER = "Sec-Session-Response";
 export const LEGACY_CHALLENGE_HEADER = "Sec-Session-Challenge";
+export const LEGACY_SKIPPED_HEADER = "Sec-Session-Skipped";
 
 export function readSessionResponseHeader(
   headers: Record<string, string | string[] | undefined>,
@@ -46,4 +48,53 @@ export function readSessionResponseHeader(
   const v = headers["secure-session-response"] ?? headers["sec-session-response"];
   if (Array.isArray(v)) return v[0];
   return v;
+}
+
+export type SkippedReason = "unreachable" | "server_error" | "quota_exceeded";
+
+export interface SkippedEntry {
+  reason: SkippedReason;
+  sessionId?: string;
+}
+
+const SKIPPED_REASONS: ReadonlySet<string> = new Set([
+  "unreachable",
+  "server_error",
+  "quota_exceeded",
+]);
+
+export function parseSessionSkippedHeader(
+  headers: Record<string, string | string[] | undefined>,
+): SkippedEntry[] {
+  const raw = headers["secure-session-skipped"] ?? headers["sec-session-skipped"];
+  if (!raw) return [];
+  const value = Array.isArray(raw) ? raw.join(", ") : raw;
+  const entries: SkippedEntry[] = [];
+
+  for (const item of value.split(",")) {
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+
+    const [tokenPart, ...paramParts] = trimmed.split(";");
+    const reason = tokenPart!.trim();
+    if (!SKIPPED_REASONS.has(reason)) continue;
+
+    let sessionId: string | undefined;
+    for (const param of paramParts) {
+      const eq = param.indexOf("=");
+      if (eq === -1) continue;
+      const key = param.slice(0, eq).trim();
+      let val = param.slice(eq + 1).trim();
+      if (val.startsWith('"') && val.endsWith('"')) {
+        val = val.slice(1, -1);
+      }
+      if (key === "session_identifier") sessionId = val;
+    }
+
+    const entry: SkippedEntry = { reason: reason as SkippedReason };
+    if (sessionId !== undefined) entry.sessionId = sessionId;
+    entries.push(entry);
+  }
+
+  return entries;
 }

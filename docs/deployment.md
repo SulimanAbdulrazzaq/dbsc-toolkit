@@ -6,42 +6,63 @@ DBSC requires HTTPS and a stable HTTP layer. This guide covers the platforms we 
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| Railway | Verified end-to-end with Chrome 147 | Edge terminates HTTPS, easy zero-config |
-| Fly.io | Should work (same architecture as Railway) | Untested |
-| Render | Should work | Untested |
+| Render | Verified end-to-end with Chrome 147 | Edge terminates HTTPS, requires `trust proxy` (see below) |
+| Railway | Worked in earlier rounds of testing | Same trust-proxy requirement |
+| Fly.io | Should work (same architecture as Render/Railway) | Untested in 1.x |
 | Cloudflare Workers | Works with Hono adapter | Storage must be Redis (Upstash) or KV |
 | Vercel | Works for Next.js adapter | Use Edge Middleware; storage needs external (Redis/Postgres) |
 | Self-hosted (nginx + Node) | Works | See reverse proxy section below |
 
-## Railway
+## Reverse proxy gotcha — read this first
 
-Simplest path. Steps:
+Any platform that terminates HTTPS at an edge proxy (Render, Fly, Railway, Heroku, Cloudflare, nginx) hands plain HTTP to your Node process. Express's `req.protocol` returns `"http"` unless you explicitly trust the proxy. The DBSC adapters build `scope.origin` from `req.protocol`, so without trust-proxy the registration response advertises `scope.origin: "http://your-app.example.com"` while the page was actually loaded over `https://...`. Chrome's same-site / scheme check (W3C spec § 8.9 step 9) fails silently — no JS error, no telemetry, just no `/dbsc/refresh` ever happens.
 
-1. Create new Railway project pointed at your GitHub repo.
-2. Set Root Directory to `examples/express` (or wherever your `package.json` lives).
-3. Railway auto-detects Node, runs `npm install` and `npm start`.
-4. Custom domain optional — `*.up.railway.app` works for testing.
-5. HTTPS is automatic at the edge.
+Fix per framework:
 
-Environment variables: none required for the demo. For Redis/Postgres storage, add `REDIS_URL` or `DATABASE_URL` from Railway's add-on services.
+```ts
+// Express
+app.set("trust proxy", true);
+app.use(dbsc({ storage }));
+
+// Fastify
+const fastify = Fastify({ trustProxy: true });
+await fastify.register(dbsc, { storage });
+```
+
+Hono and Next.js derive origin from the request URL directly (`url.origin`, `req.nextUrl.origin`), so they don't need an opt-in flag. The runtime gives them the correct scheme.
+
+If `/dbsc/refresh` never fires in your logs after a working `/dbsc/registration`, this is the first thing to check. Symptom looks identical to several other failure modes; trust-proxy is the cheapest fix to verify.
+
+## Render
+
+The live demo runs here. Steps:
+
+1. Connect your GitHub repo as a Web Service.
+2. Root Directory: `examples/express` (or wherever your `package.json` lives).
+3. Build command: `npm install`.
+4. Start command: `node src/server.js`.
+5. Render gives you `*.onrender.com` with HTTPS at the edge.
+
+`app.set("trust proxy", true)` is required — see the section above.
+
+For Redis/Postgres storage, add a Render Key-Value (Redis) or Postgres add-on and read `REDIS_URL` or `DATABASE_URL` from the env:
 
 ```js
-// in your server.js
 import { RedisStorage } from "dbsc-toolkit/storage/redis";
 import Redis from "ioredis";
 
 const storage = new RedisStorage(new Redis(process.env.REDIS_URL));
 ```
 
+## Railway
+
+Same workflow as Render. Create a project pointed at the repo, set Root Directory to `examples/express`, Railway auto-detects Node, runs `npm install` and `npm start`. `*.up.railway.app` works for testing or attach a custom domain. Same trust-proxy requirement applies.
+
 ## Fly.io
 
-Similar to Railway. `fly launch` from your project root. Set `internal_port = 3000` in `fly.toml` to match what `app.listen()` uses. HTTPS is automatic.
+`fly launch` from your project root. Set `internal_port = 3000` in `fly.toml` to match `app.listen()`. HTTPS automatic at the edge. Trust-proxy required.
 
-For Redis: use Fly's Upstash integration or a separate Redis instance. For Postgres: `fly postgres create` then connect via the printed `DATABASE_URL`.
-
-## Render
-
-Connect GitHub repo, select Web Service, set build command `npm install && npm run build` and start command `node src/server.js`. Same HTTPS-at-edge model.
+For Redis: Fly's Upstash integration or a separate Redis instance. For Postgres: `fly postgres create` then connect via the printed `DATABASE_URL`.
 
 ## Cloudflare Workers
 

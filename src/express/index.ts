@@ -7,6 +7,7 @@ import {
   buildRegistrationHeader,
   buildChallengeHeader,
   readSessionResponseHeader,
+  parseSessionSkippedHeader,
   REGISTRATION_HEADER,
   CHALLENGE_HEADER,
   LEGACY_REGISTRATION_HEADER,
@@ -19,6 +20,7 @@ import {
   type DbscOptions,
   type Session,
   type ProtectionTier,
+  type SkippedEntry,
 } from "../core/index.js";
 
 const cookieNames = (secure: boolean) => ({
@@ -37,6 +39,7 @@ export interface DbscExpressOptions extends DbscOptions {
 export interface DbscLocals {
   sessionId: string | null;
   tier: ProtectionTier;
+  skipped: SkippedEntry[];
   revoke: () => Promise<void>;
   requireBound: () => void;
 }
@@ -281,10 +284,12 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
     }
 
     const sessionId = req.cookies?.[COOKIES.bound] as string | undefined;
+    const skipped = parseSessionSkippedHeader(req.headers as Record<string, string | string[] | undefined>);
 
     res.locals.dbsc = {
       sessionId: sessionId ?? null,
       tier: "none",
+      skipped,
       revoke: async () => {
         if (sessionId) await storage.revokeSession(sessionId);
         res.setHeader("Set-Cookie", [

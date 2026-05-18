@@ -18,7 +18,7 @@ Open DevTools → Network → POST `/login`. Check the response:
 
 **HTTP, not HTTPS.** `__Host-` cookies require HTTPS. On `http://localhost`, Chrome silently drops them. Either:
 
-- Deploy to HTTPS (Railway, etc.)
+- Deploy to HTTPS (Render, Fly, Railway, Cloudflare Tunnel)
 - Use `local-ssl-proxy --source 3001 --target 3000`
 - Set `secure: false` in the middleware to switch to non-prefixed cookies (DBSC won't work but you can test the rest)
 
@@ -36,24 +36,73 @@ Wait for the bound cookie to expire (default 10 min, or test with shorter `bound
 
 ### Common causes
 
-**Registration response wasn't a JSON session config.** Chrome 147 requires the registration endpoint to return:
+**Reverse proxy + missing trust-proxy** (most common cause). If you deploy on Render, Fly, Railway, Heroku, Cloudflare, or any setup that terminates HTTPS at an edge, Express's `req.protocol` returns `"http"` even though the client connected over HTTPS. The library uses `req.protocol` to build `scope.origin` in the registration response, so Chrome receives `scope.origin: "http://..."` and rejects the session per spec § 8.9 step 9 (origin must be same-site with destination). No error surfaces. Fix:
+
+```ts
+app.set("trust proxy", true);          // Express
+const fastify = Fastify({ trustProxy: true });  // Fastify
+```
+
+Hono and Next.js derive origin from the runtime's request URL and don't need a flag.
+
+**Registration response shape is wrong for Chrome 147.** The endpoint must return 200 with this exact shape:
 
 ```json
 {
   "session_identifier": "...",
   "refresh_url": "/dbsc/refresh",
-  "scope": { "include_site": true },
-  "credentials": [{ "type": "cookie", "name": "__Host-dbsc-session", "attributes": "Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=600" }]
+  "scope": {
+    "origin": "https://your-app.example.com",
+    "include_site": true,
+    "scope_specification": []
+  },
+  "credentials": [{
+    "type": "cookie",
+    "name": "__Host-dbsc-session",
+    "attributes": "Path=/; Secure; HttpOnly; SameSite=Lax"
+  }]
 }
 ```
 
-A bare 204 No Content causes Chrome to silently terminate the session — registration appears to succeed (your code logs `tier=dbsc`) but no refresh ever happens. The library does this correctly; if you wrote a custom adapter, this is the most likely bug.
+Common silent-termination causes inside this body:
 
-**Cookie attributes mismatch.** The `attributes` string in `credentials[0].attributes` must match the actual `Set-Cookie` header. Chrome compares Path, Secure, HttpOnly, SameSite, and Domain. Mismatch → silent session termination. The `__Host-` prefix forces no-Domain, so make sure your `attributes` string omits Domain.
+- **`scope.origin` missing** — Chrome's canonical examples always include it; the W3C draft marks it optional but Chromium treats absence as malformed.
+- **`Max-Age` in `attributes`** — spec § 8.6 only matches Domain, Path, Secure, HttpOnly, SameSite. Max-Age is not in the match set; including it adds an unknown token Chromium's strict parser rejects. Cookie lifetime stays in the `Set-Cookie` header where it belongs.
+- **A bare 204 No Content** — kills the session immediately.
+- **`Set-Cookie` attributes don't match the JSON `attributes`** on Domain/Path/Secure/HttpOnly/SameSite. Watch out for `SameSite=lax` (lowercase) vs `SameSite=Lax` (capital); Chromium compares strictly.
+
+The library (1.2.3+) does all of this correctly. If you wrote a custom adapter, these are the spots to audit.
+
+**`Secure-Session-Challenge` missing `;id="..."` parameter.** On the refresh 403 response, the challenge header must be a Structured Fields list where each entry carries an `id` parameter naming the session it belongs to. Spec § 8.7 step 6 silently skips entries with no `id`, so Chrome accepts the 403 but drops the challenge and never sends a signed retry. The library handles this in 1.2.4+; older versions sent just `"jti"` and refresh silently died. If you build the header manually, format it as `"<jti>";id="<sessionId>"`.
 
 **Refresh path returns 401 instead of 403.** Chrome only restarts the challenge flow on 403. A 401 + `Secure-Session-Challenge` is silently ignored. The library returns 403; custom adapter code might not.
 
 **Reverse proxy stripping headers.** If you're behind nginx, Cloudflare, or another proxy, ensure `Secure-Session-Registration`, `Secure-Session-Challenge`, `Secure-Session-Response`, and `Sec-Secure-Session-Id` all pass through unchanged. Some restrictive proxy configs whitelist specific headers and drop the rest.
+
+## "Sec-Session-Skipped: quota_exceeded in request headers"
+
+Chrome sent a request to your origin without the bound credential and included a `Secure-Session-Skipped` header explaining why. Spec § 9.5 defines three reasons:
+
+- `quota_exceeded` — Chrome's anti-abuse throttle on DBSC registration attempts. Triggered by hammering registration repeatedly, typical during dev testing.
+- `unreachable` — Chrome couldn't reach your refresh endpoint.
+- `server_error` — your refresh endpoint returned 5xx.
+
+You cannot disable Chrome's quota from the server. It's a browser-side defense against fingerprinting via TPM probing. To recover during development:
+
+1. Clear site data: `chrome://settings/clearBrowserData` → time range "Last hour" → "Cookies and other site data".
+2. Stop test loops that login/logout in rapid succession — every cycle counts toward the quota.
+
+In production, real users hit a site once and stay logged in, so quota almost never trips. If you see it broadly across users, look for client-side code that re-registers on every navigation.
+
+The library exposes parsed entries on every request:
+
+```ts
+const skipped = res.locals.dbsc.skipped;  // Express
+// req.dbsc.skipped on Fastify; c.get("dbscSkipped") on Hono; getDbscSession(req, ...).skipped on Next.js
+if (skipped.some(s => s.reason === "quota_exceeded")) {
+  // serve degraded response, or step up to a different auth tier
+}
+```
 
 ## "verification_failure with reason=SIGNATURE_INVALID"
 

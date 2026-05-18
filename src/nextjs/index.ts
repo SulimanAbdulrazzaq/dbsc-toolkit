@@ -7,6 +7,7 @@ import {
   issueChallenge,
   buildRegistrationHeader,
   buildChallengeHeader,
+  parseSessionSkippedHeader,
   CHALLENGE_HEADER,
   LEGACY_CHALLENGE_HEADER,
   NoopRateLimiter,
@@ -15,6 +16,7 @@ import {
   DbscVerificationError,
   type DbscOptions,
   type ProtectionTier,
+  type SkippedEntry,
 } from "../core/index.js";
 
 const BOUND_COOKIE = "__Host-dbsc-session";
@@ -212,6 +214,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
 export interface DbscSessionInfo {
   sessionId: string | null;
   tier: ProtectionTier;
+  skipped: SkippedEntry[];
 }
 
 export async function getDbscSession(
@@ -219,17 +222,23 @@ export async function getDbscSession(
   storage: DbscOptions["storage"],
   opts: { boundCookieTtl?: number } = {},
 ): Promise<DbscSessionInfo> {
+  const skippedRaw: Record<string, string | undefined> = {
+    "secure-session-skipped": req.headers.get("secure-session-skipped") ?? undefined,
+    "sec-session-skipped": req.headers.get("sec-session-skipped") ?? undefined,
+  };
+  const skipped = parseSessionSkippedHeader(skippedRaw);
+
   const sessionId = req.cookies.get(BOUND_COOKIE)?.value ?? null;
-  if (!sessionId) return { sessionId: null, tier: "none" };
+  if (!sessionId) return { sessionId: null, tier: "none", skipped };
 
   const session = await storage.getSession(sessionId);
-  if (!session) return { sessionId: null, tier: "none" };
+  if (!session) return { sessionId: null, tier: "none", skipped };
 
   const boundCookieTtl = opts.boundCookieTtl ?? DEFAULT_BOUND_TTL * 1000;
   const staleAfter = session.lastRefreshAt + boundCookieTtl;
   if (session.tier === "dbsc" && Date.now() > staleAfter) {
-    return { sessionId, tier: "none" };
+    return { sessionId, tier: "none", skipped };
   }
 
-  return { sessionId, tier: session.tier };
+  return { sessionId, tier: session.tier, skipped };
 }

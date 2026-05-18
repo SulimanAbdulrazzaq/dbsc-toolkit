@@ -2,6 +2,20 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] — 2026-05-18
+
+### Added
+
+- **`Secure-Session-Skipped` request header parsing.** Spec § 9.5 defines this header as Chrome's way of telling the server "I sent this request without the bound credential, here's why." Three reasons are defined: `unreachable`, `server_error`, `quota_exceeded`. The library now parses the structured-fields list and exposes the entries to userland on every request — `res.locals.dbsc.skipped` on Express, `req.dbsc.skipped` on Fastify, `c.get("dbscSkipped")` on Hono, `getDbscSession(req, ...).skipped` on Next.js. New exports: `parseSessionSkippedHeader`, `SKIPPED_HEADER`, `LEGACY_SKIPPED_HEADER`, types `SkippedEntry` and `SkippedReason`.
+
+  This is read-only telemetry from the browser — your server can't override Chrome's quota — but you can react to it. The README has a worked example showing how to step down to a fallback tier when `quota_exceeded` shows up. Useful for diagnosing why a session degraded mid-flight without having to guess.
+
+### Documentation
+
+- README: live demo URL moved from Railway to <https://dbsc-toolkit.onrender.com>, and the local-testing section now warns about the reverse-proxy / `trust proxy` requirement.
+- `docs/deployment.md`: Render moved from "Untested" to verified, and a dedicated **Reverse proxy gotcha** section explains why trust-proxy is required on Render, Fly, Railway, Cloudflare, nginx, etc. — without it, `req.protocol` returns `http` and Chrome silently terminates the DBSC session on the spec § 8.9 scheme check.
+- `docs/troubleshooting.md`: rewritten "Chrome registers but never refreshes" entry with the corrected registration response shape (no `Max-Age` in `attributes`, `scope.origin` populated, `scope_specification: []`), added the `;id="..."` requirement on `Secure-Session-Challenge` per § 8.7 step 6, and added a new "Sec-Session-Skipped: quota_exceeded" section explaining what to do when Chrome's anti-abuse throttle trips during dev testing.
+
 ## [1.2.4] — 2026-05-17
 
 ### Fixed

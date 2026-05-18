@@ -13,9 +13,11 @@ Chrome 147+ supports DBSC natively. This library handles the server side. Verifi
 
 ## Live demo
 
-Try it: <https://dbsctest-production.up.railway.app/>
+Try it: <https://dbsc-toolkit.onrender.com/>
 
-Open in Chrome 147+, click **Login**, then **Check session** — `tier` reads `"dbsc"` once the TPM key is bound. Use **Clear cookies** to reset and replay the flow. Source in [examples/express/](./examples/express/).
+Open in Chrome 147+, click **Login**, then **Check session** — `tier` reads `"dbsc"` once the TPM key is bound. The demo uses a 60-second bound-cookie TTL so refresh kicks in fast — watch DevTools Network for the automatic `POST /dbsc/refresh` after the cookie expires. Use **Clear cookies** to reset and replay the flow. Source in [examples/express/](./examples/express/).
+
+> Heads up: the demo runs on in-memory storage. Render restarts wipe sessions, so if "Check session" returns `not authenticated` after a while, the instance probably restarted — click **Login** again.
 
 ## Install
 
@@ -126,8 +128,10 @@ See [docs/security/best-practices.md](./docs/security/best-practices.md) for the
 
 You need HTTPS — `__Host-` cookies require it and Chrome rejects DBSC on plain HTTP. Two options:
 
-- Deploy somewhere that gives you HTTPS (Railway, Fly, Render, Cloudflare Tunnel). Easiest path. We tested against Railway successfully.
+- Deploy somewhere that gives you HTTPS (Render, Fly, Railway, Cloudflare Tunnel). Easiest path. The live demo above runs on Render.
 - Run `local-ssl-proxy --source 3001 --target 3000` in front of your local server.
+
+If you deploy behind any reverse proxy (Render, Fly, Cloudflare, nginx), call `app.set("trust proxy", true)` in Express before mounting the DBSC middleware. Without it, `req.protocol` returns `http` even when the client connected over HTTPS, so the `scope.origin` in the registration response goes out with the wrong scheme and Chrome silently terminates the session. Fastify needs `Fastify({ trustProxy: true })`; Hono and Next.js derive origin from the request URL directly and don't need any flag.
 
 A working demo is in [examples/express/](./examples/express/).
 
@@ -214,6 +218,24 @@ app.use(dbsc({
 ```
 
 Event types: `registration`, `refresh`, `verification_failure`, `session_stolen`, `fallback_tier`.
+
+## Skipped sessions
+
+Chrome may send a request without the bound credential and tell you why via the `Secure-Session-Skipped` header. The library parses it and exposes the entries on the request:
+
+```ts
+app.get("/payment", (req, res) => {
+  const skipped = res.locals.dbsc.skipped;
+  if (skipped.some(s => s.reason === "quota_exceeded")) {
+    // Chrome throttled DBSC registrations for this site, briefly
+    // unsafe to assume the binding is fresh — fall back or step up
+    return res.status(503).json({ error: "session binding temporarily unavailable" });
+  }
+  // ...
+});
+```
+
+Reasons defined by the spec: `unreachable` (couldn't reach the refresh endpoint), `server_error` (refresh got a 5xx), `quota_exceeded` (browser's anti-abuse throttle). These are diagnostics from Chrome — your server cannot disable them, but it can react to them.
 
 ## Header naming
 
