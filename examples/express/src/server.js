@@ -99,30 +99,80 @@ ${banner}
 <button id="clear">Clear cookies</button>
 <pre id="out"></pre>
 <script>
-async function req(method, path, body) {
-  const r = await fetch(path, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-    credentials: 'include',
-  });
-  return r.json().catch(() => r.status);
+const DBSC_HEADERS = [
+  'secure-session-registration',
+  'sec-session-registration',
+  'secure-session-challenge',
+  'sec-session-challenge',
+  'secure-session-skipped',
+  'sec-session-skipped',
+  'content-type',
+];
+
+function ts() {
+  const d = new Date();
+  return d.toISOString().slice(11, 23);
 }
+
+function visibleCookies() {
+  // document.cookie does not expose HttpOnly cookies (which __Host-dbsc-* are).
+  // This is mainly to show what JS *can* see, vs what the server gets.
+  return document.cookie || '(none visible to JS — __Host-dbsc-* are HttpOnly)';
+}
+
+async function req(method, path, body) {
+  const t0 = performance.now();
+  console.groupCollapsed('%c[' + ts() + '] -> ' + method + ' ' + path, 'color:#0a7');
+  console.log('cookies visible to JS:', visibleCookies());
+  if (body) console.log('body:', body);
+  try {
+    const r = await fetch(path, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+      credentials: 'include',
+    });
+    const dt = (performance.now() - t0).toFixed(0);
+    const headers = {};
+    for (const name of DBSC_HEADERS) {
+      const v = r.headers.get(name);
+      if (v) headers[name] = v;
+    }
+    console.log('status:', r.status, r.statusText, '(' + dt + 'ms)');
+    if (Object.keys(headers).length) console.log('dbsc headers:', headers);
+    else console.log('dbsc headers: (none)');
+    const text = await r.text();
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { parsed = text; }
+    console.log('body:', parsed);
+    console.log('cookies after response:', visibleCookies());
+    console.groupEnd();
+    return { status: r.status, body: parsed };
+  } catch (err) {
+    console.error('fetch failed:', err);
+    console.groupEnd();
+    return { status: 0, body: { error: String(err) } };
+  }
+}
+
+function show(result) {
+  document.getElementById('out').textContent = JSON.stringify(result, null, 2);
+}
+
+console.log('%c[dbsc-demo] open this console — every action logs its request, status, dbsc-related headers, and response body here.', 'font-weight:bold');
+console.log('%cThe __Host-dbsc-* cookies are HttpOnly, so they will NOT appear in document.cookie. Open DevTools -> Application -> Cookies to see them. Watch the Network tab for automatic POST /dbsc/registration and POST /dbsc/refresh that Chrome makes on its own.', 'color:#666');
+
 document.getElementById('login').onclick = async () => {
-  const res = await req('POST', '/login', { username: 'alice' });
-  document.getElementById('out').textContent = JSON.stringify(res, null, 2);
+  show(await req('POST', '/login', { username: 'alice' }));
 };
 document.getElementById('logout').onclick = async () => {
-  const res = await req('POST', '/logout');
-  document.getElementById('out').textContent = JSON.stringify(res, null, 2);
+  show(await req('POST', '/logout'));
 };
 document.getElementById('me').onclick = async () => {
-  const res = await req('GET', '/me');
-  document.getElementById('out').textContent = JSON.stringify(res, null, 2);
+  show(await req('GET', '/me'));
 };
 document.getElementById('clear').onclick = async () => {
-  const res = await req('POST', '/clear-cookies');
-  document.getElementById('out').textContent = JSON.stringify(res, null, 2);
+  show(await req('POST', '/clear-cookies'));
 };
 </script>
 </body>
