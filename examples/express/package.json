@@ -9,6 +9,7 @@
   "dependencies": {
     "cookie-parser": "^1.4.6",
     "dbsc-toolkit": "^1.5.0",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "ioredis": "^5.4.1"
   }
 }
