@@ -207,7 +207,7 @@ The library stores three things per session:
 
 Three storage adapters ship:
 
-- **`MemoryStorage`** — Map-based, in-process, wiped on restart. Dev only. If you deploy to Render free tier or any serverless platform that spins down, you will lose all sessions and every browser with an old `__Host-dbsc-session` cookie will hit `KEY_NOT_FOUND` on refresh and loop registration.
+- **`MemoryStorage`** — Map-based, in-process, wiped on restart. Dev only. If you deploy to Render free tier or any serverless platform that spins down, you will lose all sessions and every browser with an old `__Host-dbsc-session` cookie will hit `KEY_NOT_FOUND` on refresh and loop registration. The live demo previously tripped on exactly this — it now runs on `RedisStorage` (Upstash free tier) and the loop disappears.
 - **`RedisStorage`** — uses `ioredis`. Atomic challenge consume via a small Lua script. Production-ready. Works across instances; survives restarts.
 - **`PostgresStorage`** — uses `pg`. Migrations included. Atomic challenge consume via row-level locking. Same production properties as Redis, just more familiar if your stack is already Postgres-heavy.
 
@@ -248,7 +248,7 @@ The other three (`registration`, `refresh`, `fallback_tier`) are useful for metr
 
 **Rate limiting.** A `RateLimiter` interface is exposed; the default `NoopRateLimiter` does nothing. Wire a real one in production — registration and refresh routes are unauthenticated by design (the cookie hasn't been bound yet on registration; on refresh the cookie has just expired). Without rate limiting these are attack surface.
 
-**Render free tier.** Spins down after ~15 min of inactivity. Cold start wipes `MemoryStorage`. Browsers with old `__Host-dbsc-session` cookies hit `KEY_NOT_FOUND` and the demo enters a registration loop. This is *the* most common "why isn't my demo working?" — switch to Redis (Upstash has a free tier) and the problem disappears.
+**Render free tier.** Spins down after ~15 min of inactivity. Cold start wipes `MemoryStorage`. Browsers with old `__Host-dbsc-session` cookies hit `KEY_NOT_FOUND` and the demo enters a registration loop. This is *the* most common "why isn't my demo working?" — switch to Redis (Upstash has a free tier; just set `REDIS_URL` and the example server picks it up automatically) and the problem disappears.
 
 **Render / Fly cold starts in general.** Even with Redis, very cold starts can mean the first request after deploy takes a few seconds. Browsers timing out on `/dbsc/refresh` get a `Secure-Session-Skipped: unreachable` on the next request — diagnostic only, your code can read it from `res.locals.dbsc.skipped` if you want to react.
 
@@ -260,7 +260,7 @@ The other three (`registration`, `refresh`, `fallback_tier`) are useful for metr
 Either (a) the browser doesn't support DBSC, (b) the bound cookie hasn't been set yet because registration hasn't completed, or (c) you forgot to wire `bindSession()` into your login route. Open DevTools → Network after clicking Login. If you don't see a `POST /dbsc/registration` request fire on its own within a second, the registration header isn't reaching the browser — check `bindSession()` is being called and isn't throwing.
 
 **Why does `/me` say not-authenticated right after a successful login?**
-Almost always: `MemoryStorage` got wiped by a server restart while the browser still had an old `__Host-dbsc-session` cookie referring to a session that no longer exists. Click "Clear cookies" in the demo, then Login. For production, use Redis or Postgres.
+Almost always: `MemoryStorage` got wiped by a server restart while the browser still had an old `__Host-dbsc-session` cookie referring to a session that no longer exists. Click "Clear cookies" in the demo, then Login. For production — or for any deployment that ever restarts (Render free tier, serverless, autoscaling) — use Redis or Postgres. The live demo runs on Redis specifically for this reason.
 
 **Why does Chrome keep looping registration?**
 The bound key in storage doesn't match what the browser is sending. Usually because storage was wiped between registration and the first refresh. `MemoryStorage` + Render cold start is the classic. Switch to persistent storage.

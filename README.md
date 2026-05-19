@@ -19,7 +19,7 @@ Try it: <https://dbsc-toolkit.onrender.com/>
 
 Open in any Chromium-based browser version 145+ (Chrome, Edge, Brave, Opera), click **Login**, then **Check session** — `tier` reads `"dbsc"` once the hardware-backed key is bound. The demo uses a 60-second bound-cookie TTL so refresh kicks in fast — watch DevTools Network for the automatic `POST /dbsc/refresh` after the cookie expires. Use **Clear cookies** to reset and replay the flow. Source in [examples/express/](./examples/express/).
 
-> Heads up: the demo runs on in-memory storage. Render restarts wipe sessions, so if "Check session" returns `not authenticated` after a while, the instance probably restarted — click **Login** again.
+The demo now runs on `RedisStorage` (Upstash) by default, so sessions survive deploys, cold starts, and laptop reboots. If you clone the demo and run it locally without a `REDIS_URL` environment variable, it falls back to `MemoryStorage` automatically — fine for one terminal session, wiped on every restart.
 
 ## Install
 
