@@ -1,7 +1,30 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// dbsc-toolkit demo
+//
+// This file is structured in two halves so a new reader can see exactly what
+// DBSC adds on top of a normal Express auth flow.
+//
+//   PART 1 — "what most apps already have":
+//     signup, login, logout, session cookie, in-memory user store, bcrypt
+//     password hashing, express-session. Nothing DBSC-specific.
+//
+//   PART 2 — "what DBSC adds on top":
+//     mount dbsc middleware, call bindSession() at the end of /login,
+//     gate /profile on tier === "dbsc". Three small additions to an
+//     otherwise-normal app.
+//
+// The diagnostic infrastructure (SSE log stream, request/response logging,
+// HTML alert banners) is here only to make the demo visible — it is not
+// something a real app needs.
+// ─────────────────────────────────────────────────────────────────────────────
+
 import express from "express";
 import cookieParser from "cookie-parser";
-import { randomUUID } from "node:crypto";
+import session from "express-session";
+import bcrypt from "bcryptjs";
+import { randomBytes } from "node:crypto";
 import Redis from "ioredis";
+
 import { dbsc, bindSession } from "dbsc-toolkit/express";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 import { RedisStorage } from "dbsc-toolkit/storage/redis";
@@ -9,9 +32,9 @@ import { RedisStorage } from "dbsc-toolkit/storage/redis";
 const app = express();
 app.set("trust proxy", true);
 
-const storage = process.env.REDIS_URL
-  ? new RedisStorage(new Redis(process.env.REDIS_URL))
-  : new MemoryStorage();
+// ─────────────────────────────────────────────────────────────────────────────
+// Diagnostic log stream (for the demo UI only, not part of the auth story)
+// ─────────────────────────────────────────────────────────────────────────────
 
 const LOG_BUFFER_MAX = 200;
 const logBuffer = [];
@@ -25,11 +48,9 @@ function emitLog(entry) {
   console.log(serialized);
   const frame = `data: ${serialized}\n\n`;
   for (const res of sseClients) {
-    try { res.write(frame); } catch { /* client gone, next ping cleans it up */ }
+    try { res.write(frame); } catch { /* client gone */ }
   }
 }
-
-emitLog({ t: "boot", storage: process.env.REDIS_URL ? "redis" : "memory" });
 
 app.get("/debug-logs/stream", (req, res) => {
   res.writeHead(200, {
@@ -52,210 +73,354 @@ app.get("/debug-logs/stream", (req, res) => {
   });
 });
 
+// ═════════════════════════════════════════════════════════════════════════════
+// PART 1 — "what most apps already have"
+// Everything below this block is the kind of code you'd find in a normal
+// Express app with signup / login / sessions. No DBSC here yet.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// In-memory user store. In a real app this would be Postgres / Mongo / etc.
+// Shape: { username -> { id, username, passwordHash } }
+const users = new Map();
+
 app.use(cookieParser());
-app.use("/dbsc/registration", express.text({ type: "*/*", limit: "100kb" }));
-app.use("/dbsc/refresh", express.text({ type: "*/*", limit: "100kb" }));
 app.use(express.json());
 
+// Standard server-side session cookie. Cookie name: "connect.sid".
+// This is the user's identity cookie — exactly like Reddit, Discourse,
+// Express-session-based apps, NextAuth-with-database, etc.
+app.use(
+  session({
+    name: "demo.sid",
+    secret: process.env.SESSION_SECRET ?? randomBytes(32).toString("hex"),
+    resave: false,
+    saveUninitialized: false,
+    rolling: true,
+    cookie: {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      maxAge: 24 * 60 * 60 * 1000,
+    },
+  }),
+);
+
+// Body parsers for DBSC's two automatic routes. Required because Chrome posts
+// the JWS as a raw text body under various content types.
+app.use("/dbsc/registration", express.text({ type: "*/*", limit: "100kb" }));
+app.use("/dbsc/refresh", express.text({ type: "*/*", limit: "100kb" }));
+
+// Request/response logger (diagnostic — not part of the auth story).
 app.use((req, res, next) => {
   if (req.path === "/debug-logs/stream") return next();
   const start = Date.now();
   const cookies = Object.keys(req.cookies ?? {});
-  const dbscCookies = cookies.filter((n) => n.includes("dbsc"));
+  const interestingCookies = cookies.filter((n) => n.includes("dbsc") || n === "demo.sid");
   const hdr = req.headers;
   const interesting = {
     "sec-secure-session-id": hdr["sec-secure-session-id"],
     "secure-session-response": hdr["secure-session-response"] ? "<present>" : undefined,
-    "sec-session-response": hdr["sec-session-response"] ? "<present>" : undefined,
     "secure-session-skipped": hdr["secure-session-skipped"],
-    "sec-session-skipped": hdr["sec-session-skipped"],
   };
   for (const k of Object.keys(interesting)) if (interesting[k] === undefined) delete interesting[k];
   emitLog({
     t: "req",
     method: req.method,
     path: req.path,
-    dbscCookies,
+    cookies: interestingCookies,
     headers: Object.keys(interesting).length ? interesting : undefined,
   });
   res.on("finish", () => {
-    emitLog({
-      t: "res",
-      method: req.method,
-      path: req.path,
-      status: res.statusCode,
-      ms: Date.now() - start,
-    });
+    emitLog({ t: "res", method: req.method, path: req.path, status: res.statusCode, ms: Date.now() - start });
   });
   next();
 });
 
+// ─── signup ───
+app.post("/signup", async (req, res) => {
+  const { username, password } = req.body ?? {};
+  if (!username || !password) {
+    return res.status(400).json({ error: "username and password required" });
+  }
+  if (users.has(username)) {
+    return res.status(409).json({ error: "username already taken" });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ error: "password too short (min 6 chars)" });
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const id = randomBytes(8).toString("hex");
+  users.set(username, { id, username, passwordHash });
+
+  // Optional: auto-login on signup. Most apps do this.
+  req.session.userId = id;
+  req.session.username = username;
+
+  emitLog({ t: "signup", username, userId: id });
+  res.json({ ok: true, username });
+});
+
+// ─── logout (define BEFORE login so we can reuse the same handler later) ───
+async function destroyAppSession(req, res) {
+  await new Promise((resolve) => req.session.destroy(() => resolve()));
+  res.clearCookie("demo.sid");
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PART 2 — "what DBSC adds on top"
+//
+// Three additions:
+//   (1) mount the dbsc middleware (one line)
+//   (2) call bindSession() at the end of /login (one line)
+//   (3) gate sensitive routes on tier === "dbsc" (one if-statement)
+//
+// Everything else stays the same. Your password check, your session cookie,
+// your user store — all unchanged.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const dbscStorage = process.env.REDIS_URL
+  ? new RedisStorage(new Redis(process.env.REDIS_URL))
+  : new MemoryStorage();
+
+emitLog({ t: "boot", storage: process.env.REDIS_URL ? "redis" : "memory" });
+
+// Addition (1) — mount the middleware.
+// This makes POST /dbsc/registration + POST /dbsc/refresh exist automatically,
+// and decorates every request with res.locals.dbsc = { sessionId, tier, ... }.
 app.use(
   dbsc({
-    storage,
-    boundCookieTtl: 60 * 1000,
-    onEvent: (event) => {
-      emitLog({ t: "dbsc-event", ...event });
-    },
+    storage: dbscStorage,
+    boundCookieTtl: 60 * 1000,  // 60s so demo viewers see refresh fire quickly
+    onEvent: (event) => emitLog({ t: "dbsc-event", ...event }),
   }),
 );
 
+// ─── login ───
+// Exactly what a normal Express+bcrypt+session login looks like, PLUS the one
+// extra bindSession() line at the end.
 app.post("/login", async (req, res) => {
-  const { username } = req.body;
-  if (!username) {
-    res.status(400).json({ error: "username required" });
-    return;
+  const { username, password } = req.body ?? {};
+  if (!username || !password) {
+    return res.status(400).json({ error: "username and password required" });
   }
 
-  const sessionId = randomUUID();
-  await bindSession(res, sessionId, storage, { userId: username });
-  res.json({ ok: true });
+  const user = users.get(username);
+  if (!user) {
+    return res.status(401).json({ error: "invalid credentials" });
+  }
+
+  const ok = await bcrypt.compare(password, user.passwordHash);
+  if (!ok) {
+    return res.status(401).json({ error: "invalid credentials" });
+  }
+
+  req.session.userId = user.id;
+  req.session.username = user.username;
+
+  // Addition (2) — one line. Tells the browser to start the DBSC binding.
+  // Uses the same session id as express-session, so DBSC and your app stay
+  // in sync without a second id-space to manage.
+  await bindSession(res, req.session.id, dbscStorage, { userId: user.id });
+
+  emitLog({ t: "login", username, userId: user.id, appSessionId: req.session.id });
+  res.json({ ok: true, username: user.username });
 });
 
-app.post("/logout", async (_req, res) => {
+// ─── logout ───
+app.post("/logout", async (req, res) => {
+  // Tear down the DBSC binding on the server + clear its cookie.
   await res.locals.dbsc.revoke();
+  // Tear down your normal app session.
+  await destroyAppSession(req, res);
   res.json({ ok: true });
 });
 
-app.post("/clear-cookies", (req, res) => {
-  const names = Object.keys(req.cookies ?? {});
-  for (const name of names) {
-    res.clearCookie(name, {
-      path: "/",
-      secure: true,
-      httpOnly: true,
-      sameSite: "lax",
-    });
+// ─── /me — basic "am I logged in" check (does NOT require DBSC) ───
+// This works for any logged-in user, including Firefox / Safari users that
+// don't support DBSC. Tier will read "none" for them.
+app.get("/me", (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: "not logged in", reason: "no app session" });
   }
-  res.json({ ok: true, cleared: names });
+  res.json({
+    username: req.session.username,
+    appSessionId: req.session.id,
+    dbsc: {
+      sessionId: res.locals.dbsc.sessionId,
+      tier: res.locals.dbsc.tier,
+      skipped: res.locals.dbsc.skipped,
+    },
+  });
 });
 
-app.get("/me", (_req, res) => {
-  const { sessionId, tier, skipped } = res.locals.dbsc;
-  const quotaHit = skipped.some((s) => s.reason === "quota_exceeded");
-
-  if (!sessionId) {
-    const reason = quotaHit
-      ? "Chrome refused to register the session because its DBSC quota for this origin is exhausted. This happens during dev/test cycles that login + logout repeatedly. Clear site data in chrome://settings/clearBrowserData (Last hour → Cookies and site data) or open an Incognito window to reset the quota."
-      : "no bound cookie present — click Login first";
-    res.status(401).json({
-      error: "not authenticated",
-      reason,
-      skipped,
-    });
-    return;
+// Addition (3) — gate for high-value routes.
+// Reusable middleware. Refuse unless DBSC binding is active and fresh.
+function requireDbsc(req, res, next) {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: "not logged in" });
   }
-  res.json({ sessionId, tier, skipped });
+  if (res.locals.dbsc.tier !== "dbsc") {
+    const quotaHit = res.locals.dbsc.skipped.some((s) => s.reason === "quota_exceeded");
+    return res.status(403).json({
+      error: "hardware-bound session required for this route",
+      currentTier: res.locals.dbsc.tier,
+      reason: quotaHit
+        ? "Chrome's DBSC quota is exhausted for this origin (typical during dev login/logout loops). Clear site data or use Incognito to reset."
+        : "your browser has not completed DBSC registration. Use Chromium 145+ (Chrome / Edge / Brave / Opera). Firefox and Safari cannot reach tier=dbsc.",
+      skipped: res.locals.dbsc.skipped,
+    });
+  }
+  next();
+}
+
+// ─── /profile — the protected route ───
+// Only accessible when DBSC tier is "dbsc". This is the pattern you'd use for
+// payment routes, account-settings routes, admin pages, etc.
+app.get("/profile", requireDbsc, (req, res) => {
+  res.json({
+    username: req.session.username,
+    email: `${req.session.username}@example.com`,
+    plan: "demo",
+    securityLevel: "hardware-bound (DBSC)",
+    note: "This route is only reachable when tier === 'dbsc'. A stolen cookie replayed from a different device would see tier='none' and a 403 here.",
+  });
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// HTML UI — signup/login forms + dashboard
+// ═════════════════════════════════════════════════════════════════════════════
 
 app.get("/", (_req, res) => {
   const usingRedis = !!process.env.REDIS_URL;
-  const banner = usingRedis
-    ? `<div class="banner ok"><strong>Storage:</strong> Redis (Upstash). Sessions survive deploys and restarts. Bound-cookie TTL is 60 seconds so refresh kicks in fast &mdash; watch DevTools Network for the automatic <code>POST /dbsc/refresh</code> after the cookie expires.</div>`
-    : `<div class="banner"><strong>Heads up:</strong> this demo is running on in-memory storage. Sessions are wiped on every deploy or server restart. If "Check session" returns <code>not authenticated</code> after a while, the server probably restarted &mdash; click <strong>Login</strong> again. Set <code>REDIS_URL</code> to switch to <code>RedisStorage</code>.</div>`;
-  res.send(`
-<!doctype html>
+  const storageBanner = usingRedis
+    ? `<div class="banner ok"><strong>Storage:</strong> Redis (Upstash). Sessions survive restarts. Bound-cookie TTL is 60s so refresh kicks in fast.</div>`
+    : `<div class="banner"><strong>Heads up:</strong> running on in-memory storage. Set <code>REDIS_URL</code> for persistence.</div>`;
+
+  res.send(`<!doctype html>
 <html>
 <head>
-<title>DBSC Demo</title>
+<title>DBSC Demo — realistic app</title>
 <style>
-  body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
-  .banner { background: #fff3cd; border: 1px solid #ffe28a; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.9rem; color: #5b4400; }
-  .banner.ok { background: #e6f4ea; border-color: #b6e0c2; color: #1e4023; }
-  .banner.alert { background: #fde2e1; border-color: #f5b1ae; color: #7a1b16; }
-  button { margin-right: 0.5rem; margin-bottom: 0.5rem; padding: 0.5rem 1rem; }
-  pre { background: #f4f4f4; padding: 1rem; border-radius: 6px; overflow-x: auto; }
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { margin-bottom: 0.25rem; }
+  h2 { margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.25rem; }
+  .sub { color: #666; font-size: 0.9rem; }
+  .banner { padding: 0.75rem 1rem; border-radius: 6px; margin: 0.75rem 0; font-size: 0.9rem; }
+  .banner { background: #fff3cd; border: 1px solid #ffe28a; color: #5b4400; }
+  .banner.ok { background: #e6f4ea; border: 1px solid #b6e0c2; color: #1e4023; }
+  .banner.alert { background: #fde2e1; border: 1px solid #f5b1ae; color: #7a1b16; }
+  form { margin: 0.5rem 0 1rem; }
+  input[type=text], input[type=password] { padding: 0.4rem; margin-right: 0.5rem; font-size: 1rem; }
+  button { margin-right: 0.5rem; margin-bottom: 0.5rem; padding: 0.5rem 1rem; font-size: 0.95rem; cursor: pointer; }
+  button.protected { background: #2b3a55; color: white; border: none; border-radius: 4px; }
+  pre { background: #f4f4f4; padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; }
+  .label { font-weight: 600; color: #444; }
 </style>
 </head>
 <body>
-<h1>DBSC Toolkit Demo</h1>
-${banner}
-<button id="login">Login</button>
-<button id="logout">Logout</button>
-<button id="me">Check session</button>
-<button id="clear">Clear cookies</button>
+<h1>DBSC Demo</h1>
+<p class="sub">Realistic Express app — signup, login, sessions, and one route gated on hardware-bound DBSC.</p>
+
+${storageBanner}
+
+<h2>1. Sign up or log in</h2>
+<p class="sub">Standard username + password. Hashed with bcrypt. Sets a normal <code>demo.sid</code> session cookie.</p>
+<form id="auth-form" onsubmit="return false">
+  <input type="text" id="username" placeholder="username" autocomplete="username" required>
+  <input type="password" id="password" placeholder="password (min 6)" autocomplete="current-password" required>
+  <button id="signup-btn">Sign up</button>
+  <button id="login-btn">Log in</button>
+  <button id="logout-btn">Log out</button>
+</form>
+
+<h2>2. Check session</h2>
+<p class="sub"><code>/me</code> works for any logged-in user (does NOT require DBSC). Shows your app session id + the DBSC tier the browser reached.</p>
+<button id="me-btn">Check session (no DBSC required)</button>
+
+<h2>3. Protected route — DBSC required</h2>
+<p class="sub"><code>/profile</code> is gated on <code>tier === "dbsc"</code>. Only reachable from a Chromium 145+ browser after registration completes. Firefox / Safari / pre-registration requests get a 403.</p>
+<button id="profile-btn" class="protected">Get profile (requires tier=dbsc)</button>
+
 <div id="alert" class="banner alert" style="display:none"></div>
-<pre id="out"></pre>
+<pre id="out">(output will appear here)</pre>
+
+<h2>What the server is doing</h2>
+<p class="sub">Open DevTools console for full request/response logs. Live server log stream below mirrors every request.</p>
+
 <script>
-const DBSC_HEADERS = [
-  'secure-session-registration',
-  'sec-session-registration',
-  'secure-session-challenge',
-  'sec-session-challenge',
-  'secure-session-skipped',
-  'sec-session-skipped',
-  'content-type',
-];
-
-function ts() {
-  const d = new Date();
-  return d.toISOString().slice(11, 23);
-}
-
-function visibleCookies() {
-  // document.cookie does not expose HttpOnly cookies (which __Host-dbsc-* are).
-  // This is mainly to show what JS *can* see, vs what the server gets.
-  return document.cookie || '(none visible to JS — __Host-dbsc-* are HttpOnly)';
-}
-
-async function req(method, path, body) {
-  const t0 = performance.now();
-  console.groupCollapsed('%c[' + ts() + '] -> ' + method + ' ' + path, 'color:#0a7');
-  console.log('cookies visible to JS:', visibleCookies());
-  if (body) console.log('body:', body);
-  try {
-    const r = await fetch(path, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
-      credentials: 'include',
-    });
-    const dt = (performance.now() - t0).toFixed(0);
-    const headers = {};
-    for (const name of DBSC_HEADERS) {
-      const v = r.headers.get(name);
-      if (v) headers[name] = v;
-    }
-    console.log('status:', r.status, r.statusText, '(' + dt + 'ms)');
-    if (Object.keys(headers).length) console.log('dbsc headers:', headers);
-    else console.log('dbsc headers: (none)');
-    const text = await r.text();
-    let parsed;
-    try { parsed = JSON.parse(text); } catch { parsed = text; }
-    console.log('body:', parsed);
-    console.log('cookies after response:', visibleCookies());
-    console.groupEnd();
-    return { status: r.status, body: parsed };
-  } catch (err) {
-    console.error('fetch failed:', err);
-    console.groupEnd();
-    return { status: 0, body: { error: String(err) } };
-  }
-}
+const SKIP_REASON_MESSAGES = {
+  quota_exceeded: '<strong>Chrome quota exhausted for this origin.</strong> Too many DBSC attempts in a short time (login/logout loops). Recover: <code>chrome://settings/clearBrowserData</code> &rarr; Last hour &rarr; Cookies and site data, or Incognito window.',
+  unreachable: '<strong>Chrome could not reach the refresh endpoint.</strong> Network drop. Will retry.',
+  server_error: '<strong>Refresh endpoint returned 5xx.</strong> Check server logs.',
+};
 
 function show(result) {
   document.getElementById('out').textContent = JSON.stringify(result, null, 2);
-
   const alertEl = document.getElementById('alert');
   alertEl.style.display = 'none';
   alertEl.innerHTML = '';
 
-  const skipped = result && result.body && result.body.skipped;
+  const body = result && result.body;
+  const skipped = body && (body.skipped || (body.dbsc && body.dbsc.skipped));
   if (Array.isArray(skipped) && skipped.length) {
-    const reasons = skipped.map((s) => s.reason);
-    const messages = {
-      quota_exceeded: '<strong>Chrome quota exhausted for this origin.</strong> The browser refused to register or refresh the DBSC session because too many attempts happened in a short time (typical during dev testing — login/logout loops). To recover: <code>chrome://settings/clearBrowserData</code> &rarr; Last hour &rarr; Cookies and site data &rarr; clear. Or open an Incognito window. In production this almost never trips because real users log in once and stay logged in.',
-      unreachable: '<strong>Chrome could not reach the refresh endpoint.</strong> Network drop or server outage. Will retry automatically.',
-      server_error: '<strong>Refresh endpoint returned 5xx.</strong> Server-side error during refresh. Check server logs.',
-    };
-    alertEl.innerHTML = reasons.map((r) => messages[r] || ('Unknown skip reason: ' + r)).join('<br><br>');
+    alertEl.innerHTML = skipped
+      .map((s) => SKIP_REASON_MESSAGES[s.reason] || ('Unknown skip reason: ' + s.reason))
+      .join('<br><br>');
     alertEl.style.display = 'block';
   }
 }
 
-console.log('%c[dbsc-demo] open this console — every action logs its request, status, dbsc-related headers, and response body here.', 'font-weight:bold');
-console.log('%cThe __Host-dbsc-* cookies are HttpOnly, so they will NOT appear in document.cookie. Open DevTools -> Application -> Cookies to see them. Watch the Network tab for automatic POST /dbsc/registration and POST /dbsc/refresh that Chrome makes on its own.', 'color:#666');
+async function req(method, path, body) {
+  const t0 = performance.now();
+  console.groupCollapsed('%c-> ' + method + ' ' + path, 'color:#0a7');
+  if (body) console.log('body:', body);
+  try {
+    const r = await fetch(path, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+      credentials: 'include',
+    });
+    const dt = (performance.now() - t0).toFixed(0);
+    console.log('status:', r.status, '(' + dt + 'ms)');
+    const text = await r.text();
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { parsed = text; }
+    console.log('body:', parsed);
+    console.groupEnd();
+    return { method, path, status: r.status, body: parsed };
+  } catch (err) {
+    console.error('fetch failed:', err);
+    console.groupEnd();
+    return { method, path, status: 0, body: { error: String(err) } };
+  }
+}
 
+function creds() {
+  return {
+    username: document.getElementById('username').value.trim(),
+    password: document.getElementById('password').value,
+  };
+}
+
+document.getElementById('signup-btn').onclick = async () => {
+  show(await req('POST', '/signup', creds()));
+};
+document.getElementById('login-btn').onclick = async () => {
+  show(await req('POST', '/login', creds()));
+};
+document.getElementById('logout-btn').onclick = async () => {
+  show(await req('POST', '/logout'));
+};
+document.getElementById('me-btn').onclick = async () => {
+  show(await req('GET', '/me'));
+};
+document.getElementById('profile-btn').onclick = async () => {
+  show(await req('GET', '/profile'));
+};
+
+// Live server log stream
 (function streamServerLogs() {
   let es;
   function connect() {
@@ -270,36 +435,21 @@ console.log('%cThe __Host-dbsc-* cookies are HttpOnly, so they will NOT appear i
       let line;
       try { line = JSON.parse(e.data); } catch { console.log('[server]', e.data); return; }
       const tag = line.t || 'log';
-      const head = '%c[server ' + line.ts.slice(11, 23) + '] ' + tag;
       let color = '#06c';
       if (tag === 'dbsc-event') color = '#a06';
       else if (tag === 'res' && line.status >= 400) color = '#c33';
       else if (tag === 'res') color = '#393';
-      else if (tag === 'boot') color = '#666';
+      else if (tag === 'boot' || tag === 'signup' || tag === 'login') color = '#666';
       const rest = Object.assign({}, line);
       delete rest.t; delete rest.ts;
-      console.log(head, 'color:' + color + ';font-weight:bold', rest);
+      console.log('%c[server ' + line.ts.slice(11, 23) + '] ' + tag, 'color:' + color + ';font-weight:bold', rest);
     };
   }
   connect();
 })();
-
-document.getElementById('login').onclick = async () => {
-  show(await req('POST', '/login', { username: 'alice' }));
-};
-document.getElementById('logout').onclick = async () => {
-  show(await req('POST', '/logout'));
-};
-document.getElementById('me').onclick = async () => {
-  show(await req('GET', '/me'));
-};
-document.getElementById('clear').onclick = async () => {
-  show(await req('POST', '/clear-cookies'));
-};
 </script>
 </body>
-</html>
-  `);
+</html>`);
 });
 
 const PORT = process.env.PORT ?? 3000;
