@@ -105,7 +105,9 @@ T+10min..T+20min   Normal browsing again. Same cycle repeats every 10 minutes
                    until the user logs out or the session expires.
 ```
 
-A couple of subtleties worth burning into memory:
+One gotcha that catches almost every first-time integrator: **registration is asynchronous**. The login response returns instantly, but the browser's `POST /dbsc/registration` runs in the background — TPM key generation plus a network round-trip — and lands anywhere from 300 ms to a couple of seconds later. If your page immediately calls a route that gates on `tier === "dbsc"`, the check may run *before* the bound cookie is set and report `tier: "none"` on a fully supported browser. Two clean fixes: a tiny status indicator that polls `/me` for a few seconds after login until tier flips off `"none"`, or a one-shot auto-retry on the first tier-gated request after login. The live demo uses both; see `pollDbscReady` in `examples/express/src/server.js`. Anything past the first second is unaffected.
+
+A couple more subtleties worth burning into memory:
 
 - **The refresh route returns 403, not 401, when proof is missing.** Chromium only restarts the challenge flow on `403`. A `401` is silently ignored. We learned this the hard way.
 - **The session ID on refresh arrives in the `Sec-Secure-Session-Id` header — both prefixes.** The bound cookie is absent at that point because it just expired. If you only read from the cookie you get `undefined` and every refresh fails.

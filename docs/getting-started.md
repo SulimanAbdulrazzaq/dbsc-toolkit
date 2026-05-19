@@ -8,6 +8,8 @@ When a user logs in, the browser (Chrome, Edge, Brave, Opera, Arc — any Chromi
 
 The library handles every server-side piece of that flow. You wire one middleware call and start a session after your existing login logic.
 
+One thing to plan for from day one: registration happens *after* the login response returns. Chrome posts to `/dbsc/registration` on its own, but the TPM handshake plus a network round-trip typically takes 300 ms to a couple of seconds. If your client checks `tier === "dbsc"` the same instant login resolves, the check may run before registration lands and report `tier: "none"` even on a supported browser. Either show a brief "binding…" indicator that polls `/me` until tier leaves `"none"`, or auto-retry the first tier-gated request once after a short delay. The live demo wires both patterns in [examples/express/src/server.js](../examples/express/src/server.js).
+
 ## Install
 
 ```sh

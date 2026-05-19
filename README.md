@@ -76,6 +76,15 @@ app.listen(3000);
 
 Call `bindSession()` after you have verified the user's credentials — in the login route, or in a signup route that auto-logs the user in. Calling it in a bare signup that does not establish an authenticated session is not useful: there is no session to bind yet.
 
+### The registration race after login
+
+Chrome posts to `/dbsc/registration` *after* the login response returns. The handshake includes TPM key generation, JWS signing, and a network round-trip, so it commonly takes 300 ms to 1.5 s — sometimes longer on a cold device. If the page immediately requests `/me` or `/payment` and gates on `tier === "dbsc"`, the check can land before registration completes and report `tier: "none"` even on a fully supported browser. Two ways to absorb this on the client:
+
+- **Status indicator with short polling.** After a successful login, poll a low-cost endpoint (`/me` works) every 500 ms for up to ~5 s. Stop when `tier !== "none"` or the window expires; show a small "DBSC ready" or "Using fallback tier" badge. The live demo uses this pattern — see `pollDbscReady` in [examples/express/src/server.js](./examples/express/src/server.js).
+- **One-shot auto-retry on the first call after login.** If a tier-gated request returns `tier: "none"` within the first few seconds of a fresh login, wait ~1 s and retry once. Cheap, invisible to the user, and avoids the false demotion entirely.
+
+For server-driven flows (a payment route called from a server redirect immediately after login), either pattern works. The race only matters when the very first authenticated request is also a tier check; routine browsing past the first second is unaffected.
+
 A full demo with `/me`, `/logout`, and `/clear-cookies` is in [examples/express/src/server.js](./examples/express/src/server.js).
 
 ## Adding DBSC to an existing app
