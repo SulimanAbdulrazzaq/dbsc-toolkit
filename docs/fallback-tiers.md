@@ -2,6 +2,8 @@
 
 DBSC works only on Chromium 145+ (Chrome, Edge, Brave, Opera, Arc, etc.) with a usable hardware-backed key store (TPM 2.0 on Windows, Secure Enclave on Apple Silicon macOS, Keystore on Android). The library negotiates a tier per session so your application can apply different policies depending on what level of binding the browser actually achieved.
 
+The live demo wires both fallback tiers end-to-end — see [examples/express/src/server.js](../examples/express/src/server.js) for a complete reference implementation (sections marked `FALLBACK TIERS — webauthn + hmac`).
+
 ## The four tiers
 
 | Tier | Mechanism | Hardware-bound | Cookie theft useless? |
@@ -87,6 +89,63 @@ For subsequent requests, run an authentication ceremony to bind that request to 
 
 The library does not auto-trigger WebAuthn. Your application controls when to invoke it. See the `client/webauthn.ts` source for the helper functions and `core/fallback/webauthn.ts` for server-side verification.
 
+### Wiring it end-to-end
+
+The middleware reads `tier` from the session row in storage on every request. To promote a session to `webauthn`, update the row after a successful ceremony:
+
+```ts
+import {
+  generateWebAuthnRegistration,
+  verifyWebAuthnRegistration,
+} from "dbsc-toolkit";
+
+app.post("/tier/webauthn/begin", async (req, res) => {
+  const { options, challenge } = await generateWebAuthnRegistration(
+    "Your App",                          // rpName
+    req.get("host").split(":")[0],       // rpId — registrable domain
+    req.session.userId,
+    req.session.username,
+  );
+  pendingChallenges.set(req.session.userId, challenge);
+  res.json(options);
+});
+
+app.post("/tier/webauthn/finish", async (req, res) => {
+  const expectedChallenge = pendingChallenges.get(req.session.userId);
+  pendingChallenges.delete(req.session.userId);
+
+  const verification = await verifyWebAuthnRegistration(
+    req.body,
+    expectedChallenge,
+    `https://${req.get("host")}`,        // expectedOrigin
+    req.get("host").split(":")[0],       // rpId
+  );
+  if (!verification.verified) return res.status(400).json({ error: "verification failed" });
+
+  // Store the credential per-user for later authentication ceremonies
+  credentials.set(req.session.userId, verification.registrationInfo);
+
+  // Promote the DBSC session row's tier — middleware picks it up next request
+  const sess = await storage.getSession(req.session.id);
+  await storage.setSession({ ...sess, tier: "webauthn", lastRefreshAt: Date.now() });
+
+  res.json({ ok: true, tier: "webauthn" });
+});
+```
+
+On the browser side, drive the ceremony with `@simplewebauthn/browser`'s `startRegistration(options)`:
+
+```js
+import { startRegistration } from "@simplewebauthn/browser";
+const options = await fetch("/tier/webauthn/begin", { method: "POST" }).then((r) => r.json());
+const credential = await startRegistration({ optionsJSON: options });
+await fetch("/tier/webauthn/finish", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(credential),
+});
+```
+
 ## HMAC tier
 
 The HMAC tier is a best-effort context binding for browsers without DBSC or WebAuthn. It collects a bundle of weak browser signals (User-Agent, Accept-Language, secure context flags) and hashes them with a server-side HMAC secret. The cookie carries this hash. On every request, the server recomputes the hash and compares.
@@ -94,15 +153,30 @@ The HMAC tier is a best-effort context binding for browsers without DBSC or WebA
 ```ts
 import { collectSignals, generateHmacToken, verifyHmacToken } from "dbsc-toolkit";
 
-// On login
-const signals = collectSignals(req.headers);
-const token = generateHmacToken(signals, hmacSecret);
-res.cookie("dbsc-hmac", token, { httpOnly: true, secure: true });
+const hmacSecret = Buffer.from(process.env.HMAC_SECRET, "hex");  // 32 bytes
 
-// On every request
-const cookie = req.cookies["dbsc-hmac"];
-const valid = verifyHmacToken(cookie, collectSignals(req.headers), hmacSecret);
+// Promote session to hmac tier
+app.post("/tier/hmac", async (req, res) => {
+  const signals = collectSignals(req.headers);
+  const token = generateHmacToken(signals, hmacSecret);
+  res.cookie("dbsc-hmac", token, {
+    httpOnly: true, secure: true, sameSite: "lax", path: "/",
+    maxAge: 24 * 60 * 60 * 1000,
+  });
+  const sess = await storage.getSession(req.session.id);
+  await storage.setSession({ ...sess, tier: "hmac", lastRefreshAt: Date.now() });
+  res.json({ ok: true, tier: "hmac" });
+});
+
+// Re-verify on every protected request (do NOT trust the stored tier alone for hmac)
+function verifyHmacBinding(req) {
+  const token = req.cookies?.["dbsc-hmac"];
+  if (!token) return false;
+  return verifyHmacToken(token, collectSignals(req.headers), hmacSecret);
+}
 ```
+
+The `lastRefreshAt: Date.now()` update on promotion is important — without it, the middleware's freshness check could demote the row back to `none` on the next request.
 
 This is **not** hardware binding. An attacker who intercepts a cookie and replicates the User-Agent can forge a valid HMAC. The protection is against trivial cookie theft — paste-into-browser scenarios where the attacker uses a different OS/browser combination.
 
@@ -127,15 +201,24 @@ The signal bundle includes User-Agent and Accept-Language. Combined with a user 
 
 The library emits a console warning the first time HMAC tier is used to remind operators of this.
 
-## Disabling fallback
+## Strict DBSC-only
 
-Some applications want strict DBSC-only — no WebAuthn fallback, no HMAC, no plain session. Set `fallback: "none"` in adapter options:
+Some applications want hardware-bound DBSC and nothing else — no WebAuthn fallback, no HMAC, no plain session. The library does not have a "disable fallback" option because there is nothing to disable: webauthn and hmac tiers only exist if your application code explicitly drives them. If you never call `generateWebAuthnRegistration` or `generateHmacToken`, the only way a session can reach a non-`none` tier is through DBSC.
+
+To enforce DBSC-only, gate every protected route on `tier === "dbsc"`:
 
 ```ts
-app.use(dbsc({ storage, fallback: "none" }));
+function requireDbsc(req, res, next) {
+  if (res.locals.dbsc.tier !== "dbsc") {
+    return res.status(401).json({ error: "hardware-bound session required" });
+  }
+  next();
+}
+
+app.use("/api", requireDbsc);
 ```
 
-In this mode, sessions that fail to upgrade to `tier = "dbsc"` get `tier = "none"` and your application can reject them.
+Sessions on Firefox / Safari / pre-145 Chromium stay at `tier = "none"` and the gate refuses them.
 
 ## Client SDK responsibilities
 

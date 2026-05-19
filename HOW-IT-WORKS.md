@@ -228,10 +228,13 @@ Default TTLs: bound cookie 10 min (browser refreshes it on its own), challenge 5
 
 The library detects browser support via the `Secure-Session-Registration` header arriving on the response: if the browser supports DBSC, it POSTs to `/dbsc/registration` within a second; if it doesn't, no request ever arrives and the session stays at `tier: "none"`. You don't have to write any browser detection.
 
-For non-Chromium users, you have two options:
+For non-Chromium users, you have three options:
 
-1. **Wire the WebAuthn fallback.** The library ships helpers for `@simplewebauthn/server`. Your login page calls `registerWebAuthn()`; if it succeeds, the session's tier promotes to `"webauthn"`. Platform-hardware-bound, similar guarantees as DBSC, but a UX prompt the user sees.
-2. **Accept `none` and gate accordingly.** Most pragmatic for large public sites. Don't lock non-Chromium users out — that's roughly half the desktop market. Apply DBSC-only gates to genuinely high-value actions (payments, password change) where you're OK if Firefox users have to use Chrome for that one action.
+1. **Wire the WebAuthn fallback.** The library ships helpers for `@simplewebauthn/server`. After login, your app calls `/tier/webauthn/begin` → browser prompts for TouchID / Windows Hello / passkey → `/tier/webauthn/finish` verifies and promotes the session to `tier = "webauthn"`. Hardware-bound on most modern devices, similar guarantees to DBSC, but the user sees a UX prompt.
+2. **Wire the HMAC fallback.** The library exposes `collectSignals + generateHmacToken + verifyHmacToken`. Best-effort context binding via User-Agent / Accept-Language / TLS-secure-context hashed with a server-side secret. NOT hardware-bound — an attacker who replicates the victim's browser environment can forge it. Useful for blocking trivial cookie theft (curl, generic scrapers) and as an audit signal. Sets `tier = "hmac"`.
+3. **Accept `none` and gate accordingly.** Most pragmatic for large public sites. Don't lock non-Chromium users out — that's roughly half the desktop market. Apply DBSC-only gates to genuinely high-value actions (payments, password change); accept `webauthn` / `hmac` for medium-trust actions; accept `none` for read-only.
+
+**How tier promotion works under the hood.** The middleware reads `session.tier` from storage on every request. The DBSC path is automatic — registration in `/dbsc/registration` sets it to `"dbsc"`. For webauthn and hmac, your app drives the promotion explicitly: after a successful ceremony or HMAC token issuance, call `storage.setSession({ ...session, tier: "webauthn", lastRefreshAt: Date.now() })`. The middleware picks up the new tier on the next request. See [docs/fallback-tiers.md](./docs/fallback-tiers.md) for complete wiring examples or the live demo at [examples/express/src/server.js](./examples/express/src/server.js).
 
 ---
 

@@ -21,6 +21,8 @@ Open in any Chromium-based browser version 145+ (Chrome, Edge, Brave, Opera), cl
 
 The demo now runs on `RedisStorage` (Upstash) by default, so sessions survive deploys, cold starts, and laptop reboots. If you clone the demo and run it locally without a `REDIS_URL` environment variable, it falls back to `MemoryStorage` automatically — fine for one terminal session, wiped on every restart.
 
+The demo also wires the two fallback tiers end-to-end so you can see all four states in action: `dbsc` (default on Chromium 145+), `webauthn` (click "Enable WebAuthn" — uses TouchID / Windows Hello / passkey), `hmac` (click "Enable HMAC" — best-effort signal binding), or `none` (logged-out / no binding). Two protected routes show the gating: `/profile` requires `tier === "dbsc"`; `/profile-soft` accepts any non-`none` tier.
+
 > **Hitting `not authenticated` after a few login/logout cycles?** That's Chrome's DBSC quota — the browser's anti-abuse throttle. The demo surfaces it explicitly now (red banner + reason text in the response). To recover: `chrome://settings/clearBrowserData` → Last hour → Cookies and site data → clear, or open an Incognito window. The quota is per `(browser install, origin)`, so production users (who log in once and stay logged in) essentially never trip it.
 
 ## Install
