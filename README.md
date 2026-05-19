@@ -74,6 +74,8 @@ app.listen(3000);
 
 `app.use(dbsc(...))` mounts `POST /dbsc/registration` and `POST /dbsc/refresh` automatically — Chrome drives both, your code never sees them. `bindSession()` is the one-liner you add to your login route: it writes the session row, issues a challenge, builds the registration header (both legacy + new names), and sets the two short-lived cookies Chrome needs to complete binding.
 
+Call `bindSession()` after you have verified the user's credentials — in the login route, or in a signup route that auto-logs the user in. Calling it in a bare signup that does not establish an authenticated session is not useful: there is no session to bind yet.
+
 A full demo with `/me`, `/logout`, and `/clear-cookies` is in [examples/express/src/server.js](./examples/express/src/server.js).
 
 ## Adding DBSC to an existing app

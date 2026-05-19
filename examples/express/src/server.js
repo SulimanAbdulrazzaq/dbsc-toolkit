@@ -338,9 +338,12 @@ app.get("/profile", requireDbsc, (req, res) => {
 // collectSignals + generateHmacToken + verifyHmacToken helpers.
 // ═════════════════════════════════════════════════════════════════════════════
 
-// Helper: promote the DBSC session row's tier in storage so subsequent requests
-// see the new value. The middleware reads tier from storage on every request.
-async function promoteTier(req, tier) {
+// Helper: promote the DBSC session row's tier in storage AND set the bound
+// cookie the middleware reads. Without the cookie, the middleware can't link
+// the request back to the storage row (it looks up sessionId from
+// __Host-dbsc-session only). This is what enables webauthn/hmac tiers on
+// browsers that never completed the native DBSC registration (Firefox, Safari).
+async function promoteTier(req, res, tier) {
   const sessionId = req.session.id;
   const sess = await dbscStorage.getSession(sessionId);
   if (sess) {
@@ -358,6 +361,14 @@ async function promoteTier(req, tier) {
       lastRefreshAt: Date.now(),
     });
   }
+
+  res.cookie("__Host-dbsc-session", sessionId, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 24 * 60 * 60 * 1000,
+  });
 }
 
 // ─── WebAuthn registration ceremony ───
@@ -402,7 +413,7 @@ app.post("/tier/webauthn/finish", async (req, res) => {
     }
     webauthnCredentials.set(req.session.userId, verification.registrationInfo);
 
-    await promoteTier(req, "webauthn");
+    await promoteTier(req, res, "webauthn");
     emitLog({ t: "webauthn-success", userId: req.session.userId, tier: "webauthn" });
     res.json({ ok: true, tier: "webauthn" });
   } catch (err) {
@@ -425,7 +436,7 @@ app.post("/tier/hmac", async (req, res) => {
     maxAge: 24 * 60 * 60 * 1000,
   });
 
-  await promoteTier(req, "hmac");
+  await promoteTier(req, res, "hmac");
   emitLog({ t: "hmac-bound", userId: req.session.userId, tier: "hmac" });
   res.json({ ok: true, tier: "hmac", note: "Best-effort binding only — see /docs/fallback-tiers.md" });
 });
@@ -507,6 +518,7 @@ ${storageBanner}
 
 <h2>1. Sign up or log in</h2>
 <p class="sub">Standard username + password. Hashed with bcrypt. Sets a normal <code>demo.sid</code> session cookie.</p>
+<p class="sub">After signing up, click <strong>Log in</strong> to activate the hardware-bound DBSC binding. Signup alone does not trigger DBSC — <code>bindSession()</code> runs in the login route after password verification, which mirrors how a real app behaves when it requires explicit credential proof before binding to the device.</p>
 <form id="auth-form" onsubmit="return false">
   <input type="text" id="username" placeholder="username" autocomplete="username" required>
   <input type="password" id="password" placeholder="password (min 6)" autocomplete="current-password" required>

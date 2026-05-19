@@ -155,7 +155,7 @@ You touch three places. That's it.
 
 **Touch point (2)** is the middleware mount — one line, runs on app startup, never thought about again.
 
-**Touch point (1)** is `bindSession()` — one line at the end of your existing login route. It writes a session row, issues a challenge, sets the registration header, and sets the two short-lived cookies the browser needs. That used to be ~25 lines hand-rolled before 1.4.0; now it's one function call.
+**Touch point (1)** is `bindSession()` — one line at the end of your existing login route. It writes a session row, issues a challenge, sets the registration header, and sets the two short-lived cookies the browser needs. That used to be ~25 lines hand-rolled before 1.4.0; now it's one function call. The call belongs after the credential check — login, or a signup route that immediately authenticates the user. A bare signup with no session established is not the right place; there is nothing to bind yet.
 
 **Touch point (3)** is the tier check on sensitive routes. The library exposes `tier` — you write `if (tier !== "dbsc") return 403`. This is where the security actually lives. If you skip the check, a stolen cookie still works against your server because the cookie alone reaches your handler, the session exists in storage, and your handler proceeds. The whole point of DBSC is the demotion: when a cookie is replayed from a device without the matching hardware key, refresh fails, tier drops to `"none"`, and your gate refuses. **No gate, no defense.**
 
