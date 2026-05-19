@@ -236,6 +236,16 @@ app.post("/logout", async (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── /clear-cookies — diagnostic helper: wipes every cookie for the origin ───
+// Useful for resetting state between test scenarios. Real apps don't ship this.
+app.post("/clear-cookies", (req, res) => {
+  const names = Object.keys(req.cookies ?? {});
+  for (const name of names) {
+    res.clearCookie(name, { path: "/", secure: true, httpOnly: true, sameSite: "lax" });
+  }
+  res.json({ ok: true, cleared: names });
+});
+
 // ─── /me — basic "am I logged in" check (does NOT require DBSC) ───
 // This works for any logged-in user, including Firefox / Safari users that
 // don't support DBSC. Tier will read "none" for them.
@@ -332,6 +342,7 @@ ${storageBanner}
   <button id="signup-btn">Sign up</button>
   <button id="login-btn">Log in</button>
   <button id="logout-btn">Log out</button>
+  <button id="clear-btn">Clear cookies</button>
 </form>
 
 <h2>2. Check session</h2>
@@ -418,6 +429,9 @@ document.getElementById('me-btn').onclick = async () => {
 };
 document.getElementById('profile-btn').onclick = async () => {
   show(await req('GET', '/profile'));
+};
+document.getElementById('clear-btn').onclick = async () => {
+  show(await req('POST', '/clear-cookies'));
 };
 
 // Live server log stream
