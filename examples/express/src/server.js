@@ -13,22 +13,89 @@ const storage = process.env.REDIS_URL
   ? new RedisStorage(new Redis(process.env.REDIS_URL))
   : new MemoryStorage();
 
-console.log(JSON.stringify({
-  t: "boot",
-  storage: process.env.REDIS_URL ? "redis" : "memory",
-}));
+const LOG_BUFFER_MAX = 200;
+const logBuffer = [];
+const sseClients = new Set();
+
+function emitLog(entry) {
+  const line = { ts: new Date().toISOString(), ...entry };
+  logBuffer.push(line);
+  if (logBuffer.length > LOG_BUFFER_MAX) logBuffer.shift();
+  const serialized = JSON.stringify(line);
+  console.log(serialized);
+  const frame = `data: ${serialized}\n\n`;
+  for (const res of sseClients) {
+    try { res.write(frame); } catch { /* client gone, next ping cleans it up */ }
+  }
+}
+
+emitLog({ t: "boot", storage: process.env.REDIS_URL ? "redis" : "memory" });
+
+app.get("/debug-logs/stream", (req, res) => {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  res.write(`retry: 2000\n\n`);
+  for (const line of logBuffer) {
+    res.write(`data: ${JSON.stringify(line)}\n\n`);
+  }
+  sseClients.add(res);
+  const ping = setInterval(() => {
+    try { res.write(`: ping\n\n`); } catch { /* */ }
+  }, 15000);
+  req.on("close", () => {
+    clearInterval(ping);
+    sseClients.delete(res);
+  });
+});
 
 app.use(cookieParser());
 app.use("/dbsc/registration", express.text({ type: "*/*", limit: "100kb" }));
 app.use("/dbsc/refresh", express.text({ type: "*/*", limit: "100kb" }));
 app.use(express.json());
 
+app.use((req, res, next) => {
+  if (req.path === "/debug-logs/stream") return next();
+  const start = Date.now();
+  const cookies = Object.keys(req.cookies ?? {});
+  const dbscCookies = cookies.filter((n) => n.includes("dbsc"));
+  const hdr = req.headers;
+  const interesting = {
+    "sec-secure-session-id": hdr["sec-secure-session-id"],
+    "secure-session-response": hdr["secure-session-response"] ? "<present>" : undefined,
+    "sec-session-response": hdr["sec-session-response"] ? "<present>" : undefined,
+    "secure-session-skipped": hdr["secure-session-skipped"],
+    "sec-session-skipped": hdr["sec-session-skipped"],
+  };
+  for (const k of Object.keys(interesting)) if (interesting[k] === undefined) delete interesting[k];
+  emitLog({
+    t: "req",
+    method: req.method,
+    path: req.path,
+    dbscCookies,
+    headers: Object.keys(interesting).length ? interesting : undefined,
+  });
+  res.on("finish", () => {
+    emitLog({
+      t: "res",
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      ms: Date.now() - start,
+    });
+  });
+  next();
+});
+
 app.use(
   dbsc({
     storage,
     boundCookieTtl: 60 * 1000,
     onEvent: (event) => {
-      console.log(JSON.stringify({ t: "dbsc-event", ...event }));
+      emitLog({ t: "dbsc-event", ...event });
     },
   }),
 );
@@ -161,6 +228,34 @@ function show(result) {
 
 console.log('%c[dbsc-demo] open this console — every action logs its request, status, dbsc-related headers, and response body here.', 'font-weight:bold');
 console.log('%cThe __Host-dbsc-* cookies are HttpOnly, so they will NOT appear in document.cookie. Open DevTools -> Application -> Cookies to see them. Watch the Network tab for automatic POST /dbsc/registration and POST /dbsc/refresh that Chrome makes on its own.', 'color:#666');
+
+(function streamServerLogs() {
+  let es;
+  function connect() {
+    es = new EventSource('/debug-logs/stream');
+    es.onopen = () => console.log('%c[server-stream] connected', 'color:#0a7');
+    es.onerror = () => {
+      console.warn('[server-stream] disconnected — retrying...');
+      try { es.close(); } catch (_) {}
+      setTimeout(connect, 2000);
+    };
+    es.onmessage = (e) => {
+      let line;
+      try { line = JSON.parse(e.data); } catch { console.log('[server]', e.data); return; }
+      const tag = line.t || 'log';
+      const head = '%c[server ' + line.ts.slice(11, 23) + '] ' + tag;
+      let color = '#06c';
+      if (tag === 'dbsc-event') color = '#a06';
+      else if (tag === 'res' && line.status >= 400) color = '#c33';
+      else if (tag === 'res') color = '#393';
+      else if (tag === 'boot') color = '#666';
+      const rest = Object.assign({}, line);
+      delete rest.t; delete rest.ts;
+      console.log(head, 'color:' + color + ';font-weight:bold', rest);
+    };
+  }
+  connect();
+})();
 
 document.getElementById('login').onclick = async () => {
   show(await req('POST', '/login', { username: 'alice' }));
