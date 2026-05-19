@@ -502,6 +502,10 @@ app.get("/", (_req, res) => {
   .banner { background: #fff3cd; border: 1px solid #ffe28a; color: #5b4400; }
   .banner.ok { background: #e6f4ea; border: 1px solid #b6e0c2; color: #1e4023; }
   .banner.alert { background: #fde2e1; border: 1px solid #f5b1ae; color: #7a1b16; }
+  #dbsc-status { display: none; padding: 0.5rem 0.75rem; border-radius: 6px; margin: 0.5rem 0; font-size: 0.85rem; }
+  #dbsc-status.pending { display: block; background: #fff3cd; border: 1px solid #ffe28a; color: #5b4400; }
+  #dbsc-status.ready { display: block; background: #e6f4ea; border: 1px solid #b6e0c2; color: #1e4023; }
+  #dbsc-status.unsupported { display: block; background: #eef0f3; border: 1px solid #d3d7de; color: #444; }
   form { margin: 0.5rem 0 1rem; }
   input[type=text], input[type=password] { padding: 0.4rem; margin-right: 0.5rem; font-size: 1rem; }
   button { margin-right: 0.5rem; margin-bottom: 0.5rem; padding: 0.5rem 1rem; font-size: 0.95rem; cursor: pointer; }
@@ -527,6 +531,7 @@ ${storageBanner}
   <button id="logout-btn">Log out</button>
   <button id="clear-btn">Clear cookies</button>
 </form>
+<div id="dbsc-status"></div>
 
 <h2>2. Check session</h2>
 <p class="sub"><code>/me</code> works for any logged-in user (does NOT require DBSC). Shows your app session id + the DBSC tier the browser reached.</p>
@@ -573,7 +578,7 @@ function show(result) {
   }
 }
 
-async function req(method, path, body) {
+async function rawReq(method, path, body) {
   const t0 = performance.now();
   console.groupCollapsed('%c-> ' + method + ' ' + path, 'color:#0a7');
   if (body) console.log('body:', body);
@@ -599,6 +604,73 @@ async function req(method, path, body) {
   }
 }
 
+// Tracks whether a login just happened. Used by the auto-retry wrapper to
+// give Chrome a moment to finish DBSC registration in the background before
+// reporting tier=none to the user.
+let lastLoginAt = 0;
+const RETRY_PATHS = new Set(['/me', '/profile', '/profile-soft']);
+const RETRY_WINDOW_MS = 5000;
+const RETRY_DELAY_MS = 1200;
+
+function looksLikeNoneTier(result) {
+  if (!result || result.status !== 200) {
+    if (result && result.status === 403 && result.body && result.body.currentTier === 'none') return true;
+    return false;
+  }
+  const b = result.body;
+  if (!b || typeof b !== 'object') return false;
+  if (b.dbsc && b.dbsc.tier === 'none') return true;
+  if (b.tier === 'none') return true;
+  return false;
+}
+
+async function req(method, path, body) {
+  const first = await rawReq(method, path, body);
+  if (RETRY_PATHS.has(path)
+      && method === 'GET'
+      && Date.now() - lastLoginAt < RETRY_WINDOW_MS
+      && looksLikeNoneTier(first)) {
+    console.log('%c[auto-retry] tier=none right after login — retrying in ' + RETRY_DELAY_MS + 'ms', 'color:#a60');
+    await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+    return rawReq(method, path, body);
+  }
+  return first;
+}
+
+// ─── DBSC status indicator + polling after login ───
+const statusEl = () => document.getElementById('dbsc-status');
+
+function setStatus(state, text) {
+  const el = statusEl();
+  el.className = state;
+  el.textContent = text;
+}
+
+let pollAbort = null;
+
+async function pollDbscReady() {
+  if (pollAbort) pollAbort.aborted = true;
+  const token = { aborted: false };
+  pollAbort = token;
+
+  setStatus('pending', 'Waiting for DBSC binding… (Chromium 145+ does this automatically in the background)');
+  const deadline = Date.now() + RETRY_WINDOW_MS;
+
+  while (!token.aborted && Date.now() < deadline) {
+    const r = await rawReq('GET', '/me');
+    if (token.aborted) return;
+    const tier = r && r.body && r.body.dbsc && r.body.dbsc.tier;
+    if (tier && tier !== 'none') {
+      setStatus('ready', 'DBSC binding active. tier = ' + tier + '. Your session is hardware-bound.');
+      return;
+    }
+    await new Promise((res) => setTimeout(res, 600));
+  }
+  if (!token.aborted) {
+    setStatus('unsupported', 'No DBSC binding after 5s. Likely a non-Chromium browser (Firefox/Safari) or Chromium <145. Use the WebAuthn or HMAC fallback below.');
+  }
+}
+
 function creds() {
   return {
     username: document.getElementById('username').value.trim(),
@@ -610,10 +682,18 @@ document.getElementById('signup-btn').onclick = async () => {
   show(await req('POST', '/signup', creds()));
 };
 document.getElementById('login-btn').onclick = async () => {
-  show(await req('POST', '/login', creds()));
+  const r = await rawReq('POST', '/login', creds());
+  show(r);
+  if (r.status === 200) {
+    lastLoginAt = Date.now();
+    pollDbscReady();
+  }
 };
 document.getElementById('logout-btn').onclick = async () => {
-  show(await req('POST', '/logout'));
+  if (pollAbort) pollAbort.aborted = true;
+  setStatus('', '');
+  statusEl().style.display = 'none';
+  show(await rawReq('POST', '/logout'));
 };
 document.getElementById('me-btn').onclick = async () => {
   show(await req('GET', '/me'));
