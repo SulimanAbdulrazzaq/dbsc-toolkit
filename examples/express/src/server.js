@@ -131,12 +131,21 @@ app.post("/clear-cookies", (req, res) => {
 });
 
 app.get("/me", (_req, res) => {
-  const { sessionId, tier } = res.locals.dbsc;
+  const { sessionId, tier, skipped } = res.locals.dbsc;
+  const quotaHit = skipped.some((s) => s.reason === "quota_exceeded");
+
   if (!sessionId) {
-    res.status(401).json({ error: "not authenticated" });
+    const reason = quotaHit
+      ? "Chrome refused to register the session because its DBSC quota for this origin is exhausted. This happens during dev/test cycles that login + logout repeatedly. Clear site data in chrome://settings/clearBrowserData (Last hour → Cookies and site data) or open an Incognito window to reset the quota."
+      : "no bound cookie present — click Login first";
+    res.status(401).json({
+      error: "not authenticated",
+      reason,
+      skipped,
+    });
     return;
   }
-  res.json({ sessionId, tier });
+  res.json({ sessionId, tier, skipped });
 });
 
 app.get("/", (_req, res) => {
@@ -153,6 +162,7 @@ app.get("/", (_req, res) => {
   body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
   .banner { background: #fff3cd; border: 1px solid #ffe28a; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.9rem; color: #5b4400; }
   .banner.ok { background: #e6f4ea; border-color: #b6e0c2; color: #1e4023; }
+  .banner.alert { background: #fde2e1; border-color: #f5b1ae; color: #7a1b16; }
   button { margin-right: 0.5rem; margin-bottom: 0.5rem; padding: 0.5rem 1rem; }
   pre { background: #f4f4f4; padding: 1rem; border-radius: 6px; overflow-x: auto; }
 </style>
@@ -164,6 +174,7 @@ ${banner}
 <button id="logout">Logout</button>
 <button id="me">Check session</button>
 <button id="clear">Clear cookies</button>
+<div id="alert" class="banner alert" style="display:none"></div>
 <pre id="out"></pre>
 <script>
 const DBSC_HEADERS = [
@@ -224,6 +235,22 @@ async function req(method, path, body) {
 
 function show(result) {
   document.getElementById('out').textContent = JSON.stringify(result, null, 2);
+
+  const alertEl = document.getElementById('alert');
+  alertEl.style.display = 'none';
+  alertEl.innerHTML = '';
+
+  const skipped = result && result.body && result.body.skipped;
+  if (Array.isArray(skipped) && skipped.length) {
+    const reasons = skipped.map((s) => s.reason);
+    const messages = {
+      quota_exceeded: '<strong>Chrome quota exhausted for this origin.</strong> The browser refused to register or refresh the DBSC session because too many attempts happened in a short time (typical during dev testing — login/logout loops). To recover: <code>chrome://settings/clearBrowserData</code> &rarr; Last hour &rarr; Cookies and site data &rarr; clear. Or open an Incognito window. In production this almost never trips because real users log in once and stay logged in.',
+      unreachable: '<strong>Chrome could not reach the refresh endpoint.</strong> Network drop or server outage. Will retry automatically.',
+      server_error: '<strong>Refresh endpoint returned 5xx.</strong> Server-side error during refresh. Check server logs.',
+    };
+    alertEl.innerHTML = reasons.map((r) => messages[r] || ('Unknown skip reason: ' + r)).join('<br><br>');
+    alertEl.style.display = 'block';
+  }
 }
 
 console.log('%c[dbsc-demo] open this console — every action logs its request, status, dbsc-related headers, and response body here.', 'font-weight:bold');
