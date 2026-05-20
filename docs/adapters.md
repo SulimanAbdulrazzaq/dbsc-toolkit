@@ -106,7 +106,7 @@ export default app;
 
 `c.get("dbsc")` returns `{ sessionId, tier, skipped, revoke }` — the same shape as `res.locals.dbsc` on Express and `req.dbsc` on Fastify.
 
-The 1.3.x split keys `c.get("dbscSessionId")`, `c.get("dbscTier")`, `c.get("dbscSkipped")` are deprecated aliases that still work in 1.x for back-compat. They will be removed in 2.0.0 — migrate to `c.get("dbsc")` for new code.
+The 1.3.x split keys (`c.get("dbscSessionId")`, `c.get("dbscTier")`, `c.get("dbscSkipped")`) were removed in 2.0.0. Use the unified object only.
 
 ## Next.js (App Router)
 
@@ -150,14 +150,26 @@ The four shipped adapters cover the major frameworks. For Koa, Hapi, raw `http`,
 
 ### What an adapter does
 
-An adapter has six responsibilities:
+There are two protocol surfaces. Most adapters wire both.
 
-1. Read the relevant cookies from the request (`__Host-dbsc-session`, `__Host-dbsc-reg`, `__Host-dbsc-challenge`).
-2. Read the `Sec-Secure-Session-Id` header on refresh requests (Chrome sends the session ID here when the bound cookie is gone).
-3. Read the `Secure-Session-Response` (or legacy `Sec-Session-Response`) header for both registration and refresh JWS proofs.
-4. Mount `POST /dbsc/registration` and `POST /dbsc/refresh` routes that call `handleRegistration` and `handleRefresh`.
-5. Set `Set-Cookie`, `Secure-Session-Challenge`, and JSON session config on responses as required by the protocol.
-6. Expose `tier` and `sessionId` on a per-request object that downstream handlers can read.
+**Native DBSC** (Chromium 145+ drives this):
+
+1. Read `__Host-dbsc-session`, `__Host-dbsc-reg`, and `__Host-dbsc-challenge` cookies.
+2. Read `Sec-Secure-Session-Id` on refresh requests (the bound cookie is gone by then; Chrome sends the session id in this header instead).
+3. Read `Secure-Session-Response` (with `Sec-Session-Response` legacy fallback) for both registration and refresh JWS proofs.
+4. Mount `POST /dbsc/registration` and `POST /dbsc/refresh` that call `handleRegistration` and `handleRefresh`.
+5. Write `Set-Cookie`, `Secure-Session-Challenge`, and the JSON session-config response body.
+
+**Bound polyfill** (the client SDK drives this on Firefox / Safari / older Chromium):
+
+6. Mount `GET /dbsc-bound/state` so the SDK can detect whether registration is needed.
+7. Mount `GET /dbsc-bound/challenge` to issue fresh JTIs for the refresh signing loop.
+8. Mount `POST /dbsc-bound/registration` and `POST /dbsc-bound/refresh` that call `handleBoundRegistration` and `handleBoundRefresh`. Both expect JSON request bodies (not headers). The client SDK posts `{ publicKey, signature, challenge }` and `{ challenge, signature, timestamp }`.
+9. Serve `node_modules/dbsc-toolkit/dist/client/` as a static directory so the browser can `import { initBoundDbsc } from "/dbsc-client/index.js"`.
+
+**Per-request:**
+
+10. Expose `tier` and `sessionId` on a per-request object that downstream handlers can read. The same `__Host-dbsc-session` cookie identifies the session for both tiers; the freshness check (`session.lastRefreshAt + boundCookieTtl > now`) applies to both `"dbsc"` and `"bound"`.
 
 ### Minimum implementation
 
@@ -169,6 +181,8 @@ import { parse as parseCookie } from "node:cookie";
 import {
   handleRegistration,
   handleRefresh,
+  handleBoundRegistration,
+  handleBoundRefresh,
   issueChallenge,
   buildChallengeHeader,
   readSessionResponseHeader,
@@ -244,7 +258,64 @@ export function dbscHandler(storage: StorageAdapter, boundTtlMs = 600_000) {
       }
     }
 
-    // Augment request with tier for downstream handlers
+    // ---- Bound polyfill routes (JSON body) -------------------------------
+
+    const boundSessionId = cookies[BOUND] ?? cookies["__Host-dbsc-reg"];
+
+    if (req.method === "GET" && req.url === "/dbsc-bound/state") {
+      if (!boundSessionId) return reply(res, 200, { phase: "unbound", sessionId: null });
+      const session = await storage.getSession(boundSessionId);
+      if (!session) return reply(res, 200, { phase: "unbound", sessionId: null });
+      const key = await storage.getBoundKey(boundSessionId);
+      if (!key) {
+        const challenge = await issueChallenge(boundSessionId, storage);
+        return reply(res, 200, { phase: "needs-registration", sessionId: boundSessionId, challenge: challenge.jti });
+      }
+      return reply(res, 200, { phase: "bound", sessionId: boundSessionId, tier: session.tier, refreshIntervalMs: boundTtlMs });
+    }
+
+    if (req.method === "GET" && req.url === "/dbsc-bound/challenge") {
+      if (!boundSessionId) return reply(res, 403, { error: "no session" });
+      const challenge = await issueChallenge(boundSessionId, storage);
+      return reply(res, 200, { challenge: challenge.jti });
+    }
+
+    if (req.method === "POST" && req.url === "/dbsc-bound/registration") {
+      if (!boundSessionId) return reply(res, 400, { error: "missing session cookie" });
+      const body = await readJson(req);
+      try {
+        await handleBoundRegistration({
+          sessionId: boundSessionId,
+          publicKey: body.publicKey,
+          signature: body.signature,
+          expectedJti: body.challenge,
+        }, storage);
+        res.setHeader("Set-Cookie", `${BOUND}=${boundSessionId}; HttpOnly; Secure; SameSite=Lax; Max-Age=${boundTtlMs / 1000}; Path=/`);
+        return reply(res, 200, { session_identifier: boundSessionId, refresh_url: "/dbsc-bound/refresh", tier: "bound" });
+      } catch (err) {
+        return reply(res, 400, { error: (err as Error).message });
+      }
+    }
+
+    if (req.method === "POST" && req.url === "/dbsc-bound/refresh") {
+      if (!boundSessionId) return reply(res, 403, { error: "no session" });
+      const body = await readJson(req);
+      try {
+        await handleBoundRefresh({
+          sessionId: boundSessionId,
+          signature: body.signature,
+          expectedJti: body.challenge,
+          timestamp: body.timestamp,
+        }, storage);
+        res.setHeader("Set-Cookie", `${BOUND}=${boundSessionId}; HttpOnly; Secure; SameSite=Lax; Max-Age=${boundTtlMs / 1000}; Path=/`);
+        return reply(res, 200, { session_identifier: boundSessionId, refresh_url: "/dbsc-bound/refresh", tier: "bound" });
+      } catch (err) {
+        return reply(res, 401, { error: (err as Error).message });
+      }
+    }
+
+    // ---- Per-request tier (both tiers share storage) ---------------------
+
     const sessionId = cookies[BOUND] ?? null;
     let tier: ProtectionTier = "none";
     if (sessionId) {
@@ -259,8 +330,25 @@ export function dbscHandler(storage: StorageAdapter, boundTtlMs = 600_000) {
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(body));
   }
+
+  async function readJson(req): Promise<any> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk);
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  }
 }
 ```
+
+On a non-Chromium browser, the page needs to load the client SDK so the bound flow actually fires:
+
+```html
+<script type="module">
+  import { initBoundDbsc } from "/dbsc-client/index.js";
+  initBoundDbsc();
+</script>
+```
+
+Serve `node_modules/dbsc-toolkit/dist/client/` as a static directory at `/dbsc-client`. In raw `http` that's another route handler that streams files from disk; in any real framework it's one line (Express: `app.use("/dbsc-client", express.static(...))`).
 
 ### Critical details to get right
 
@@ -277,6 +365,12 @@ export function dbscHandler(storage: StorageAdapter, boundTtlMs = 600_000) {
 **Cookie attributes match.** The `attributes` string in the `credentials[].attributes` field must match what your `Set-Cookie` header actually sets (Domain, Path, Secure, HttpOnly, SameSite). Chrome compares them and terminates the session on mismatch. The `__Host-` prefix forces no-Domain, Path=/, Secure — make sure your attributes string omits Domain.
 
 **Atomic challenge consume.** Multiple parallel refresh attempts could replay the same challenge if your storage adapter is not atomic. Memory and Redis adapters handle this; if you write your own storage, ensure `consumeChallenge` is single-shot.
+
+**Bound routes use JSON bodies, not headers.** The two `POST /dbsc-bound/*` routes read `{ publicKey, signature, challenge }` (registration) and `{ challenge, signature, timestamp }` (refresh) from the request body. The native DBSC routes read from headers instead. If your framework's body parser only fires on certain content types, make sure JSON parsing is wired for the bound paths.
+
+**Bound refresh timestamp window.** `handleBoundRefresh` rejects signatures whose `timestamp` is more than 60 seconds off from server time. This is the polyfill's replay defense. Make sure your client SDK sends `Date.now()` at signing time, not at some earlier point in the request lifecycle.
+
+**Same `__Host-dbsc-session` cookie for both tiers.** The middleware identifies the session from one cookie regardless of which protocol path produced it. Don't issue different cookies for `dbsc` and `bound`; that breaks the per-request tier read.
 
 ### Bun and Deno
 
