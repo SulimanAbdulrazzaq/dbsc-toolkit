@@ -117,6 +117,7 @@ The library exposes the tier; **enforcing it is your responsibility**. Gate most
 
 - **Concepts and protocol:** [HOW-IT-WORKS.md](./HOW-IT-WORKS.md)
 - **Bound polyfill wire protocol:** [docs/bound-polyfill.md](./docs/bound-polyfill.md)
+- **Per-request signing (close the Firefox/Safari ride-along gap on sensitive routes):** [docs/per-request-signing.md](./docs/per-request-signing.md)
 - **API reference:** [docs/api-reference.md](./docs/api-reference.md)
 - **Adapters (Express / Fastify / Hono / Next.js + write your own):** [docs/adapters.md](./docs/adapters.md)
 - **Storage (memory / Redis / Postgres):** [docs/storage.md](./docs/storage.md)

@@ -252,5 +252,6 @@ Important to communicate to your team and users:
 - [ ] Bound cookie TTL appropriate for sensitivity (default 10 min may be too long for payments)
 - [ ] Storage backups configured
 - [ ] If using the bound polyfill: `initBoundDbsc()` script tag included on every authenticated page
+- [ ] On Firefox / Safari, the routes you'd want to gate on `tier === "dbsc"` if you could should instead use `requireBoundProof()` so stolen cookies cannot ride along during the freshness window. See [per-request-signing.md](../per-request-signing.md) for the threat boundary and when to use it
 - [ ] User notification flow for `session_stolen`
 - [ ] Tier requirements documented per route (which routes require `tier === "dbsc"` vs `tier !== "none"`)

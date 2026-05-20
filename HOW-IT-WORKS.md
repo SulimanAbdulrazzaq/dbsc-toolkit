@@ -196,6 +196,8 @@ app.post("/payment", requireDbsc, paymentHandler);
 app.post("/settings/email", requireDbsc, emailHandler);
 ```
 
+A note on the gap that remains for the bound tier: a passively-stolen cookie used by another browser still works on tier-only routes (`tier !== "none"`) for as long as the legitimate user's polyfill keeps refreshing — neither protocol signs every request, only refreshes. Native DBSC closes this in practice because Chromium tracks the cookie-to-key association browser-side; the bound polyfill, living in JavaScript, has no equivalent. For specific sensitive routes (payment, admin, password change) on Firefox / Safari, v2.1.0 ships `requireBoundProof()` and `wrapFetch()` — opt-in per-request signing that makes the cookie alone insufficient. See [docs/per-request-signing.md](./docs/per-request-signing.md).
+
 A subtle property: the library demotes the stored tier from `"dbsc"` to `"none"` immediately when a refresh fails. So an attacker's first replayed request might succeed (tier still `"dbsc"` from the victim's last refresh), but the moment the attacker's browser tries to refresh — which the browser does on its own, automatically, the first time it sees the bound cookie expire — refresh fails, JWS signature is wrong, and the stored tier becomes `"none"`. Now every subsequent request, including the victim's, sees `"none"` until the victim's *real* browser refreshes with their real hardware key and re-promotes the session. Attacker access window: at most one `boundCookieTtl` (default 10 min, configurable to 60s if you want to tighten). Compare to no-DBSC: attacker has full access until the user manually logs out or the app session naturally expires.
 
 ---

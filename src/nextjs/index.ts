@@ -25,6 +25,13 @@ import {
   type SkippedEntry,
 } from "../core/index.js";
 
+export { requireBoundProof } from "./proof.js";
+export type {
+  RequireBoundProofOptions,
+  RequireBoundProofContext,
+  RequireBoundProofResult,
+} from "./proof.js";
+
 const cookieNames = (secure: boolean) => ({
   bound: secure ? "__Host-dbsc-session" : "dbsc-session",
   reg: secure ? "__Host-dbsc-reg" : "dbsc-reg",
@@ -285,20 +292,33 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
 
     if (req.method === "GET" && url === boundStatePath) {
       const sid = readBoundSessionId();
-      if (!sid) return NextResponse.json({ phase: "unbound", sessionId: null });
+      const xServerTime = String(Date.now());
+      if (!sid) {
+        const res = NextResponse.json({ phase: "unbound", sessionId: null });
+        res.headers.set("X-Server-Time", xServerTime);
+        return res;
+      }
       const session = await storage.getSession(sid);
-      if (!session) return NextResponse.json({ phase: "unbound", sessionId: null });
+      if (!session) {
+        const res = NextResponse.json({ phase: "unbound", sessionId: null });
+        res.headers.set("X-Server-Time", xServerTime);
+        return res;
+      }
       const key = await storage.getBoundKey(sid);
       if (!key) {
         const challenge = await issueChallenge(sid, storage);
-        return NextResponse.json({ phase: "needs-registration", sessionId: sid, challenge: challenge.jti });
+        const res = NextResponse.json({ phase: "needs-registration", sessionId: sid, challenge: challenge.jti });
+        res.headers.set("X-Server-Time", xServerTime);
+        return res;
       }
-      return NextResponse.json({
+      const res = NextResponse.json({
         phase: "bound",
         sessionId: sid,
         tier: session.tier,
         refreshIntervalMs: boundCookieTtl,
       });
+      res.headers.set("X-Server-Time", xServerTime);
+      return res;
     }
 
     if (req.method === "GET" && url === boundChallengePath) {
@@ -365,8 +385,13 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
     }
 
     if (req.method === "POST" && url === boundRefreshPath) {
+      const xServerTime = String(Date.now());
       const sid = readBoundSessionId();
-      if (!sid) return NextResponse.json({ error: "no session" }, { status: 403 });
+      if (!sid) {
+        const res = NextResponse.json({ error: "no session" }, { status: 403 });
+        res.headers.set("X-Server-Time", xServerTime);
+        return res;
+      }
 
       const allowed = await rateLimiter.checkRefresh(ip, sid);
       if (!allowed) return NextResponse.json({ error: "rate limited" }, { status: 429 });
@@ -393,6 +418,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
           tier: "bound",
         });
         res.cookies.set(COOKIES.bound, sid, { ...cookieBase(secure), maxAge: boundCookieTtl / 1000 });
+        res.headers.set("X-Server-Time", xServerTime);
         return res;
       } catch (err) {
         await rateLimiter.recordFailure(ip, sid);

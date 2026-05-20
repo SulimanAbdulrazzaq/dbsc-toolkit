@@ -1,4 +1,8 @@
 import { clearKeyRecord, getKeyRecord, setKeyRecord } from "./keystore.js";
+import { recordServerTime } from "./clockSync.js";
+
+export { wrapFetch } from "./wrapFetch.js";
+export type { WrapFetchOptions } from "./wrapFetch.js";
 
 export interface InitBoundDbscOptions {
   statePath?: string;
@@ -104,6 +108,7 @@ export function stopBoundDbsc(): void {
 
 async function fetchState(path: string): Promise<StateResponse> {
   const r = await fetch(path, { credentials: "include" });
+  await recordServerTime(r);
   return (await r.json()) as StateResponse;
 }
 
@@ -135,6 +140,7 @@ async function runRegistration(
   }
 
   await setKeyRecord({ sessionId, keyPair });
+  await recordServerTime(res);
 }
 
 async function runRefresh(cfg: ResolvedOptions): Promise<boolean> {
@@ -156,6 +162,7 @@ async function runRefresh(cfg: ResolvedOptions): Promise<boolean> {
     body: JSON.stringify({ challenge, signature, timestamp }),
   });
 
+  await recordServerTime(res);
   return res.ok;
 }
 

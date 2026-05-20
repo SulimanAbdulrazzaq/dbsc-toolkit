@@ -310,6 +310,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     req.cookies?.[COOKIES.bound] ?? req.cookies?.[COOKIES.reg];
 
   fastify.get(boundStatePath, async (req: FastifyRequest, reply: FastifyReply) => {
+    reply.header("X-Server-Time", String(Date.now()));
     const sessionId = readBoundSessionId(req);
     if (!sessionId) return reply.status(200).send({ phase: "unbound", sessionId: null });
     const session = await storage.getSession(sessionId);
@@ -341,6 +342,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
   });
 
   fastify.post(boundRegistrationPath, async (req: FastifyRequest, reply: FastifyReply) => {
+    reply.header("X-Server-Time", String(Date.now()));
     const ip = req.ip;
     const allowed = await rateLimiter.checkRegistration(ip);
     if (!allowed) return reply.status(429).send({ error: "rate limited" });
@@ -390,6 +392,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
   });
 
   fastify.post(boundRefreshPath, async (req: FastifyRequest, reply: FastifyReply) => {
+    reply.header("X-Server-Time", String(Date.now()));
     const ip = req.ip;
     const sessionId = readBoundSessionId(req);
     if (!sessionId) return reply.status(403).send({ error: "no session" });
@@ -437,3 +440,6 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
 };
 
 export const dbsc = fp(dbscPlugin, { name: "@dbsc-toolkit/server-fastify" });
+
+export { requireBoundProof } from "./proof.js";
+export type { RequireBoundProofOptions } from "./proof.js";

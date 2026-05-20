@@ -122,6 +122,12 @@ The underlying encrypted blob still lives in the browser's profile directory on 
 
 After a successful registration or on a `phase: "bound", tier: "bound"` init, the SDK schedules a `setTimeout` for `refreshIntervalMs - refreshMarginMs` (default 5s margin) and refreshes silently. On refresh success, it schedules the next one. On refresh failure, it stops. The next page load will re-run the init flow and re-bind if appropriate.
 
+## Closing the ride-along gap
+
+The bound tier signs *refresh* requests but not every individual request. Between refreshes, the cookie alone is the credential — a copy of it pasted into another browser will work as the legitimate user until the next refresh fails. Native DBSC has the same window in principle but Chromium enforces the cookie-to-key association browser-side, so the cookie naturally dies on a profile that has no DBSC state. The bound polyfill lives in JavaScript and has no equivalent enforcement.
+
+If you need same-time stolen-cookie protection on Firefox / Safari for specific sensitive routes (payment, admin, password change), v2.1.0 ships per-request signing as an opt-in feature: `wrapFetch()` on the client signs every outgoing request, `requireBoundProof()` on the server verifies. Use it only where it matters — see [per-request-signing.md](./per-request-signing.md) for the full design, threat boundary, and integration recipe.
+
 ### Re-invoke after login
 
 If your login flow doesn't reload the page (most SPA logins), the page-load `initBoundDbsc()` already ran while the user was unauthenticated, saw `phase: "unbound"`, and exited. To pick up the new registration cookies set by `bindSession`, call `initBoundDbsc()` again after a successful login:

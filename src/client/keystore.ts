@@ -5,6 +5,7 @@ const KEY_RECORD_KEY = "key-record";
 export interface KeyRecord {
   sessionId: string;
   keyPair: CryptoKeyPair;
+  clockOffsetMs?: number;
 }
 
 function openDb(): Promise<IDBDatabase> {

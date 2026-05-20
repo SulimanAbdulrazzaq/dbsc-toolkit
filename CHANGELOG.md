@@ -2,6 +2,24 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] — 2026-05-20
+
+### Added
+
+- **Per-request signing for the bound tier.** Opt-in feature that closes the cookie ride-along gap on Firefox / Safari / older Chromium. A stolen cookie pasted into a second browser profile cannot reach routes gated with `requireBoundProof()` — the attacker has the cookie but not the private key in the victim's IndexedDB, so the request is rejected even within the freshness window.
+- New client export: `wrapFetch()` from `dbsc-toolkit/client`. Returns a fetch-shaped function that adds an `X-Dbsc-Bound-Proof` header signed over `${sessionId}.${METHOD}.${path}.${ts}`. Per-call use only — never assign to `globalThis.fetch`.
+- New server export: `requireBoundProof()` from each of `dbsc-toolkit/express`, `dbsc-toolkit/fastify`, `dbsc-toolkit/hono`, `dbsc-toolkit/nextjs`. Verifies the proof header before letting the request through. `tier: "dbsc"` passes through by default (Chromium enforces session validity browser-side); pass `allowDbscWithoutProof: false` to require the proof on native DBSC too.
+- New core function: `verifyBoundProof()` from `dbsc-toolkit` for adapter authors and frameworks the library doesn't ship.
+- Auto clock-skew correction: the bound endpoints now emit an `X-Server-Time` response header. The client SDK reads it, stores the offset alongside the keypair in IndexedDB, and signs with the corrected time. A user whose device clock is hours off still produces a fresh-enough timestamp. Default acceptance window widened to ±5 minutes.
+- New `ErrorCodes`: `MISSING_PROOF`, `MALFORMED_PROOF`.
+
+### Notes
+
+- This is opt-in. Apps that don't import `requireBoundProof()` or `wrapFetch()` are unaffected — the new code lives in isolated files and is never reached by the registration / refresh / state code paths.
+- Recommended use is sensitive routes only (payment, admin, password change). Per-request signing has a measurable CPU cost on both sides; do not wrap every fetch.
+- The signed message does not include the request body in this release. Active MITM that can substitute bodies within the timestamp window is a separate threat that TLS already prevents for any modern HTTPS app. Body signing is on the roadmap.
+- Full design, threat boundary, and integration recipe: [docs/per-request-signing.md](./docs/per-request-signing.md).
+
 ## [2.0.2] — 2026-05-20
 
 Docs-only release to refresh the README displayed on npmjs.com. The README was rewritten in `c920e35` to lead with the problem (stolen cookies) before the mechanism, trimmed from 343 to 135 lines, and the production-readiness table moved to `HOW-IT-WORKS.md`. No code changes; safe to upgrade from 2.0.1 with no action required.

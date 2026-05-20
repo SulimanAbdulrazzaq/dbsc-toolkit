@@ -216,9 +216,22 @@ function handleBoundRefresh(req: BoundRefreshRequest, storage: StorageAdapter): 
 
 // Web Crypto signature verification helper used by both handlers, exposed for adapters.
 function verifyP256Signature(jwk: JsonWebKey, signatureB64Url: string, message: string): Promise<boolean>;
+
+// Per-request signing — see docs/per-request-signing.md.
+// Throws DbscVerificationError on any failure; the caller decides the HTTP status.
+const BOUND_PROOF_HEADER = "X-Dbsc-Bound-Proof";
+interface VerifyBoundProofRequest {
+  sessionId: string;
+  proofHeader: string | undefined;
+  method: string;
+  path: string;
+  timestampWindowMs?: number;   // default 5 * 60 * 1000
+}
+function verifyBoundProof(req: VerifyBoundProofRequest, storage: StorageAdapter): Promise<void>;
+function parseProofHeader(s: string): { ts: number; sig: string } | null;
 ```
 
-The bound polyfill protocol is documented in [bound-polyfill.md](./bound-polyfill.md).
+The bound polyfill protocol is documented in [bound-polyfill.md](./bound-polyfill.md). The per-request signing flow that closes the bound-tier ride-along gap is documented in [per-request-signing.md](./per-request-signing.md). New `ErrorCodes` entries: `MISSING_PROOF`, `MALFORMED_PROOF`.
 
 ### Telemetry
 
@@ -273,9 +286,19 @@ function bindSession(
   storage: StorageAdapter,
   opts: BindSessionOptions,
 ): Promise<void>;
+
+// Per-request signing gate for sensitive routes — see docs/per-request-signing.md.
+interface RequireBoundProofOptions {
+  storage: StorageAdapter;
+  allowDbscWithoutProof?: boolean;   // default true — tier=dbsc passes through
+  timestampWindowMs?: number;        // default 5 * 60 * 1000
+}
+function requireBoundProof(opts: RequireBoundProofOptions): RequestHandler;
 ```
 
 After mount, every request has `res.locals.dbsc` populated. Call `bindSession` once on your login response to start a new binding — it writes the session row, issues a challenge, sets both registration headers (legacy + new), and sets the two short-lived cookies Chrome needs.
+
+`requireBoundProof()` gates sensitive routes on a fresh proof signed by the bound key — pair it with `wrapFetch()` on the client. Native DBSC users pass through by default. The same `RequireBoundProofOptions` shape is used by every adapter; the wrapper just changes return type to match each framework's middleware idiom (Fastify returns a `preHandler`, Hono a `MiddlewareHandler`, Next.js a handler-callable that returns `{ ok }` or a short-circuit response).
 
 ---
 
@@ -401,6 +424,14 @@ interface InitBoundDbscOptions {
 
 function initBoundDbsc(options?: InitBoundDbscOptions): Promise<void>;
 function stopBoundDbsc(): void;
+
+// Per-request signing for sensitive routes — see docs/per-request-signing.md.
+// Returns a NEW fetch-shaped function. Do not assign to globalThis.fetch.
+interface WrapFetchOptions {
+  fetch?: typeof fetch;
+  headerName?: string;            // default "X-Dbsc-Bound-Proof"
+}
+function wrapFetch(options?: WrapFetchOptions): typeof fetch;
 ```
 
 Typical use:

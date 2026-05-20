@@ -24,6 +24,9 @@ import {
   type SkippedEntry,
 } from "../core/index.js";
 
+export { requireBoundProof } from "./proof.js";
+export type { RequireBoundProofOptions } from "./proof.js";
+
 const cookieNames = (secure: boolean) => ({
   bound: secure ? "__Host-dbsc-session" : "dbsc-session",
   reg: secure ? "__Host-dbsc-reg" : "dbsc-reg",
@@ -275,6 +278,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
       getCookie(c, COOKIES.bound) ?? getCookie(c, COOKIES.reg);
 
     if (c.req.method === "GET" && url.pathname === boundStatePath) {
+      c.header("X-Server-Time", String(Date.now()));
       const sid = readBoundSessionId();
       if (!sid) return c.json({ phase: "unbound", sessionId: null });
       const session = await storage.getSession(sid);
@@ -297,6 +301,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
     }
 
     if (c.req.method === "POST" && url.pathname === boundRegistrationPath) {
+      c.header("X-Server-Time", String(Date.now()));
       const allowed = await rateLimiter.checkRegistration(ip);
       if (!allowed) return c.json({ error: "rate limited" }, 429);
 
@@ -346,6 +351,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
     }
 
     if (c.req.method === "POST" && url.pathname === boundRefreshPath) {
+      c.header("X-Server-Time", String(Date.now()));
       const sid = readBoundSessionId();
       if (!sid) return c.json({ error: "no session" }, 403);
 

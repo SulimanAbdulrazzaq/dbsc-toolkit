@@ -28,7 +28,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Redis from "ioredis";
 
-import { dbsc, bindSession } from "dbsc-toolkit/express";
+import { dbsc, bindSession, requireBoundProof } from "dbsc-toolkit/express";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 import { RedisStorage } from "dbsc-toolkit/storage/redis";
 
@@ -309,6 +309,26 @@ app.get("/profile", requireDbsc, (req, res) => {
   });
 });
 
+// ─── /profile-strict — requires a per-request signed proof ───
+// New in v2.1.0. On tier=dbsc this passes through (Chromium enforces session
+// validity browser-side). On tier=bound the route demands a fresh
+// X-Dbsc-Bound-Proof header signed by the IndexedDB key. A stolen cookie
+// pasted into a second Firefox profile cannot produce that proof, so it's
+// rejected immediately — even within the freshness window.
+app.get("/profile-strict", requireDbscSession, requireBoundProof({ storage: dbscStorage }), (req, res) => {
+  res.json({
+    username: req.session.username,
+    plan: "demo",
+    securityLevel: res.locals.dbsc.tier,
+    note: "Reached via a verified per-request proof. A stolen cookie alone cannot reach this route on Firefox/Safari.",
+  });
+});
+
+function requireDbscSession(req, res, next) {
+  if (!req.session.userId) return res.status(401).json({ error: "not logged in" });
+  next();
+}
+
 // ─── /profile-soft — any non-none tier ───
 // Demonstrates a route that accepts either DBSC native or the bound polyfill.
 // Both deliver cryptographic refresh signing — the only difference is whether
@@ -397,6 +417,11 @@ ${storageBanner}
 <button id="profile-btn" class="protected">Get profile (requires tier=dbsc)</button>
 <p class="sub"><code>/profile-soft</code> accepts <code>"dbsc"</code> or <code>"bound"</code> — both deliver cryptographic refresh signing.</p>
 <button id="profile-soft-btn">Get profile-soft (any tier except none)</button>
+
+<h2>4. Strict route — requires per-request signed proof</h2>
+<p class="sub"><code>/profile-strict</code> demands <code>X-Dbsc-Bound-Proof</code> on tier=bound requests. The first button uses <code>wrapFetch</code> to sign automatically; the second deliberately omits it to demonstrate the rejection an attacker would hit with a stolen cookie.</p>
+<button id="profile-strict-btn" class="protected">Get profile-strict (with proof)</button>
+<button id="theft-btn">Simulate cookie theft (no proof)</button>
 
 <div id="alert" class="banner alert" style="display:none"></div>
 <pre id="out">(output will appear here)</pre>
@@ -562,6 +587,38 @@ document.getElementById('profile-btn').onclick = async () => {
 document.getElementById('profile-soft-btn').onclick = async () => {
   show(await req('GET', '/profile-soft'));
 };
+document.getElementById('profile-strict-btn').onclick = async () => {
+  // Uses the wrapFetch-signed version. On native DBSC the proof header is
+  // unnecessary (requireBoundProof passes tier=dbsc through), but it doesn't
+  // hurt to send it.
+  if (typeof window.dbscBoundFetch !== 'function') {
+    show({ status: 0, body: { error: 'wrapFetch SDK not loaded yet — wait a second after login' } });
+    return;
+  }
+  const t0 = performance.now();
+  console.groupCollapsed('%c-> GET /profile-strict (signed)', 'color:#0a7');
+  try {
+    const r = await window.dbscBoundFetch('/profile-strict', { method: 'GET', credentials: 'include' });
+    const dt = (performance.now() - t0).toFixed(0);
+    console.log('status:', r.status, '(' + dt + 'ms)');
+    const text = await r.text();
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { parsed = text; }
+    console.log('body:', parsed);
+    console.groupEnd();
+    show({ method: 'GET', path: '/profile-strict', status: r.status, body: parsed });
+  } catch (err) {
+    console.error('fetch failed:', err);
+    console.groupEnd();
+    show({ method: 'GET', path: '/profile-strict', status: 0, body: { error: String(err) } });
+  }
+};
+document.getElementById('theft-btn').onclick = async () => {
+  // Plain fetch — no proof header. On tier=bound the server returns 403 with
+  // code:"MISSING_PROOF". On tier=dbsc the server still passes through (Chromium
+  // enforcement handles the equivalent threat), so this only fails on Firefox/Safari.
+  show(await rawReq('GET', '/profile-strict'));
+};
 document.getElementById('clear-btn').onclick = async () => {
   show(await req('POST', '/clear-cookies'));
 };
@@ -596,8 +653,11 @@ document.getElementById('clear-btn').onclick = async () => {
 </script>
 
 <script type="module">
-  import { initBoundDbsc } from '/dbsc-client/index.js';
+  import { initBoundDbsc, wrapFetch } from '/dbsc-client/index.js';
   window.initBoundDbsc = initBoundDbsc;
+  // Per-call wrapper. NOT assigned to globalThis.fetch — analytics, React Query,
+  // and other third-party SDKs keep using the native fetch unaffected.
+  window.dbscBoundFetch = wrapFetch();
   initBoundDbsc().catch((err) => console.error('[bound-sdk]', err));
 </script>
 </body>

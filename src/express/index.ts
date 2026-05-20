@@ -27,6 +27,9 @@ import {
   type AutoBindResult,
 } from "../core/index.js";
 
+export { requireBoundProof } from "./proof.js";
+export type { RequireBoundProofOptions } from "./proof.js";
+
 const cookieNames = (secure: boolean) => ({
   bound: secure ? "__Host-dbsc-session" : "dbsc-session",
   reg: secure ? "__Host-dbsc-reg" : "dbsc-reg",
@@ -345,6 +348,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
   }
 
   async function handleBoundStateRoute(req: Request, res: Response): Promise<void> {
+    res.setHeader("X-Server-Time", String(Date.now()));
     const sessionId = readBoundSessionId(req);
     if (!sessionId) {
       res.status(200).json({ phase: "unbound", sessionId: null });
@@ -389,6 +393,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
   }
 
   async function handleBoundRegistrationRoute(req: Request, res: Response): Promise<void> {
+    res.setHeader("X-Server-Time", String(Date.now()));
     const ip = req.ip ?? "unknown";
     const allowed = await rateLimiter.checkRegistration(ip);
     if (!allowed) {
@@ -455,6 +460,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
   }
 
   async function handleBoundRefreshRoute(req: Request, res: Response): Promise<void> {
+    res.setHeader("X-Server-Time", String(Date.now()));
     const ip = req.ip ?? "unknown";
     const sessionId = readBoundSessionId(req);
     if (!sessionId) {
