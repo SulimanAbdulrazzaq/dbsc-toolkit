@@ -93,10 +93,10 @@ The tier check is where the security actually lives. Pattern from a Reddit-style
 |-------|---------------|-----------|
 | `GET /feed` | none | Read-only, public-ish. Don't lock anyone out. |
 | `GET /comments/:id` | none | Same. |
-| `POST /comment` | hmac or higher | Some binding, not strict. |
-| `POST /upvote` | hmac or higher | Cheap action, abuse-prone but not catastrophic. |
-| `POST /post` | hmac or higher | Same. |
-| `POST /settings/email` | dbsc | Account takeover vector. Hardware-bound only. |
+| `POST /comment` | bound or dbsc (`!== "none"`) | Some binding, not strict. |
+| `POST /upvote` | bound or dbsc (`!== "none"`) | Cheap action, abuse-prone but not catastrophic. |
+| `POST /post` | bound or dbsc (`!== "none"`) | Same. |
+| `POST /settings/email` | dbsc | Account takeover vector. TPM-backed only — defeats infostealer malware. |
 | `POST /settings/password` | dbsc | Same. |
 | `POST /payment` | dbsc | Same. |
 | `POST /admin/*` | dbsc | Same. |
@@ -104,26 +104,33 @@ The tier check is where the security actually lives. Pattern from a Reddit-style
 Express helper if you prefer a middleware:
 
 ```js
-const requireTier = (min) => (req, res, next) => {
-  const rank = { none: 0, hmac: 1, webauthn: 2, dbsc: 3 };
-  if (rank[res.locals.dbsc.tier] < rank[min]) {
-    return res.status(403).json({ error: `requires ${min} tier` });
+const requireBound = (req, res, next) => {
+  if (res.locals.dbsc.tier === "none") {
+    return res.status(403).json({ error: "session not bound" });
   }
   next();
 };
 
-app.post("/comment", requireTier("hmac"), commentHandler);
-app.post("/settings/email", requireTier("dbsc"), emailHandler);
+const requireDbsc = (req, res, next) => {
+  if (res.locals.dbsc.tier !== "dbsc") {
+    return res.status(403).json({ error: "hardware-bound session required" });
+  }
+  next();
+};
+
+app.post("/comment", requireBound, commentHandler);
+app.post("/settings/email", requireDbsc, emailHandler);
 ```
 
 ## Non-Chromium users
 
-Firefox, Safari, older Chromium versions — these don't know what DBSC is. They ignore the registration header entirely and stay at `tier: "none"` (or the tier their fallback achieves if you wire WebAuthn or HMAC).
+Firefox, Safari, and older Chromium ignore the native DBSC registration header. If you load `initBoundDbsc()` from `dbsc-toolkit/client` on your page, those browsers land on `tier: "bound"` automatically — the Web Crypto polyfill kicks in ~3 seconds after login and signs refresh challenges silently from then on.
 
 Decide your policy:
 
-- **Permissive:** accept `none` for non-sensitive routes. This is the only choice if you can't force users onto Chromium 145+. Most sites pick this.
-- **Strict:** require `dbsc` everywhere. Excludes anyone not on a Chromium 145+ browser (Chrome, Edge, Brave, Opera, etc.). Only viable for internal tools.
+- **Default:** load the bound polyfill, gate sensitive routes on `tier !== "none"`. Every modern browser ends up bound; routes that demand TPM-level isolation stay gated on `tier === "dbsc"`.
+- **Permissive without polyfill:** don't load the client SDK. Non-Chromium users stay at `tier: "none"` indefinitely. Only sensible if you've decided not to ship browser-side JavaScript for binding.
+- **Strict:** require `dbsc` everywhere, regardless of polyfill. Excludes any browser without native DBSC support. Only viable for internal tools.
 
 You can't detect "this browser supports DBSC" from the server cleanly. The tier on first request reflects what binding actually happened — `none` means either "no DBSC support" or "DBSC not bound yet." Both look the same and that's fine: you just gate on the tier you got.
 
@@ -159,7 +166,7 @@ app.post("/logout", async (req, res) => {
 
 ## What this does NOT protect against
 
-- **An attacker who controls the user's device.** DBSC binds to the device; if the attacker is on the device they have the device's key. Defense in depth: pair with WebAuthn for high-value actions.
+- **An attacker who controls the user's device.** Native DBSC binds the key to the TPM, so on-device malware still cannot extract the key — but it can sign refreshes from within the user's browser process. The bound polyfill is more exposed: its key blob sits on disk in the browser profile and is readable by infostealer malware. For routes that must defeat this class of threat, gate strictly on `tier === "dbsc"`.
 - **Server-side session theft.** If your session store is breached, the attacker has every session row. DBSC's key is server-side too. This is a database-security problem, not a session-binding problem.
 - **CSRF.** DBSC is about exfiltrated cookies, not about cross-site form posts. Keep your CSRF tokens.
 - **TLS interception.** DBSC assumes the TLS layer is intact. If you're MITM'd, the attacker sees the registration JWS too. Use HSTS.

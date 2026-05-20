@@ -70,7 +70,7 @@ app.listen(3000);
 
 **Hosted deploy.** Push to Railway, Fly, Render, or Vercel — they terminate HTTPS at the edge automatically.
 
-For local-only HTTP testing, set `secure: false` in the middleware options. The library falls back to non-prefixed cookie names. DBSC will still not work because Chrome rejects the protocol over HTTP, but you can at least exercise the WebAuthn or HMAC fallback tiers.
+For local-only HTTP testing, set `secure: false` in the middleware options. The library falls back to non-prefixed cookie names. Native DBSC will still not work because Chromium rejects the protocol over HTTP, but the bound polyfill operates over Web Crypto and works fine — useful for exercising the protocol locally.
 
 ## Verify it works
 
@@ -94,6 +94,6 @@ From this point forward your application code never has to think about DBSC. The
 - Bolting DBSC onto an existing app with its own session cookie? See [integrating with existing auth](./integrating-existing-auth.md).
 - Switch to a real storage adapter — see [storage](./storage.md).
 - Read [protocol](./protocol.md) to understand exactly what Chrome and the server exchange.
-- Use `tier` to gate sensitive operations — see [fallback tiers](./fallback-tiers.md).
+- Use `tier` to gate sensitive operations — gate on `tier !== "none"` for routes that need any binding, on `tier === "dbsc"` for routes that need TPM-backed binding specifically. See [bound-polyfill.md](./bound-polyfill.md) for the per-tier threat boundary.
 - Wire telemetry — see [telemetry](./telemetry.md).
 - Going to production — see [deployment](./deployment.md) and [security best practices](./security/best-practices.md).

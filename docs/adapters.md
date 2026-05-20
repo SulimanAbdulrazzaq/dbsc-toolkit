@@ -41,7 +41,7 @@ The `text` body parsers on the protocol routes are required — Chrome sends the
 ```ts
 {
   sessionId: string | null;
-  tier: "dbsc" | "webauthn" | "hmac" | "none";
+  tier: "dbsc" | "bound" | "none";
   skipped: SkippedEntry[];        // Chrome's diagnostic entries (quota_exceeded, etc.)
   revoke: () => Promise<void>;    // server-side revocation + Set-Cookie clear
 }

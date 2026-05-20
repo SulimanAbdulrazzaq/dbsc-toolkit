@@ -103,20 +103,20 @@ This is the single most actionable event. Wire it to:
 - Page on-call if the rate exceeds N/minute.
 - Trigger a security review of the affected user account.
 
-### `fallback_tier`
+### `tier_change`
 
-Fires when a session moves between tiers — typically when a WebAuthn or HMAC fallback completes after DBSC fails.
+Fires when a session moves between tiers — for example when the bound polyfill activates after a native DBSC attempt times out, or when a refresh failure demotes a tier to `"none"`.
 
 ```ts
-interface FallbackTierEvent extends TelemetryEvent {
-  type: "fallback_tier";
+interface TierChangeEvent extends TelemetryEvent {
+  type: "tier_change";
   from: ProtectionTier;
   to: ProtectionTier;
-  reason: string;   // "dbsc_unsupported" | "tpm_unavailable" | "webauthn_failed"
+  reason: string;
 }
 ```
 
-Useful for: tracking what fraction of sessions land at each tier, identifying browsers/platforms with poor support.
+The library does not auto-emit this event from every internal transition; it is the canonical shape for applications that want to track promotions or demotions explicitly. Useful for: dashboards on what fraction of sessions land at each tier, identifying browsers/platforms where the polyfill carries more traffic than expected.
 
 ## OpenTelemetry mapping
 
@@ -129,8 +129,8 @@ dbsc.event_type    = event.type
 dbsc.ip            = event.ip
 dbsc.algorithm     = event.algorithm    (registration only)
 dbsc.failure_reason = event.reason      (verification_failure only)
-dbsc.fallback_from = event.from         (fallback_tier only)
-dbsc.fallback_to   = event.to           (fallback_tier only)
+dbsc.tier_from     = event.from         (tier_change only)
+dbsc.tier_to       = event.to           (tier_change only)
 ```
 
 Example with OTel:
@@ -180,7 +180,7 @@ For dashboards:
 | `dbsc.verification_failure.count` | counter | tier, reason |
 | `dbsc.session_stolen.count` | counter | (none — should always be near zero) |
 | `dbsc.tier_distribution` | gauge | tier — sample periodically from storage |
-| `dbsc.fallback_tier.count` | counter | from, to, reason |
+| `dbsc.tier_change.count` | counter | from, to, reason |
 
 ## Alerting thresholds (starting points)
 

@@ -23,18 +23,18 @@ import cookieParser from "cookie-parser";
 import session from "express-session";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import Redis from "ioredis";
 
 import { dbsc, bindSession } from "dbsc-toolkit/express";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 import { RedisStorage } from "dbsc-toolkit/storage/redis";
-import {
-  generateWebAuthnRegistration,
-  verifyWebAuthnRegistration,
-  collectSignals,
-  generateHmacToken,
-  verifyHmacToken,
-} from "dbsc-toolkit";
+
+const require = createRequire(import.meta.url);
+const dbscToolkitPkgPath = require.resolve("dbsc-toolkit/package.json");
+const dbscToolkitClientDir = join(dirname(dbscToolkitPkgPath), "dist", "client");
 
 const app = express();
 app.set("trust proxy", true);
@@ -90,23 +90,13 @@ app.get("/debug-logs/stream", (req, res) => {
 // Shape: { username -> { id, username, passwordHash } }
 const users = new Map();
 
-// Per-user registered WebAuthn credentials. Shape: userId -> { id, publicKey, counter }
-const webauthnCredentials = new Map();
-
-// Pending WebAuthn ceremonies (challenge waiting for the browser to respond).
-// Shape: userId -> challenge string. Single-use; cleared after verify.
-const webauthnPending = new Map();
-
-// HMAC secret used to sign the signal-bundle tokens. In production, load from
-// env var and persist; rotating this invalidates every hmac-tier session.
-const HMAC_SECRET = process.env.HMAC_SECRET
-  ? Buffer.from(process.env.HMAC_SECRET, "hex")
-  : randomBytes(32);
-
-const HMAC_COOKIE = "demo.hmac";
-
 app.use(cookieParser());
 app.use(express.json());
+
+// Serve the dbsc-toolkit browser SDK at /dbsc-client/ so the HTML can import
+// it as a regular ES module. Pulled from node_modules so it always matches
+// the installed library version.
+app.use("/dbsc-client", express.static(dbscToolkitClientDir));
 
 // Standard server-side session cookie. Cookie name: "connect.sid".
 // This is the user's identity cookie — exactly like Reddit, Discourse,
@@ -319,141 +309,11 @@ app.get("/profile", requireDbsc, (req, res) => {
   });
 });
 
-// ═════════════════════════════════════════════════════════════════════════════
-// FALLBACK TIERS — webauthn + hmac
-//
-// The library exposes the negotiated tier on every request, but the actual
-// promotion to "webauthn" or "hmac" is something your app drives. Real apps
-// pick one or both based on user UX preferences.
-//
-// Flow:
-//   1. App detects DBSC didn't activate (tier=none after a few seconds).
-//   2. App offers user a fallback: either platform authenticator (webauthn)
-//      or signal-bundle binding (hmac).
-//   3. On success, app updates the session row in DBSC storage to mark the
-//      new tier. The middleware's per-request tier read picks it up.
-//
-// The two flows below are minimal but complete. webauthn uses the library's
-// server-side @simplewebauthn/server wrappers; hmac uses the library's
-// collectSignals + generateHmacToken + verifyHmacToken helpers.
-// ═════════════════════════════════════════════════════════════════════════════
-
-// Helper: promote the DBSC session row's tier in storage AND set the bound
-// cookie the middleware reads. Without the cookie, the middleware can't link
-// the request back to the storage row (it looks up sessionId from
-// __Host-dbsc-session only). This is what enables webauthn/hmac tiers on
-// browsers that never completed the native DBSC registration (Firefox, Safari).
-async function promoteTier(req, res, tier) {
-  const sessionId = req.session.id;
-  const sess = await dbscStorage.getSession(sessionId);
-  if (sess) {
-    await dbscStorage.setSession({ ...sess, tier, lastRefreshAt: Date.now() });
-  } else {
-    // Session row doesn't exist yet — happens if /login bound DBSC but the
-    // browser didn't complete registration. Create a minimal one so the
-    // middleware has something to read tier from.
-    await dbscStorage.setSession({
-      id: sessionId,
-      userId: req.session.userId,
-      tier,
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-      lastRefreshAt: Date.now(),
-    });
-  }
-
-  res.cookie("__Host-dbsc-session", sessionId, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 24 * 60 * 60 * 1000,
-  });
-}
-
-// ─── WebAuthn registration ceremony ───
-const RP_NAME = "DBSC Toolkit Demo";
-
-function rpId(req) {
-  // RP ID must be the registrable domain of the request origin. For the demo
-  // this is dbsc-toolkit.onrender.com.
-  return req.get("host").split(":")[0];
-}
-
-app.post("/tier/webauthn/begin", async (req, res) => {
-  if (!req.session.userId) return res.status(401).json({ error: "not logged in" });
-  const { options, challenge } = await generateWebAuthnRegistration(
-    RP_NAME,
-    rpId(req),
-    req.session.userId,
-    req.session.username,
-  );
-  webauthnPending.set(req.session.userId, challenge);
-  emitLog({ t: "webauthn-begin", userId: req.session.userId });
-  res.json(options);
-});
-
-app.post("/tier/webauthn/finish", async (req, res) => {
-  if (!req.session.userId) return res.status(401).json({ error: "not logged in" });
-  const expectedChallenge = webauthnPending.get(req.session.userId);
-  if (!expectedChallenge) {
-    return res.status(400).json({ error: "no pending ceremony — call /tier/webauthn/begin first" });
-  }
-  webauthnPending.delete(req.session.userId);
-
-  try {
-    const verification = await verifyWebAuthnRegistration(
-      req.body,
-      expectedChallenge,
-      `https://${rpId(req)}`,
-      rpId(req),
-    );
-    if (!verification.verified || !verification.registrationInfo) {
-      return res.status(400).json({ error: "verification failed" });
-    }
-    webauthnCredentials.set(req.session.userId, verification.registrationInfo);
-
-    await promoteTier(req, res, "webauthn");
-    emitLog({ t: "webauthn-success", userId: req.session.userId, tier: "webauthn" });
-    res.json({ ok: true, tier: "webauthn" });
-  } catch (err) {
-    emitLog({ t: "webauthn-error", error: String(err) });
-    res.status(400).json({ error: String(err) });
-  }
-});
-
-// ─── HMAC tier ───
-app.post("/tier/hmac", async (req, res) => {
-  if (!req.session.userId) return res.status(401).json({ error: "not logged in" });
-  const signals = collectSignals(req.headers);
-  const token = generateHmacToken(signals, HMAC_SECRET);
-
-  res.cookie(HMAC_COOKIE, token, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 24 * 60 * 60 * 1000,
-  });
-
-  await promoteTier(req, res, "hmac");
-  emitLog({ t: "hmac-bound", userId: req.session.userId, tier: "hmac" });
-  res.json({ ok: true, tier: "hmac", note: "Best-effort binding only — see /docs/fallback-tiers.md" });
-});
-
-// Middleware that re-verifies the HMAC binding on every request. Used as part
-// of requireMin so we don't trust the stored tier alone for hmac sessions.
-function verifyHmacBinding(req) {
-  const token = req.cookies?.[HMAC_COOKIE];
-  if (!token) return false;
-  return verifyHmacToken(token, collectSignals(req.headers), HMAC_SECRET);
-}
-
 // ─── /profile-soft — any non-none tier ───
-// Demonstrates a route that accepts any binding (dbsc OR webauthn OR hmac).
-// hmac is re-verified per request; dbsc / webauthn rely on the middleware's
-// freshness check.
-app.get("/profile-soft", async (req, res) => {
+// Demonstrates a route that accepts either DBSC native or the bound polyfill.
+// Both deliver cryptographic refresh signing — the only difference is whether
+// the key lives in TPM/Secure Enclave (dbsc) or the browser keystore (bound).
+app.get("/profile-soft", (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: "not logged in" });
   const tier = res.locals.dbsc.tier;
 
@@ -461,13 +321,7 @@ app.get("/profile-soft", async (req, res) => {
     return res.status(403).json({
       error: "any non-none tier required",
       currentTier: "none",
-      reason: "no binding active. Enable WebAuthn or HMAC fallback, or use a Chromium 145+ browser for DBSC.",
-    });
-  }
-  if (tier === "hmac" && !verifyHmacBinding(req)) {
-    return res.status(403).json({
-      error: "hmac binding mismatch",
-      reason: "the signal bundle (User-Agent, Accept-Language, etc.) on this request does not match what was registered. Cookie may have been replayed from another browser.",
+      reason: "no binding active. Wait a few seconds after login for the bound polyfill to activate, or use a Chromium 145+ browser for native DBSC.",
     });
   }
 
@@ -537,16 +391,11 @@ ${storageBanner}
 <p class="sub"><code>/me</code> works for any logged-in user (does NOT require DBSC). Shows your app session id + the DBSC tier the browser reached.</p>
 <button id="me-btn">Check session (no DBSC required)</button>
 
-<h2>3. Fallback tiers — for browsers without DBSC</h2>
-<p class="sub">Firefox / Safari / pre-145 Chromium stay at <code>tier=none</code> after login. The library exposes two fallback paths your app drives manually. Click one to promote this session.</p>
-<button id="webauthn-btn">Enable WebAuthn (TouchID / Windows Hello / Passkey)</button>
-<button id="hmac-btn">Enable HMAC (best-effort, no hardware)</button>
-<p class="sub"><strong>WebAuthn</strong> = platform authenticator binding (hardware on most modern devices). UX prompt appears. <strong>HMAC</strong> = signal-bundle binding (UA / Accept-Language / TLS). Weak — only catches amateur cookie theft. Never sufficient for high-value routes.</p>
-
-<h2>4. Protected routes — gated by tier</h2>
-<p class="sub"><code>/profile</code> is gated on <code>tier === "dbsc"</code>. Only reachable from a Chromium 145+ browser after registration completes.</p>
+<h2>3. Protected routes — gated by tier</h2>
+<p class="sub">On Chromium 145+ this session is hardware-bound via native DBSC. On other browsers a silent Web Crypto polyfill kicks in within ~3 seconds of login. Either way, <code>tier !== "none"</code> is the gate to use for routes that need binding.</p>
+<p class="sub"><code>/profile</code> is gated strictly on <code>tier === "dbsc"</code> — use this for actions where you want the TPM-backed guarantee specifically.</p>
 <button id="profile-btn" class="protected">Get profile (requires tier=dbsc)</button>
-<p class="sub"><code>/profile-soft</code> accepts any non-none tier — dbsc OR webauthn OR hmac. This is the pattern for read-mostly routes where you want some binding but Chrome-only would lock out half your users.</p>
+<p class="sub"><code>/profile-soft</code> accepts <code>"dbsc"</code> or <code>"bound"</code> — both deliver cryptographic refresh signing.</p>
 <button id="profile-soft-btn">Get profile-soft (any tier except none)</button>
 
 <div id="alert" class="banner alert" style="display:none"></div>
@@ -609,8 +458,8 @@ async function rawReq(method, path, body) {
 // reporting tier=none to the user.
 let lastLoginAt = 0;
 const RETRY_PATHS = new Set(['/me', '/profile', '/profile-soft']);
-const RETRY_WINDOW_MS = 5000;
-const RETRY_DELAY_MS = 1200;
+const RETRY_WINDOW_MS = 8000;
+const RETRY_DELAY_MS = 1500;
 
 function looksLikeNoneTier(result) {
   if (!result || result.status !== 200) {
@@ -653,7 +502,7 @@ async function pollDbscReady() {
   const token = { aborted: false };
   pollAbort = token;
 
-  setStatus('pending', 'Waiting for DBSC binding… (Chromium 145+ does this automatically in the background)');
+  setStatus('pending', 'Binding session… (native DBSC on Chromium 145+, Web Crypto polyfill on other browsers)');
   const deadline = Date.now() + RETRY_WINDOW_MS;
 
   while (!token.aborted && Date.now() < deadline) {
@@ -661,13 +510,16 @@ async function pollDbscReady() {
     if (token.aborted) return;
     const tier = r && r.body && r.body.dbsc && r.body.dbsc.tier;
     if (tier && tier !== 'none') {
-      setStatus('ready', 'DBSC binding active. tier = ' + tier + '. Your session is hardware-bound.');
+      const label = tier === 'dbsc'
+        ? 'Session bound (tier: dbsc) — hardware-backed key, native DBSC.'
+        : 'Session bound (tier: bound) — Web Crypto polyfill. Cookies replayed elsewhere will fail refresh.';
+      setStatus('ready', label);
       return;
     }
     await new Promise((res) => setTimeout(res, 600));
   }
   if (!token.aborted) {
-    setStatus('unsupported', 'No DBSC binding after 5s. Likely a non-Chromium browser (Firefox/Safari) or Chromium <145. Use the WebAuthn or HMAC fallback below.');
+    setStatus('unsupported', 'No binding after ' + (RETRY_WINDOW_MS / 1000) + 's. Check the browser console for SDK errors, or that cookies and IndexedDB are not blocked.');
   }
 }
 
@@ -708,31 +560,6 @@ document.getElementById('clear-btn').onclick = async () => {
   show(await req('POST', '/clear-cookies'));
 };
 
-// ─── WebAuthn handler ───
-// Uses @simplewebauthn/browser loaded from esm.sh CDN. In a real app you'd
-// bundle it. The dynamic import keeps the demo HTML simple.
-document.getElementById('webauthn-btn').onclick = async () => {
-  try {
-    const mod = await import('https://esm.sh/@simplewebauthn/browser@11');
-    const begin = await req('POST', '/tier/webauthn/begin');
-    if (begin.status !== 200) { show(begin); return; }
-    let credential;
-    try {
-      credential = await mod.startRegistration({ optionsJSON: begin.body });
-    } catch (err) {
-      show({ method: 'webauthn ceremony', status: 0, body: { error: String(err), hint: 'Browser cancelled or no platform authenticator available (TouchID / Windows Hello / fingerprint reader needed).' } });
-      return;
-    }
-    show(await req('POST', '/tier/webauthn/finish', credential));
-  } catch (err) {
-    show({ method: 'webauthn', status: 0, body: { error: String(err) } });
-  }
-};
-
-document.getElementById('hmac-btn').onclick = async () => {
-  show(await req('POST', '/tier/hmac'));
-};
-
 // Live server log stream
 (function streamServerLogs() {
   let es;
@@ -760,6 +587,11 @@ document.getElementById('hmac-btn').onclick = async () => {
   }
   connect();
 })();
+</script>
+
+<script type="module">
+  import { initBoundDbsc } from '/dbsc-client/index.js';
+  initBoundDbsc().catch((err) => console.error('[bound-sdk]', err));
 </script>
 </body>
 </html>`);

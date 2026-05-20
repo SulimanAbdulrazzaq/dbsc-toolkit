@@ -4,7 +4,7 @@ import { dbsc, bindSession } from "./index.js";
 import { MemoryStorage } from "../core/testing/memory-storage-stub.js";
 
 describe("Hono adapter session shape", () => {
-  it("exposes c.get('dbsc') as a single object and keeps legacy aliases", async () => {
+  it("exposes c.get('dbsc') as a single object with sessionId/tier/skipped/revoke", async () => {
     const storage = new MemoryStorage();
     const app = new Hono();
     app.use("*", dbsc({ storage, secure: false }));
@@ -12,9 +12,6 @@ describe("Hono adapter session shape", () => {
       const obj = c.get("dbsc");
       return c.json({
         obj,
-        legacySessionId: c.get("dbscSessionId"),
-        legacyTier: c.get("dbscTier"),
-        legacySkippedLen: c.get("dbscSkipped").length,
         hasRevoke: typeof obj?.revoke === "function",
       });
     });
@@ -27,9 +24,6 @@ describe("Hono adapter session shape", () => {
     expect(body.obj.tier).toBe("none");
     expect(body.obj.skipped).toEqual([]);
     expect(body.hasRevoke).toBe(true);
-    expect(body.legacySessionId).toBe(null);
-    expect(body.legacyTier).toBe("none");
-    expect(body.legacySkippedLen).toBe(0);
   });
 
   it("bindSession sets registration headers + cookies on the response", async () => {

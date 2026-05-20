@@ -12,7 +12,7 @@ Server-side W3C Device Bound Session Credentials (DBSC) for Node.js.
 
 - [Adapters](./adapters.md) — Express, Fastify, Hono, Next.js. Plus how to write your own for Koa, Hapi, raw `http`, Bun, Deno, Cloudflare Workers.
 - [Storage](./storage.md) — memory, Redis, Postgres. Plus how to implement `StorageAdapter` against any backend.
-- [Fallback tiers](./fallback-tiers.md) — what happens when the browser does not support DBSC. Tier negotiation, WebAuthn ceremony, HMAC signal binding.
+- [Bound polyfill](./bound-polyfill.md) — the Web Crypto path for Firefox / Safari / older Chromium. Wire protocol, key storage, threat coverage.
 - [Telemetry](./telemetry.md) — typed event hooks, OpenTelemetry mapping, suggested metrics.
 
 ## Going to production

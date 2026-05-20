@@ -23,7 +23,7 @@ Every public export across all subpaths.
 ### Types
 
 ```ts
-type ProtectionTier = "dbsc" | "webauthn" | "hmac" | "none";
+type ProtectionTier = "dbsc" | "bound" | "none";
 
 interface Session {
   id: string;
@@ -108,9 +108,9 @@ interface RegistrationEvent { type: "registration"; sessionId; tier; timestamp; 
 interface RefreshEvent { type: "refresh"; sessionId; tier; timestamp; ip }
 interface VerificationFailureEvent { type: "verification_failure"; sessionId; tier; timestamp; reason; ip }
 interface SessionStolenEvent { type: "session_stolen"; sessionId; tier; timestamp; ip }
-interface FallbackTierEvent { type: "fallback_tier"; sessionId; tier; timestamp; from; to; reason }
+interface TierChangeEvent { type: "tier_change"; sessionId; tier; timestamp; from; to; reason }
 
-type AnyTelemetryEvent = RegistrationEvent | RefreshEvent | VerificationFailureEvent | SessionStolenEvent | FallbackTierEvent;
+type AnyTelemetryEvent = RegistrationEvent | RefreshEvent | VerificationFailureEvent | SessionStolenEvent | TierChangeEvent;
 ```
 
 ### Errors
@@ -195,23 +195,30 @@ function verifyDbscJws(token: string, storedJwk: JsonWebKey, expectedJti: string
 function parseRegistrationJws(token: string): Promise<{ claims; jwk; algorithm }>;
 ```
 
-### Fallback
+### Bound polyfill (server side)
 
 ```ts
-function negotiateTier(req: { headers: Record<string, string | string[] | undefined> }): ProtectionTier;
-function detectDbscSupport(headers: Record<string, string | string[] | undefined>): boolean;
+interface BoundRegistrationRequest {
+  sessionId: string;
+  publicKey: JsonWebKey;
+  signature: string;        // base64url ECDSA P-256 signature over the JTI bytes
+  expectedJti: string;
+}
+function handleBoundRegistration(req: BoundRegistrationRequest, storage: StorageAdapter): Promise<{ boundKey: BoundKey }>;
 
-// WebAuthn (server-side helpers wrapping @simplewebauthn/server)
-function generateWebAuthnRegistration(opts): Promise<RegistrationOptions>;
-function verifyWebAuthnRegistration(opts): Promise<boolean>;
-function generateWebAuthnAuthentication(opts): Promise<AuthenticationOptions>;
-function verifyWebAuthnAuthentication(opts): Promise<boolean>;
+interface BoundRefreshRequest {
+  sessionId: string;
+  signature: string;        // base64url ECDSA P-256 signature over `${jti}.${timestamp}`
+  expectedJti: string;
+  timestamp: number;        // must be within ±60s of server time
+}
+function handleBoundRefresh(req: BoundRefreshRequest, storage: StorageAdapter): Promise<RefreshProof>;
 
-// HMAC tier
-function collectSignals(headers: Record<string, string | string[] | undefined>): SignalBundle;
-function generateHmacToken(signals: SignalBundle, secret: Uint8Array): string;
-function verifyHmacToken(token: string, signals: SignalBundle, secret: Uint8Array): boolean;
+// Web Crypto signature verification helper used by both handlers, exposed for adapters.
+function verifyP256Signature(jwk: JsonWebKey, signatureB64Url: string, message: string): Promise<boolean>;
 ```
+
+The bound polyfill protocol is documented in [bound-polyfill.md](./bound-polyfill.md).
 
 ### Telemetry
 
@@ -340,7 +347,7 @@ function bindSession(
 ): Promise<void>;
 ```
 
-Read everything as `c.get("dbsc")` — a single object matching the Express/Fastify shape. The three legacy keys (`dbscSessionId`, `dbscTier`, `dbscSkipped`) still resolve in 1.x for back-compat and will be removed in 2.0.0. `registrationCookieTtl` is honored as of 1.4.0.
+Read everything as `c.get("dbsc")` — a single object matching the Express/Fastify shape. The legacy keys (`dbscSessionId`, `dbscTier`, `dbscSkipped`) that existed in 1.x were removed in 2.0.0; use the unified object only.
 
 ---
 
@@ -380,14 +387,32 @@ Export `createDbscMiddleware` from `middleware.ts` for the App Router. Use `getD
 
 ## `dbsc-toolkit/client`
 
-Browser-side SDK for fallback tiers. Chrome with native DBSC does not need this.
+Browser-side SDK for the bound polyfill. Load on every page that needs `tier: "bound"` on non-Chromium browsers; Chromium 145+ users see no effect (the SDK detects the native binding and steps back).
 
 ```ts
-function detectClientTier(): Promise<"dbsc" | "webauthn" | "hmac">;
-function registerWebAuthn(opts): Promise<Credential>;
-function authenticateWebAuthn(opts): Promise<AuthenticationResponseJSON>;
-function collectClientSignals(): SignalBundle;
+interface InitBoundDbscOptions {
+  statePath?: string;             // default "/dbsc-bound/state"
+  challengePath?: string;         // default "/dbsc-bound/challenge"
+  registrationPath?: string;      // default "/dbsc-bound/registration"
+  refreshPath?: string;           // default "/dbsc-bound/refresh"
+  nativeProbeWindowMs?: number;   // default 3000 — how long to wait for native DBSC before polyfilling
+  refreshMarginMs?: number;       // default 5000 — refresh this many ms before the bound cookie expires
+}
+
+function initBoundDbsc(options?: InitBoundDbscOptions): Promise<void>;
+function stopBoundDbsc(): void;
 ```
+
+Typical use:
+
+```html
+<script type="module">
+  import { initBoundDbsc } from "/dbsc-client/index.js";
+  initBoundDbsc();
+</script>
+```
+
+See [bound-polyfill.md](./bound-polyfill.md) for the wire protocol and threat coverage.
 
 ---
 

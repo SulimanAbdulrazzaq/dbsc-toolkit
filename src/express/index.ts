@@ -3,6 +3,8 @@ import { randomBytes as nodeRandomBytes } from "node:crypto";
 import {
   handleRegistration,
   handleRefresh,
+  handleBoundRegistration,
+  handleBoundRefresh,
   issueChallenge,
   buildRegistrationHeader,
   buildChallengeHeader,
@@ -37,6 +39,10 @@ const DEFAULT_SESSION_TTL = 24 * 60 * 60 * 1000;
 
 export interface DbscExpressOptions extends DbscOptions {
   secure?: boolean;
+  boundStatePath?: string;
+  boundChallengePath?: string;
+  boundRegistrationPath?: string;
+  boundRefreshPath?: string;
 }
 
 export interface DbscLocals {
@@ -136,6 +142,10 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
     storage,
     registrationPath = "/dbsc/registration",
     refreshPath = "/dbsc/refresh",
+    boundStatePath = "/dbsc-bound/state",
+    boundChallengePath = "/dbsc-bound/challenge",
+    boundRegistrationPath = "/dbsc-bound/registration",
+    boundRefreshPath = "/dbsc-bound/refresh",
     boundCookieTtl = DEFAULT_BOUND_TTL,
     registrationCookieTtl = DEFAULT_REG_TTL,
     rateLimiter = new NoopRateLimiter(),
@@ -329,6 +339,198 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
     }
   }
 
+  function readBoundSessionId(req: Request): string | undefined {
+    return (req.cookies?.[COOKIES.bound]
+      ?? req.cookies?.[COOKIES.reg]) as string | undefined;
+  }
+
+  async function handleBoundStateRoute(req: Request, res: Response): Promise<void> {
+    const sessionId = readBoundSessionId(req);
+    if (!sessionId) {
+      res.status(200).json({ phase: "unbound", sessionId: null });
+      return;
+    }
+    const session = await storage.getSession(sessionId);
+    if (!session) {
+      res.status(200).json({ phase: "unbound", sessionId: null });
+      return;
+    }
+    const key = await storage.getBoundKey(sessionId);
+    if (!key) {
+      const challenge = await issueChallenge(sessionId, storage);
+      res.status(200).json({
+        phase: "needs-registration",
+        sessionId,
+        challenge: challenge.jti,
+      });
+      return;
+    }
+    res.status(200).json({
+      phase: "bound",
+      sessionId,
+      tier: session.tier,
+      refreshIntervalMs: boundCookieTtl,
+    });
+  }
+
+  async function handleBoundChallengeRoute(req: Request, res: Response): Promise<void> {
+    const sessionId = readBoundSessionId(req);
+    if (!sessionId) {
+      res.status(403).json({ error: "no session" });
+      return;
+    }
+    const session = await storage.getSession(sessionId);
+    if (!session) {
+      res.status(403).json({ error: "no session" });
+      return;
+    }
+    const challenge = await issueChallenge(sessionId, storage);
+    res.status(200).json({ challenge: challenge.jti });
+  }
+
+  async function handleBoundRegistrationRoute(req: Request, res: Response): Promise<void> {
+    const ip = req.ip ?? "unknown";
+    const allowed = await rateLimiter.checkRegistration(ip);
+    if (!allowed) {
+      res.status(429).json({ error: "rate limited" });
+      return;
+    }
+
+    const sessionId = readBoundSessionId(req);
+    if (!sessionId) {
+      res.status(400).json({ error: "missing session cookie" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as { publicKey?: JsonWebKey; signature?: string; challenge?: string };
+    if (!body.publicKey || !body.signature || !body.challenge) {
+      res.status(400).json({ error: "publicKey, signature, and challenge are required in JSON body" });
+      return;
+    }
+
+    try {
+      await handleBoundRegistration(
+        {
+          sessionId,
+          publicKey: body.publicKey,
+          signature: body.signature,
+          expectedJti: body.challenge,
+        },
+        storage,
+      );
+
+      emit(onEvent, {
+        type: "registration",
+        sessionId,
+        tier: "bound",
+        timestamp: Date.now(),
+        algorithm: "ES256",
+        ip,
+      });
+
+      res.setHeader("Set-Cookie", [
+        serializeCookie(COOKIES.bound, sessionId, cookieOpts(boundCookieTtl, secure)),
+      ]);
+      res.status(200).json({
+        session_identifier: sessionId,
+        refresh_url: boundRefreshPath,
+        tier: "bound",
+      });
+    } catch (err) {
+      await rateLimiter.recordFailure(ip, sessionId);
+      if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {
+        emit(onEvent, {
+          type: "verification_failure",
+          sessionId,
+          tier: "bound",
+          timestamp: Date.now(),
+          reason: err.code,
+          ip,
+        });
+        res.status(400).json({ error: err.message });
+        return;
+      }
+      throw err;
+    }
+  }
+
+  async function handleBoundRefreshRoute(req: Request, res: Response): Promise<void> {
+    const ip = req.ip ?? "unknown";
+    const sessionId = readBoundSessionId(req);
+    if (!sessionId) {
+      res.status(403).json({ error: "no session" });
+      return;
+    }
+
+    const allowed = await rateLimiter.checkRefresh(ip, sessionId);
+    if (!allowed) {
+      res.status(429).json({ error: "rate limited" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as { challenge?: string; signature?: string; timestamp?: number };
+    if (!body.challenge || !body.signature || typeof body.timestamp !== "number") {
+      res.status(400).json({ error: "challenge, signature, and timestamp are required" });
+      return;
+    }
+
+    try {
+      await handleBoundRefresh(
+        {
+          sessionId,
+          signature: body.signature,
+          expectedJti: body.challenge,
+          timestamp: body.timestamp,
+        },
+        storage,
+      );
+
+      emit(onEvent, {
+        type: "refresh",
+        sessionId,
+        tier: "bound",
+        timestamp: Date.now(),
+        ip,
+      });
+
+      res.setHeader("Set-Cookie", [
+        serializeCookie(COOKIES.bound, sessionId, cookieOpts(boundCookieTtl, secure)),
+      ]);
+      res.status(200).json({
+        session_identifier: sessionId,
+        refresh_url: boundRefreshPath,
+        tier: "bound",
+      });
+    } catch (err) {
+      await rateLimiter.recordFailure(ip, sessionId);
+
+      const keyStillThere = await storage.getBoundKey(sessionId);
+      if (keyStillThere && err instanceof DbscVerificationError && err.code === ErrorCodes.SIGNATURE_INVALID) {
+        emit(onEvent, {
+          type: "session_stolen",
+          sessionId,
+          tier: "bound",
+          timestamp: Date.now(),
+          ip,
+        });
+      }
+
+      if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {
+        emit(onEvent, {
+          type: "verification_failure",
+          sessionId,
+          tier: "bound",
+          timestamp: Date.now(),
+          reason: err.code,
+          ip,
+        });
+        res.status(401).json({ error: err.message });
+        return;
+      }
+      throw err;
+    }
+  }
+
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     if (req.method === "POST" && req.path === registrationPath) {
       await handleRegistrationRoute(req, res);
@@ -337,6 +539,26 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
 
     if (req.method === "POST" && req.path === refreshPath) {
       await handleRefreshRoute(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && req.path === boundStatePath) {
+      await handleBoundStateRoute(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && req.path === boundChallengePath) {
+      await handleBoundChallengeRoute(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && req.path === boundRegistrationPath) {
+      await handleBoundRegistrationRoute(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && req.path === boundRefreshPath) {
+      await handleBoundRefreshRoute(req, res);
       return;
     }
 
@@ -359,7 +581,8 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       const session = await storage.getSession(sessionId);
       if (session) {
         const staleAfter = session.lastRefreshAt + boundCookieTtl;
-        if (session.tier === "dbsc" && Date.now() > staleAfter) {
+        const refreshable = session.tier === "dbsc" || session.tier === "bound";
+        if (refreshable && Date.now() > staleAfter) {
           res.locals.dbsc.tier = "none";
         } else {
           res.locals.dbsc.tier = session.tier;

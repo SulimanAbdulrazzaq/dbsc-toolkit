@@ -4,6 +4,8 @@ import { NextResponse } from "next/server.js";
 import {
   handleRegistration,
   handleRefresh,
+  handleBoundRegistration,
+  handleBoundRefresh,
   issueChallenge,
   buildRegistrationHeader,
   buildChallengeHeader,
@@ -16,6 +18,7 @@ import {
   emit,
   DbscProtocolError,
   DbscVerificationError,
+  ErrorCodes,
   type DbscOptions,
   type StorageAdapter,
   type ProtectionTier,
@@ -34,6 +37,10 @@ const DEFAULT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface DbscNextOptions extends DbscOptions {
   secure?: boolean;
+  boundStatePath?: string;
+  boundChallengePath?: string;
+  boundRegistrationPath?: string;
+  boundRefreshPath?: string;
 }
 
 function cookieBase(secure: boolean) {
@@ -103,6 +110,10 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
     storage,
     registrationPath = "/dbsc/registration",
     refreshPath = "/dbsc/refresh",
+    boundStatePath = "/dbsc-bound/state",
+    boundChallengePath = "/dbsc-bound/challenge",
+    boundRegistrationPath = "/dbsc-bound/registration",
+    boundRefreshPath = "/dbsc-bound/refresh",
     boundCookieTtl = DEFAULT_BOUND_TTL_MS,
     registrationCookieTtl = DEFAULT_REG_TTL_MS,
     rateLimiter = new NoopRateLimiter(),
@@ -269,6 +280,141 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
       }
     }
 
+    const readBoundSessionId = (): string | undefined =>
+      req.cookies.get(COOKIES.bound)?.value ?? req.cookies.get(COOKIES.reg)?.value;
+
+    if (req.method === "GET" && url === boundStatePath) {
+      const sid = readBoundSessionId();
+      if (!sid) return NextResponse.json({ phase: "unbound", sessionId: null });
+      const session = await storage.getSession(sid);
+      if (!session) return NextResponse.json({ phase: "unbound", sessionId: null });
+      const key = await storage.getBoundKey(sid);
+      if (!key) {
+        const challenge = await issueChallenge(sid, storage);
+        return NextResponse.json({ phase: "needs-registration", sessionId: sid, challenge: challenge.jti });
+      }
+      return NextResponse.json({
+        phase: "bound",
+        sessionId: sid,
+        tier: session.tier,
+        refreshIntervalMs: boundCookieTtl,
+      });
+    }
+
+    if (req.method === "GET" && url === boundChallengePath) {
+      const sid = readBoundSessionId();
+      if (!sid) return NextResponse.json({ error: "no session" }, { status: 403 });
+      const session = await storage.getSession(sid);
+      if (!session) return NextResponse.json({ error: "no session" }, { status: 403 });
+      const challenge = await issueChallenge(sid, storage);
+      return NextResponse.json({ challenge: challenge.jti });
+    }
+
+    if (req.method === "POST" && url === boundRegistrationPath) {
+      const allowed = await rateLimiter.checkRegistration(ip);
+      if (!allowed) return NextResponse.json({ error: "rate limited" }, { status: 429 });
+
+      const sid = readBoundSessionId();
+      if (!sid) return NextResponse.json({ error: "missing session cookie" }, { status: 400 });
+
+      let body: { publicKey?: JsonWebKey; signature?: string; challenge?: string };
+      try {
+        body = (await req.json()) ?? {};
+      } catch {
+        return NextResponse.json({ error: "body must be JSON" }, { status: 400 });
+      }
+      if (!body.publicKey || !body.signature || !body.challenge) {
+        return NextResponse.json({ error: "publicKey, signature, and challenge are required" }, { status: 400 });
+      }
+
+      try {
+        await handleBoundRegistration(
+          { sessionId: sid, publicKey: body.publicKey, signature: body.signature, expectedJti: body.challenge },
+          storage,
+        );
+        emit(onEvent, {
+          type: "registration",
+          sessionId: sid,
+          tier: "bound",
+          timestamp: Date.now(),
+          algorithm: "ES256",
+          ip,
+        });
+        const res = NextResponse.json({
+          session_identifier: sid,
+          refresh_url: boundRefreshPath,
+          tier: "bound",
+        });
+        res.cookies.set(COOKIES.bound, sid, { ...cookieBase(secure), maxAge: boundCookieTtl / 1000 });
+        return res;
+      } catch (err) {
+        await rateLimiter.recordFailure(ip, sid);
+        if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {
+          emit(onEvent, {
+            type: "verification_failure",
+            sessionId: sid,
+            tier: "bound",
+            timestamp: Date.now(),
+            reason: err.code,
+            ip,
+          });
+          return NextResponse.json({ error: err.message }, { status: 400 });
+        }
+        throw err;
+      }
+    }
+
+    if (req.method === "POST" && url === boundRefreshPath) {
+      const sid = readBoundSessionId();
+      if (!sid) return NextResponse.json({ error: "no session" }, { status: 403 });
+
+      const allowed = await rateLimiter.checkRefresh(ip, sid);
+      if (!allowed) return NextResponse.json({ error: "rate limited" }, { status: 429 });
+
+      let body: { challenge?: string; signature?: string; timestamp?: number };
+      try {
+        body = (await req.json()) ?? {};
+      } catch {
+        return NextResponse.json({ error: "body must be JSON" }, { status: 400 });
+      }
+      if (!body.challenge || !body.signature || typeof body.timestamp !== "number") {
+        return NextResponse.json({ error: "challenge, signature, and timestamp are required" }, { status: 400 });
+      }
+
+      try {
+        await handleBoundRefresh(
+          { sessionId: sid, signature: body.signature, expectedJti: body.challenge, timestamp: body.timestamp },
+          storage,
+        );
+        emit(onEvent, { type: "refresh", sessionId: sid, tier: "bound", timestamp: Date.now(), ip });
+        const res = NextResponse.json({
+          session_identifier: sid,
+          refresh_url: boundRefreshPath,
+          tier: "bound",
+        });
+        res.cookies.set(COOKIES.bound, sid, { ...cookieBase(secure), maxAge: boundCookieTtl / 1000 });
+        return res;
+      } catch (err) {
+        await rateLimiter.recordFailure(ip, sid);
+        const keyStillThere = await storage.getBoundKey(sid);
+        if (keyStillThere && err instanceof DbscVerificationError && err.code === ErrorCodes.SIGNATURE_INVALID) {
+          emit(onEvent, { type: "session_stolen", sessionId: sid, tier: "bound", timestamp: Date.now(), ip });
+        }
+        if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {
+          emit(onEvent, {
+            type: "verification_failure",
+            sessionId: sid,
+            tier: "bound",
+            timestamp: Date.now(),
+            reason: err.code,
+            ip,
+          });
+          return NextResponse.json({ error: err.message }, { status: 401 });
+        }
+        throw err;
+      }
+    }
+
     if (autoBind && !req.cookies.get(COOKIES.bound)?.value && !req.cookies.get(COOKIES.reg)?.value) {
       const result = await autoBind(req);
       if (result) {
@@ -323,7 +469,8 @@ export async function getDbscSession(
 
   const boundCookieTtl = opts.boundCookieTtl ?? DEFAULT_BOUND_TTL_MS;
   const staleAfter = session.lastRefreshAt + boundCookieTtl;
-  if (session.tier === "dbsc" && Date.now() > staleAfter) {
+  const refreshable = session.tier === "dbsc" || session.tier === "bound";
+  if (refreshable && Date.now() > staleAfter) {
     return { sessionId, tier: "none", skipped, revoke };
   }
 

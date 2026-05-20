@@ -25,13 +25,14 @@ It does not protect against:
 
 - Server-side session store compromise. Use encrypted storage at rest and treat the bound JWK store like password hashes.
 - Malware with kernel-level access that can interface with the TPM directly. That is an OS-level concern, not a library-level one.
-- Phishing attacks that intercept the initial authentication step. DBSC binds an existing session — it does not authenticate the user.
-- HMAC tier signal spoofing. An attacker who can replicate the browser signal bundle can forge HMAC-tier tokens. The HMAC tier is best-effort context binding, not hardware binding.
+- Phishing attacks that intercept the initial authentication step. The library binds an existing session — it does not authenticate the user.
 
-See [docs/security/threat-model.md](./docs/security/threat-model.md) for the STRIDE analysis.
+The `bound` tier defeats remote cookie theft (XSS, network capture, log leaks, paste-into-other-browser) but does not defeat infostealer malware reading the browser profile directory. The IndexedDB-stored key is `extractable: false` (JS cannot export it) but the encrypted key blob still lives on disk. For routes that must defeat that threat, gate on `tier === "dbsc"` specifically — native DBSC keeps the private key inside TPM / Secure Enclave / Android Keystore.
+
+See [docs/security/threat-model.md](./docs/security/threat-model.md) for the STRIDE analysis and [docs/bound-polyfill.md](./docs/bound-polyfill.md) for the per-attack threat table.
 
 ## Dependency policy
 
-Direct dependencies are kept to a minimum (`jose`, `@simplewebauthn/server`). All framework and database integrations are optional peer dependencies, so the consumer controls those versions.
+Direct dependencies are kept to a minimum (`jose`). All framework and database integrations are optional peer dependencies, so the consumer controls those versions.
 
 CodeQL runs on every push to `main` via GitHub Actions.

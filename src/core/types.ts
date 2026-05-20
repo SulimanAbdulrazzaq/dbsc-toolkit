@@ -1,4 +1,4 @@
-export type ProtectionTier = "dbsc" | "webauthn" | "hmac" | "none";
+export type ProtectionTier = "dbsc" | "bound" | "none";
 
 export interface BoundKey {
   sessionId: string;
@@ -88,8 +88,8 @@ export interface SessionStolenEvent extends TelemetryEvent {
   ip: string;
 }
 
-export interface FallbackTierEvent extends TelemetryEvent {
-  type: "fallback_tier";
+export interface TierChangeEvent extends TelemetryEvent {
+  type: "tier_change";
   from: ProtectionTier;
   to: ProtectionTier;
   reason: string;
@@ -100,7 +100,7 @@ export type AnyTelemetryEvent =
   | RefreshEvent
   | VerificationFailureEvent
   | SessionStolenEvent
-  | FallbackTierEvent;
+  | TierChangeEvent;
 
 export interface DbscOptions {
   storage: StorageAdapter;

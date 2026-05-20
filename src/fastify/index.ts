@@ -4,6 +4,8 @@ import "@fastify/cookie";
 import {
   handleRegistration,
   handleRefresh,
+  handleBoundRegistration,
+  handleBoundRefresh,
   issueChallenge,
   buildRegistrationHeader,
   buildChallengeHeader,
@@ -17,6 +19,7 @@ import {
   emit,
   DbscProtocolError,
   DbscVerificationError,
+  ErrorCodes,
   type DbscOptions,
   type StorageAdapter,
   type ProtectionTier,
@@ -46,6 +49,10 @@ const DEFAULT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface DbscFastifyOptions extends DbscOptions {
   secure?: boolean;
+  boundStatePath?: string;
+  boundChallengePath?: string;
+  boundRegistrationPath?: string;
+  boundRefreshPath?: string;
 }
 
 export interface BindSessionOptions {
@@ -106,6 +113,10 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     storage,
     registrationPath = "/dbsc/registration",
     refreshPath = "/dbsc/refresh",
+    boundStatePath = "/dbsc-bound/state",
+    boundChallengePath = "/dbsc-bound/challenge",
+    boundRegistrationPath = "/dbsc-bound/registration",
+    boundRefreshPath = "/dbsc-bound/refresh",
     boundCookieTtl = DEFAULT_BOUND_TTL_MS,
     registrationCookieTtl = DEFAULT_REG_TTL_MS,
     rateLimiter = new NoopRateLimiter(),
@@ -143,7 +154,8 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
       const session = await storage.getSession(sessionId);
       if (session) {
         const staleAfter = session.lastRefreshAt + boundCookieTtl;
-        if (session.tier === "dbsc" && Date.now() > staleAfter) {
+        const refreshable = session.tier === "dbsc" || session.tier === "bound";
+        if (refreshable && Date.now() > staleAfter) {
           req.dbsc.tier = "none";
         } else {
           req.dbsc.tier = session.tier;
@@ -288,6 +300,135 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     } catch (err) {
       await rateLimiter.recordFailure(ip, sessionId);
       if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {
+        return reply.status(401).send({ error: err.message });
+      }
+      throw err;
+    }
+  });
+
+  const readBoundSessionId = (req: FastifyRequest): string | undefined =>
+    req.cookies?.[COOKIES.bound] ?? req.cookies?.[COOKIES.reg];
+
+  fastify.get(boundStatePath, async (req: FastifyRequest, reply: FastifyReply) => {
+    const sessionId = readBoundSessionId(req);
+    if (!sessionId) return reply.status(200).send({ phase: "unbound", sessionId: null });
+    const session = await storage.getSession(sessionId);
+    if (!session) return reply.status(200).send({ phase: "unbound", sessionId: null });
+    const key = await storage.getBoundKey(sessionId);
+    if (!key) {
+      const challenge = await issueChallenge(sessionId, storage);
+      return reply.status(200).send({
+        phase: "needs-registration",
+        sessionId,
+        challenge: challenge.jti,
+      });
+    }
+    return reply.status(200).send({
+      phase: "bound",
+      sessionId,
+      tier: session.tier,
+      refreshIntervalMs: boundCookieTtl,
+    });
+  });
+
+  fastify.get(boundChallengePath, async (req: FastifyRequest, reply: FastifyReply) => {
+    const sessionId = readBoundSessionId(req);
+    if (!sessionId) return reply.status(403).send({ error: "no session" });
+    const session = await storage.getSession(sessionId);
+    if (!session) return reply.status(403).send({ error: "no session" });
+    const challenge = await issueChallenge(sessionId, storage);
+    return reply.status(200).send({ challenge: challenge.jti });
+  });
+
+  fastify.post(boundRegistrationPath, async (req: FastifyRequest, reply: FastifyReply) => {
+    const ip = req.ip;
+    const allowed = await rateLimiter.checkRegistration(ip);
+    if (!allowed) return reply.status(429).send({ error: "rate limited" });
+
+    const sessionId = readBoundSessionId(req);
+    if (!sessionId) return reply.status(400).send({ error: "missing session cookie" });
+
+    const body = (req.body ?? {}) as { publicKey?: JsonWebKey; signature?: string; challenge?: string };
+    if (!body.publicKey || !body.signature || !body.challenge) {
+      return reply.status(400).send({ error: "publicKey, signature, and challenge are required" });
+    }
+
+    try {
+      await handleBoundRegistration(
+        { sessionId, publicKey: body.publicKey, signature: body.signature, expectedJti: body.challenge },
+        storage,
+      );
+      emit(onEvent, {
+        type: "registration",
+        sessionId,
+        tier: "bound",
+        timestamp: Date.now(),
+        algorithm: "ES256",
+        ip,
+      });
+      reply.setCookie(COOKIES.bound, sessionId, { ...cookieOpts, maxAge: boundCookieTtl / 1000 });
+      return reply.status(200).send({
+        session_identifier: sessionId,
+        refresh_url: boundRefreshPath,
+        tier: "bound",
+      });
+    } catch (err) {
+      await rateLimiter.recordFailure(ip, sessionId);
+      if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {
+        emit(onEvent, {
+          type: "verification_failure",
+          sessionId,
+          tier: "bound",
+          timestamp: Date.now(),
+          reason: err.code,
+          ip,
+        });
+        return reply.status(400).send({ error: err.message });
+      }
+      throw err;
+    }
+  });
+
+  fastify.post(boundRefreshPath, async (req: FastifyRequest, reply: FastifyReply) => {
+    const ip = req.ip;
+    const sessionId = readBoundSessionId(req);
+    if (!sessionId) return reply.status(403).send({ error: "no session" });
+
+    const allowed = await rateLimiter.checkRefresh(ip, sessionId);
+    if (!allowed) return reply.status(429).send({ error: "rate limited" });
+
+    const body = (req.body ?? {}) as { challenge?: string; signature?: string; timestamp?: number };
+    if (!body.challenge || !body.signature || typeof body.timestamp !== "number") {
+      return reply.status(400).send({ error: "challenge, signature, and timestamp are required" });
+    }
+
+    try {
+      await handleBoundRefresh(
+        { sessionId, signature: body.signature, expectedJti: body.challenge, timestamp: body.timestamp },
+        storage,
+      );
+      emit(onEvent, { type: "refresh", sessionId, tier: "bound", timestamp: Date.now(), ip });
+      reply.setCookie(COOKIES.bound, sessionId, { ...cookieOpts, maxAge: boundCookieTtl / 1000 });
+      return reply.status(200).send({
+        session_identifier: sessionId,
+        refresh_url: boundRefreshPath,
+        tier: "bound",
+      });
+    } catch (err) {
+      await rateLimiter.recordFailure(ip, sessionId);
+      const keyStillThere = await storage.getBoundKey(sessionId);
+      if (keyStillThere && err instanceof DbscVerificationError && err.code === ErrorCodes.SIGNATURE_INVALID) {
+        emit(onEvent, { type: "session_stolen", sessionId, tier: "bound", timestamp: Date.now(), ip });
+      }
+      if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {
+        emit(onEvent, {
+          type: "verification_failure",
+          sessionId,
+          tier: "bound",
+          timestamp: Date.now(),
+          reason: err.code,
+          ip,
+        });
         return reply.status(401).send({ error: err.message });
       }
       throw err;

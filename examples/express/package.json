@@ -1,17 +1,15 @@
 {
   "name": "dbsc-express-demo",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node src/server.js"
   },
   "dependencies": {
-    "@simplewebauthn/browser": "^11.0.0",
-    "@simplewebauthn/server": "^11.0.0",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6",
-    "dbsc-toolkit": "^1.5.0",
+    "dbsc-toolkit": "^2.0.0",
     "express": "^5.2.1",
     "express-session": "^1.18.0",
     "ioredis": "^5.4.1"

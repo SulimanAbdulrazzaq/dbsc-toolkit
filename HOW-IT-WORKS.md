@@ -26,7 +26,9 @@ Three responsibilities. That's it.
 
 **(2) Verify hardware-signed proofs and store the binding.** Registration brings the browser's public key. The library validates the JWK, confirms the JWS is self-signed by the matching private key, and stores `sessionId → JWK`. On every refresh, the library re-verifies the signature against that stored key. If it fails, the binding is broken and the session degrades to `tier: "none"`.
 
-**(3) Expose a `tier` field your route handlers gate on.** Every request that goes through the middleware has `res.locals.dbsc.tier` (Express) or `req.dbsc.tier` (Fastify) or `c.get("dbsc").tier` (Hono) or returned from `getDbscSession()` (Next.js). It reads `"dbsc"` when the session is hardware-bound and fresh, `"webauthn"` if the fallback platform-authenticator path succeeded, `"hmac"` for the weak context-binding fallback, and `"none"` when nothing's bound (or when binding has gone stale). **Your code decides what each tier is allowed to do** — the library exposes the value, you write the gate.
+**(3) Expose a `tier` field your route handlers gate on.** Every request that goes through the middleware has `res.locals.dbsc.tier` (Express) or `req.dbsc.tier` (Fastify) or `c.get("dbsc").tier` (Hono) or returned from `getDbscSession()` (Next.js). It reads `"dbsc"` when a native hardware binding is fresh, `"bound"` when the Web Crypto polyfill is fresh, and `"none"` when nothing's bound or the binding has gone stale. **Your code decides what each tier is allowed to do** — the library exposes the value, you write the gate.
+
+**(4) Cover browsers without native DBSC via a Web Crypto polyfill.** Firefox, Safari, and older Chromium ignore the DBSC registration headers. For those, the library ships a small client SDK (`initBoundDbsc()`) that activates ~3 seconds after login when it sees no native binding, generates a non-extractable ECDSA P-256 keypair via Web Crypto, registers the public key with the server, and signs refresh challenges automatically. Same wire-level protection against cookie theft, no biometric prompt, no user interaction. The key lives in IndexedDB rather than a TPM, so this is software-bound — see "Tier semantics" below for the exact threat boundary.
 
 Explicit non-goals: this is not an authentication system (you bring your own login), not MFA (it complements MFA, doesn't replace), not a CSRF defense (SameSite cookies still do that), not a captcha. It binds an existing session to hardware. Your existing auth stack does everything else.
 
@@ -167,18 +169,17 @@ The middleware does not interpose itself on your existing authentication. Your s
 
 ## Tier semantics in practice
 
-| Tier | Achieved when | Useful for |
-|------|---------------|-----------|
-| `dbsc` | Browser is Chromium 145+, hardware key store is available, registration JWS verified | Hardware binding — exfiltrated cookies are useless |
-| `webauthn` | Browser ran the platform-authenticator path (your code wires WebAuthn registration) | Hardware binding via TouchID, Windows Hello, etc. |
-| `hmac` | Client SDK posted an HMAC over browser-signal bundle | Best-effort context binding, not hardware |
-| `none` | Nothing succeeded, or binding has gone stale | No additional binding — treat like a plain cookie |
+| Tier | Achieved when | Key location | Defeats |
+|------|---------------|--------------|---------|
+| `dbsc` | Chromium 145+, hardware key store available, registration JWS verified | TPM / Secure Enclave / Android Keystore | Remote cookie theft **and** infostealer malware reading the browser profile |
+| `bound` | Browser ran the `initBoundDbsc()` polyfill, server verified the ECDSA signature | IndexedDB (non-extractable `CryptoKey`) | Remote cookie theft (XSS, network, logs, paste-to-other-browser). Does NOT defeat infostealer malware reading the browser profile. |
+| `none` | Nothing succeeded, or binding has gone stale | n/a | Nothing the cookie itself doesn't defeat |
 
 A few practical patterns:
 
-**Strict per-route.** Payments, account email change, password change, admin actions: require `tier === "dbsc"`. Excludes Firefox/Safari users from those flows but is the only honest answer for high-value actions.
+**Strict per-route.** Payments, account email change, password change, admin actions: require `tier === "dbsc"`. Routes you only want to be reachable with TPM-backed binding (defeats local malware specifically). Other browsers won't reach these without native DBSC — that's the cost of the strictest gate.
 
-**Tiered by risk.** Feed, comments, profile views: accept any tier. Posts, upvotes, low-risk writes: require `tier !== "none"`. Settings, payments: require `tier === "dbsc"`. This is what most production apps end up with.
+**Tiered by risk.** Feed, comments, profile views: accept any tier. Posts, upvotes, low-risk writes: require `tier !== "none"`. Settings, payments: require `tier === "dbsc"`. This is what most production apps end up with — the bound polyfill covers the common case while DBSC adds the extra layer for the highest-stakes actions.
 
 **The misconception to kill.** Mounting `app.use(dbsc(...))` by itself does *not* protect anything. The library negotiates the binding and tells you the tier. **You** decide what to do with it. A new adopter who mounts the middleware and forgets the per-route check gets exactly the same security as before — none from DBSC, whatever they had from their existing auth.
 
@@ -219,24 +220,20 @@ Default TTLs: bound cookie 10 min (browser refreshes it on its own), challenge 5
 
 ## Cross-browser story
 
-| Browser | Tier achieved (out of the box) | Notes |
-|---------|-------------------------------|-------|
-| Chrome 145+ | `dbsc` | Reference implementation. What Chromium ships. |
-| Edge 145+ | `dbsc` | Inherits Chromium's implementation. |
-| Brave / Opera / Arc / Vivaldi (Chromium 145+) | `dbsc` | All inherit. May lag the latest Chrome by a release. |
-| Firefox | `none` | No DBSC implementation. Use WebAuthn or HMAC fallback if wired. |
-| Safari | `none` | Same. Apple has not signaled support yet. |
-| Older Chromium (<145) | `none` | Pre-DBSC. Same as Firefox/Safari from the server's view. |
+| Browser | Tier achieved (out of the box, with `initBoundDbsc()` loaded) |
+|---------|-------------------------------|
+| Chrome 145+ | `dbsc` (native, TPM-backed) |
+| Edge 145+ | `dbsc` |
+| Brave / Opera / Arc / Vivaldi (Chromium 145+) | `dbsc` |
+| Firefox | `bound` (Web Crypto polyfill) |
+| Safari | `bound` (Web Crypto polyfill) |
+| Older Chromium (<145) | `bound` (Web Crypto polyfill) |
 
-The library detects browser support via the `Secure-Session-Registration` header arriving on the response: if the browser supports DBSC, it POSTs to `/dbsc/registration` within a second; if it doesn't, no request ever arrives and the session stays at `tier: "none"`. You don't have to write any browser detection.
+If you load the client SDK (`initBoundDbsc()` from `dbsc-toolkit/client`) on the page, the right tier shows up automatically. The SDK probes for native DBSC for ~3 seconds after login; if no `__Host-dbsc-session` cookie has appeared, it generates a non-extractable ECDSA P-256 keypair, stores it in IndexedDB, and registers the public key with the server. From that point on it signs refresh challenges automatically.
 
-For non-Chromium users, you have three options:
+If you *don't* load the client SDK, you get the original behavior: `tier === "dbsc"` on Chromium 145+, `tier === "none"` everywhere else. The bound polyfill is opt-in via the script tag.
 
-1. **Wire the WebAuthn fallback.** The library ships helpers for `@simplewebauthn/server`. After login, your app calls `/tier/webauthn/begin` → browser prompts for TouchID / Windows Hello / passkey → `/tier/webauthn/finish` verifies and promotes the session to `tier = "webauthn"`. Hardware-bound on most modern devices, similar guarantees to DBSC, but the user sees a UX prompt.
-2. **Wire the HMAC fallback.** The library exposes `collectSignals + generateHmacToken + verifyHmacToken`. Best-effort context binding via User-Agent / Accept-Language / TLS-secure-context hashed with a server-side secret. NOT hardware-bound — an attacker who replicates the victim's browser environment can forge it. Useful for blocking trivial cookie theft (curl, generic scrapers) and as an audit signal. Sets `tier = "hmac"`.
-3. **Accept `none` and gate accordingly.** Most pragmatic for large public sites. Don't lock non-Chromium users out — that's roughly half the desktop market. Apply DBSC-only gates to genuinely high-value actions (payments, password change); accept `webauthn` / `hmac` for medium-trust actions; accept `none` for read-only.
-
-**How tier promotion works under the hood.** The middleware reads `session.tier` from storage on every request. The DBSC path is automatic — registration in `/dbsc/registration` sets it to `"dbsc"`. For webauthn and hmac, your app drives the promotion explicitly: after a successful ceremony or HMAC token issuance, call `storage.setSession({ ...session, tier: "webauthn", lastRefreshAt: Date.now() })`. The middleware picks up the new tier on the next request. See [docs/fallback-tiers.md](./docs/fallback-tiers.md) for complete wiring examples or the live demo at [examples/express/src/server.js](./examples/express/src/server.js).
+**How the two tiers relate under the hood.** They share storage (`Session`, `BoundKey`, `Challenge`), the same `__Host-dbsc-session` cookie, the same freshness check (`lastRefreshAt + boundCookieTtl`). The only protocol differences are: native DBSC posts JWS in headers and is driven by Chromium without app code; the bound polyfill posts JSON bodies and is driven by `initBoundDbsc()`. Both write to `session.tier` and both demote to `"none"` on a failed refresh. The middleware reads `session.tier` and applies the freshness check uniformly. See [docs/bound-polyfill.md](./docs/bound-polyfill.md) for the bound-tier wire format.
 
 ---
 
@@ -247,7 +244,7 @@ For non-Chromium users, you have three options:
 - `session_stolen` — fires when a session's refresh fails AND a bound key still exists for it. Best signal you have that something tried to replay a stolen cookie. Page someone.
 - `verification_failure` — fires on every JWS verification failure. Most are benign (browser quirk, network drop, race). But a sudden spike on one `sessionId` is suspicious.
 
-The other three (`registration`, `refresh`, `fallback_tier`) are useful for metrics dashboards but not alert-worthy.
+The other three (`registration`, `refresh`, `tier_change`) are useful for metrics dashboards but not alert-worthy.
 
 **Reverse proxy.** If you're behind any HTTPS-terminating proxy (Render, Fly, Railway, Heroku, Cloudflare, nginx), call `app.set("trust proxy", true)` in Express *before* mounting the DBSC middleware. Without it, `req.protocol` returns `"http"` even when the user connected via `https://`, the registration response advertises the wrong origin in `scope.origin`, and the browser silently terminates the session. Fastify needs `Fastify({ trustProxy: true })`. Hono and Next.js derive origin from the runtime's request URL and don't need a flag.
 
@@ -299,7 +296,7 @@ See the Production readiness section in [README.md](./README.md#production-readi
 - [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md) — bolting DBSC onto an existing app with its own session cookie.
 - [docs/api-reference.md](./docs/api-reference.md) — every public export across all subpaths.
 - [docs/protocol.md](./docs/protocol.md) — exact wire format with every header value and JSON shape.
-- [docs/fallback-tiers.md](./docs/fallback-tiers.md) — when each tier is achieved and how to gate on it.
+- [docs/bound-polyfill.md](./docs/bound-polyfill.md) — wire protocol of the `bound` tier and the exact threat-coverage table.
 - [docs/troubleshooting.md](./docs/troubleshooting.md) — symptom-to-cause table for common failures.
 - [docs/security/threat-model.md](./docs/security/threat-model.md) — STRIDE breakdown.
 - [docs/security/best-practices.md](./docs/security/best-practices.md) — the per-tier policy guidance.

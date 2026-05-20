@@ -2,6 +2,75 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.0.0] — 2026-05-20
+
+This is a breaking release. The four-tier system (`dbsc` / `webauthn` / `hmac` / `none`) is gone. In its place: two real tiers (`dbsc` / `bound`) plus `none`, with a Web Crypto polyfill that gives Firefox, Safari, and older Chromium the same protection against cookie theft that native DBSC delivers on Chromium 145+.
+
+### Why this changed
+
+The HMAC tier was theatre — any attacker who could exfiltrate cookies could also spoof User-Agent, breaking the signal-bundle binding. The WebAuthn tier as implemented bound once at registration and never re-verified per request, so cookie theft after binding still worked. Both made the tier table look richer than the protection actually was.
+
+The bound polyfill replaces both with something honest: a non-extractable ECDSA P-256 key in IndexedDB, signing every refresh challenge. Activates silently ~3 seconds after login if native DBSC didn't fire. No biometric prompts, no manual buttons, no fallback chain to negotiate.
+
+### Migration
+
+If your code reads `tier` and gates routes:
+
+- `tier === "dbsc"` checks keep working unchanged.
+- `tier === "webauthn"` and `tier === "hmac"` checks should become `tier !== "none"` — that's the equivalent gate for "session is bound, just via the polyfill route."
+- `tier === "none"` checks keep working unchanged.
+
+If your code imports HMAC or WebAuthn helpers from `dbsc-toolkit`:
+
+- `generateHmacToken`, `verifyHmacToken`, `collectSignals` — removed. No replacement; this tier never delivered what its name implied.
+- `generateWebAuthnRegistration`, `verifyWebAuthnRegistration`, `generateWebAuthnAuthentication`, `verifyWebAuthnAuthentication` — removed from the library. If you were using these for application step-up flows, install `@simplewebauthn/server` directly — that's where the implementations came from.
+- `negotiateTier`, `detectDbscSupport` — removed. The three-tier negotiation chain they served is gone.
+- `dbsc-toolkit/client` no longer exports `registerWebAuthn`, `authenticateWebAuthn`, `collectClientSignals`, `detectClientTier`, `ClientTier`, `ClientSignals`. It now exports `initBoundDbsc()` and `stopBoundDbsc()`.
+
+If your code reads the `Session.tier` field from storage directly, the TypeScript enum now narrows to `"dbsc" | "bound" | "none"`. Existing rows with `"webauthn"` or `"hmac"` will fail type checks until you migrate them. If you have persistent Redis/Postgres storage from v1, the cleanest path is to demote all sessions to `"none"` once and let them re-bind:
+
+```sql
+UPDATE dbsc_sessions SET tier = 'none' WHERE tier IN ('webauthn', 'hmac');
+```
+
+If your code subscribed to telemetry events:
+
+- `FallbackTierEvent` was renamed `TierChangeEvent` and its `type` field is now `"tier_change"` instead of `"fallback_tier"`.
+
+If your code mounted the demo's `/tier/webauthn/begin`, `/tier/webauthn/finish`, or `/tier/hmac` endpoints — those were demo-only routes, not part of the library. They no longer exist in the demo either. The demo now ships only the native DBSC routes plus the new bound-polyfill routes (`/dbsc-bound/state`, `/dbsc-bound/challenge`, `/dbsc-bound/registration`, `/dbsc-bound/refresh`), all mounted automatically by `app.use(dbsc(...))`.
+
+### Added
+
+- **`bound` tier and the Web Crypto polyfill.** New server endpoints under `/dbsc-bound/*` (configurable). New browser SDK at `dbsc-toolkit/client` exposing `initBoundDbsc(options?)`. The polyfill generates a non-extractable ECDSA P-256 key, stores it in IndexedDB, and signs refresh challenges silently. Defeats remote cookie theft on Firefox, Safari, and older Chromium without any biometric prompt.
+- **`handleBoundRegistration`, `handleBoundRefresh`** core functions exported from `dbsc-toolkit`. For apps wiring the bound tier into a framework adapter we don't ship.
+- **`verifyP256Signature`** core helper for verifying raw ECDSA P-256 signatures against a JWK. Used by both bound routes; exposed for adapters.
+- **`TierChangeEvent`** telemetry event type, replacing `FallbackTierEvent`.
+- **`docs/bound-polyfill.md`** — wire protocol for the new tier, where the key lives, full threat-coverage table.
+- **8 new unit tests** under `src/core/bound/` covering registration, refresh, replay defense, signature tampering, timestamp window, and cross-session challenge rejection. Total suite is now 51 tests.
+
+### Removed
+
+- The `webauthn` and `hmac` tiers. `ProtectionTier` narrowed to `"dbsc" | "bound" | "none"`.
+- `src/core/fallback/` directory: `hmac.ts`, `webauthn.ts`, `negotiate.ts` and the `hmac.test.ts`. Exports `generateHmacToken`, `verifyHmacToken`, `collectSignals`, `generateWebAuthnRegistration`, `verifyWebAuthnRegistration`, `generateWebAuthnAuthentication`, `verifyWebAuthnAuthentication`, `negotiateTier`, `detectDbscSupport` are gone from `dbsc-toolkit`.
+- `src/client/{detect,webauthn,signals}.ts` and exports `registerWebAuthn`, `authenticateWebAuthn`, `collectClientSignals`, `detectClientTier`, `ClientTier`, `ClientSignals`.
+- Hono context aliases `c.get("dbscSessionId")`, `c.get("dbscTier")`, `c.get("dbscSkipped")` (deprecated in 1.3.x). Use `c.get("dbsc")` and read `.sessionId`, `.tier`, `.skipped` from the unified object.
+- `docs/fallback-tiers.md` — the underlying concept is gone.
+- The `/tier/webauthn/begin`, `/tier/webauthn/finish`, `/tier/hmac` endpoints from the demo, along with `promoteTier`, `verifyHmacBinding`, the WebAuthn ceremony state maps, and the related UI buttons. The demo now activates the bound polyfill automatically; no buttons to click.
+- `@simplewebauthn/server` and `@simplewebauthn/browser` peer dependencies. Direct deps are now `jose` only.
+
+### Changed
+
+- **All four framework adapters** (Express, Fastify, Hono, Next.js) now mount the bound-polyfill routes automatically alongside the native DBSC routes. Configurable via `boundStatePath`, `boundChallengePath`, `boundRegistrationPath`, `boundRefreshPath`.
+- **Per-request freshness check** in every adapter now applies to both `"dbsc"` and `"bound"` tiers (previously only checked `"dbsc"`).
+- **README, HOW-IT-WORKS.md, SECURITY.md, docs/README.md, PROJECT-MAP.md** — all rewritten to reflect the two-tier model. The cross-browser table now shows `dbsc` on Chromium and `bound` everywhere else, instead of `none` everywhere outside Chromium.
+- **Demo (`examples/express`)** — fully refactored to v2. The fallback-tier UI section was replaced with a single explanatory paragraph; the bound SDK is mounted via a static file route at `/dbsc-client/*`. The post-login status indicator now reads "Session bound (tier: dbsc)" or "Session bound (tier: bound)" depending on which path activated. Demo pinned to `dbsc-toolkit@^2.0.0`.
+
+### Notes
+
+51 tests pass. The 1.x → 2.0 path is genuinely simpler — most users will find their existing `tier !== "none"` gates Just Work, and the routes that gated on `"dbsc"` continue to gate on `"dbsc"` with no change.
+
+---
+
 ## [1.5.0] — 2026-05-18
 
 ### Added

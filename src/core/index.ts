@@ -15,7 +15,7 @@ export type {
   RefreshEvent,
   VerificationFailureEvent,
   SessionStolenEvent,
-  FallbackTierEvent,
+  TierChangeEvent,
 } from "./types.js";
 
 export { DbscProtocolError, DbscVerificationError, DbscStorageError, ErrorCodes } from "./errors.js";
@@ -44,14 +44,8 @@ export type { SkippedEntry, SkippedReason } from "./protocol/headers.js";
 export { handleRegistration } from "./protocol/registration.js";
 export { handleRefresh } from "./protocol/refresh.js";
 
-export { negotiateTier, detectDbscSupport } from "./fallback/negotiate.js";
-export {
-  generateWebAuthnRegistration,
-  verifyWebAuthnRegistration,
-  generateWebAuthnAuthentication,
-  verifyWebAuthnAuthentication,
-} from "./fallback/webauthn.js";
-export { collectSignals, generateHmacToken, verifyHmacToken } from "./fallback/hmac.js";
+export { handleBoundRegistration } from "./bound/registration.js";
+export { handleBoundRefresh } from "./bound/refresh.js";
 
 export { NoopRateLimiter } from "./ratelimit/interface.js";
 export { emit } from "./telemetry/hooks.js";

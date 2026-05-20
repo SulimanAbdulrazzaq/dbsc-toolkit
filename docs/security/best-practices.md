@@ -152,8 +152,10 @@ Tier-aware response (different defaults per tier):
 app.get("/balance", (req, res) => {
   const { tier } = res.locals.dbsc;
   if (tier === "none") return res.status(401).end();
-  if (tier === "hmac") {
-    // best-effort binding — show without action buttons
+  if (tier === "bound") {
+    // software-bound: defeats remote cookie theft but not on-device malware.
+    // Render the balance, suppress destructive action buttons; require dbsc to
+    // initiate a transfer.
     return res.json({ balance: getBalance(req.user), readonly: true });
   }
   return res.json({ balance: getBalance(req.user), readonly: false });
@@ -202,19 +204,6 @@ app.post("/account/password", async (req, res) => {
 
 After revocation, the next refresh from any device for that user fails with `KEY_NOT_FOUND` and the session is effectively dead.
 
-## Rotating the HMAC secret
-
-The HMAC tier (fallback for non-DBSC browsers) uses a server-side secret to sign cookie context. If the secret leaks, all HMAC-tier sessions are compromised.
-
-Rotate the secret on a schedule (quarterly) or after any suspected compromise:
-
-1. Generate a new random secret (`crypto.randomBytes(32)`).
-2. Pass both old and new to the verifier — accept either for a transition window.
-3. Re-sign all active HMAC sessions on next request.
-4. After the transition window, drop the old secret.
-
-The library does not currently expose multi-secret rotation natively. Wrap the HMAC verification in your application code if you need this.
-
 ## Detecting cookie theft in real time
 
 The `session_stolen` telemetry event fires when a refresh request arrives with a valid bound cookie but invalid JWS signature. Translation: someone has the cookie but not the device key. Wire it to:
@@ -249,8 +238,7 @@ Important to communicate to your team and users:
 
 ## Compliance notes
 
-- **GDPR**: HMAC tier collects User-Agent and Accept-Language. With a user ID this is personal data. Disclose in privacy policy or restrict the tier.
-- **PCI-DSS**: Use DBSC for payment-related sessions where supported. Document the tier requirement in your compensating controls.
+- **PCI-DSS**: Use the `dbsc` tier for payment-related sessions where supported (`tier === "dbsc"`); the `bound` polyfill is software-bound and not equivalent for PCI's "strong authentication" interpretation. Document the tier requirement in your compensating controls.
 - **SOC 2**: The `dbsc_audit_log` table satisfies the access logging requirement for authentication events.
 
 ## Pre-production checklist
@@ -263,7 +251,6 @@ Important to communicate to your team and users:
 - [ ] Redis or Postgres storage (not memory)
 - [ ] Bound cookie TTL appropriate for sensitivity (default 10 min may be too long for payments)
 - [ ] Storage backups configured
-- [ ] HMAC secret stored in secrets manager (not in code)
-- [ ] Rotation policy documented for HMAC secret
+- [ ] If using the bound polyfill: `initBoundDbsc()` script tag included on every authenticated page
 - [ ] User notification flow for `session_stolen`
-- [ ] Tier requirements documented per route
+- [ ] Tier requirements documented per route (which routes require `tier === "dbsc"` vs `tier !== "none"`)

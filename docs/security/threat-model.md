@@ -56,10 +56,10 @@ JWKs (public keys) appear in logs.
 
 Mitigation: The library does not log JWKs or challenge values. The `onEvent` handler receives only session IDs, tiers, and error codes.
 
-**I2: HMAC signal fingerprinting**
-Signal bundles (UA, language, timezone) constitute personal data under GDPR when linked to a user ID.
+**I2: Key material exfiltration from the browser profile (bound tier only)**
+The bound polyfill stores a non-extractable ECDSA private key in IndexedDB. The JavaScript API cannot export it, but the encrypted key blob lives on disk in the browser profile directory. Infostealer malware running as the victim can read the profile directory and (depending on the OS keystore protections) decrypt it.
 
-Mitigation: The library logs a warning when the HMAC tier is active. Operators must obtain consent or restrict the HMAC tier to non-identified sessions. The HMAC tier is documented as best-effort.
+Mitigation: For routes that must defeat this threat, gate on `tier === "dbsc"` specifically — native DBSC keeps the private key inside TPM / Secure Enclave / Android Keystore where no on-device attacker can read it. The `bound` tier is honest about defending against remote cookie theft only.
 
 ### Denial of Service
 
@@ -80,16 +80,17 @@ An attacker crafts a JWS with a weak algorithm (e.g., `none` or `HS256` using th
 
 Mitigation: `verifyDbscJws` explicitly allows only `ES256` and `RS256`. The `none` algorithm is rejected before any key loading occurs.
 
-**E2: HMAC tier treated as hardware binding**
-Application code checks `tier !== "none"` and assumes hardware binding.
+**E2: Bound tier treated as hardware binding**
+Application code checks `tier !== "none"` and assumes the key is in a TPM. The bound tier is software-bound (Web Crypto + IndexedDB), not hardware-bound.
 
-Mitigation: The library documents tier semantics clearly. `tier === "hmac"` is explicitly not hardware binding. Operators should use `tier === "dbsc" || tier === "webauthn"` to enforce hardware binding.
+Mitigation: Documentation distinguishes the two tiers explicitly. Routes that need hardware-backed key isolation (defeat against infostealer malware) should gate on `tier === "dbsc"` specifically.
 
 ## Residual risk by tier
 
-| Threat | DBSC | WebAuthn | HMAC |
-|--------|------|----------|------|
-| Cookie theft + replay | Mitigated | Mitigated | Partial |
-| MFA bypass | Mitigated | Mitigated | Partial |
-| Signal spoofing | N/A | N/A | Unmitigated |
+| Threat | `dbsc` (native) | `bound` (Web Crypto polyfill) |
+|--------|-----------------|-------------------------------|
+| Remote cookie theft + replay | Mitigated | Mitigated |
+| MFA bypass via stolen cookies | Mitigated | Mitigated |
+| Infostealer malware reading the browser profile | Mitigated (key in TPM / Secure Enclave) | **Not mitigated** — encrypted blob in IndexedDB, recoverable by attacker with disk access |
+| Malware running inside the browser process | Not mitigated | Not mitigated |
 | Key exfiltration | Mitigated (hardware key store) | Mitigated (platform) | N/A |
