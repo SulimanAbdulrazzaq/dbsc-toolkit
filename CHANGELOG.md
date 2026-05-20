@@ -2,6 +2,10 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.0.2] — 2026-05-20
+
+Docs-only release to refresh the README displayed on npmjs.com. The README was rewritten in `c920e35` to lead with the problem (stolen cookies) before the mechanism, trimmed from 343 to 135 lines, and the production-readiness table moved to `HOW-IT-WORKS.md`. No code changes; safe to upgrade from 2.0.1 with no action required.
+
 ## [2.0.1] — 2026-05-20
 
 ### Fixed
