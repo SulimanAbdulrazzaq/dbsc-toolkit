@@ -4,23 +4,23 @@ DBSC works only on Chromium 145+. Firefox, Safari, and older Chromium ignore the
 
 Sessions bound via the polyfill carry `tier: "bound"`. They share storage, cookies, and the freshness check with native DBSC. The only differences are where the private key lives and how the proofs travel.
 
-## Threat coverage, honestly
+## What this defeats, and what it doesn't
 
 | Attack | `tier: "dbsc"` | `tier: "bound"` |
 |---|---|---|
-| XSS reads `document.cookie` | Defeated — cookie is HttpOnly, refresh needs the key | Defeated — same cookie, signing key is non-extractable from JS |
-| XSS reads IndexedDB to exfiltrate the key | n/a (key not in IndexedDB) | Defeated — `extractable: false` means the JS API cannot export it |
+| XSS reads `document.cookie` | Defeated (cookie is HttpOnly, refresh needs the key) | Defeated (same cookie, signing key is non-extractable from JS) |
+| XSS reads IndexedDB to exfiltrate the key | n/a (key not in IndexedDB) | Defeated (`extractable: false` means the JS API cannot export it) |
 | Network capture / TLS-stripping proxy | Defeated | Defeated |
 | Server log leak that captured the cookie | Defeated | Defeated |
 | Cookie pasted into a different browser on a different machine | Defeated within one refresh cycle | Defeated within one refresh cycle |
-| Infostealer malware reading the browser profile directory | Defeated — key never leaves TPM / Secure Enclave / Keystore | **Vulnerable** — the encrypted key blob is on disk; the OS keystore protects it but malware running as the victim can usually decrypt |
+| Infostealer malware reading the browser profile directory | Defeated (key never leaves TPM / Secure Enclave / Keystore) | **Vulnerable**. The encrypted key blob is on disk; the OS keystore protects it but malware running as the victim can usually decrypt |
 | Malware running inside the browser process (rogue extension, browser RCE) | Vulnerable | Vulnerable |
 
 The single row that matters: infostealer malware. If your application's threat model includes RedLine / Vidar / similar credential stealers, gate sensitive routes on `tier === "dbsc"` specifically. For every other realistic cookie-theft attack, `tier !== "none"` is sufficient.
 
 ## Wire protocol
 
-The polyfill exposes four endpoints alongside the native DBSC pair. Defaults shown — all configurable via adapter options (`boundStatePath`, `boundChallengePath`, `boundRegistrationPath`, `boundRefreshPath`).
+The polyfill exposes four endpoints alongside the native DBSC pair. Defaults shown below; all configurable via adapter options (`boundStatePath`, `boundChallengePath`, `boundRegistrationPath`, `boundRefreshPath`).
 
 ### `GET /dbsc-bound/state`
 
@@ -95,7 +95,7 @@ Failure modes (all return 400):
 }
 ```
 
-The signed message is `${challenge}.${timestamp}` (UTF-8 encoded). The timestamp must be within ±60s of server time — otherwise `SIGNATURE_INVALID`.
+The signed message is `${challenge}.${timestamp}` (UTF-8 encoded). The timestamp must be within ±60s of server time; otherwise the request fails with `SIGNATURE_INVALID`.
 
 A failed signature with a stored key still present demotes `session.tier` to `"none"` and emits a `session_stolen` telemetry event. The next request the victim makes will see `tier: "none"` until their real browser re-refreshes.
 
@@ -106,7 +106,7 @@ indexedDB.open("dbsc-toolkit") → objectStore("bound") → key "key-record"
   → { sessionId: string, keyPair: CryptoKeyPair }
 ```
 
-The `CryptoKeyPair` is generated with `crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"])`. The `false` is the critical bit — `extractable: false` means even with full XSS, no JavaScript can call `crypto.subtle.exportKey()` to get the private bytes out. The key is usable for `sign()` but not exportable.
+The `CryptoKeyPair` is generated with `crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"])`. The `false` is the critical bit. `extractable: false` means even with full XSS, no JavaScript can call `crypto.subtle.exportKey()` to get the private bytes out. The key is usable for `sign()` but not exportable.
 
 The underlying encrypted blob still lives in the browser's profile directory on disk. The browser keystore wraps it, but malware running as the victim can usually decrypt. That's the threat boundary native DBSC raises and the bound polyfill doesn't.
 
@@ -120,7 +120,7 @@ The underlying encrypted blob still lives in the browser's profile directory on 
 4. **`phase: "bound", tier: "bound"`** → the server thinks we're bound. Verify the IndexedDB key still matches. If not, clear it and retry registration.
 5. **`phase: "needs-registration"`** → wait `nativeProbeWindowMs` (default 3000 ms), then re-check `/state`. If native DBSC still hasn't landed, run the polyfill registration. If it has, do nothing.
 
-After a successful registration or on a `phase: "bound", tier: "bound"` init, the SDK schedules a `setTimeout` for `refreshIntervalMs - refreshMarginMs` (default 5s margin) and refreshes silently. On refresh success, it schedules the next one. On refresh failure, it stops — the next page load will re-run the init flow and re-bind if appropriate.
+After a successful registration or on a `phase: "bound", tier: "bound"` init, the SDK schedules a `setTimeout` for `refreshIntervalMs - refreshMarginMs` (default 5s margin) and refreshes silently. On refresh success, it schedules the next one. On refresh failure, it stops. The next page load will re-run the init flow and re-bind if appropriate.
 
 ## Mounting the SDK
 

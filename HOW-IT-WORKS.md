@@ -28,7 +28,7 @@ Three responsibilities. That's it.
 
 **(3) Expose a `tier` field your route handlers gate on.** Every request that goes through the middleware has `res.locals.dbsc.tier` (Express) or `req.dbsc.tier` (Fastify) or `c.get("dbsc").tier` (Hono) or returned from `getDbscSession()` (Next.js). It reads `"dbsc"` when a native hardware binding is fresh, `"bound"` when the Web Crypto polyfill is fresh, and `"none"` when nothing's bound or the binding has gone stale. **Your code decides what each tier is allowed to do** — the library exposes the value, you write the gate.
 
-**(4) Cover browsers without native DBSC via a Web Crypto polyfill.** Firefox, Safari, and older Chromium ignore the DBSC registration headers. For those, the library ships a small client SDK (`initBoundDbsc()`) that activates ~3 seconds after login when it sees no native binding, generates a non-extractable ECDSA P-256 keypair via Web Crypto, registers the public key with the server, and signs refresh challenges automatically. Same wire-level protection against cookie theft, no biometric prompt, no user interaction. The key lives in IndexedDB rather than a TPM, so this is software-bound — see "Tier semantics" below for the exact threat boundary.
+**(4) Cover browsers without native DBSC via a Web Crypto polyfill.** Firefox, Safari, and older Chromium ignore the DBSC registration headers. For those, the library ships a small client SDK (`initBoundDbsc()`) that activates ~3 seconds after login when it sees no native binding, generates a non-extractable ECDSA P-256 keypair via Web Crypto, registers the public key with the server, and signs refresh challenges automatically. Same wire-level protection against cookie theft, no biometric prompt, no user interaction. The key lives in IndexedDB rather than a TPM, so this is software-bound; see "Tier semantics" below for the exact threat boundary.
 
 Explicit non-goals: this is not an authentication system (you bring your own login), not MFA (it complements MFA, doesn't replace), not a CSRF defense (SameSite cookies still do that), not a captcha. It binds an existing session to hardware. Your existing auth stack does everything else.
 
@@ -286,13 +286,39 @@ The bound cookie is still valid; the user's session is still bound. The browser 
 No. MFA proves the user is who they say they are *at login time*. DBSC proves the *device* hasn't changed *between* requests. Different threat models; both belong in the stack.
 
 **Is the library production-ready?**
-See the Production readiness section in [README.md](./README.md#production-readiness). Short version: the Express + Redis/Postgres path is solid; the wire protocol is verified end-to-end against Chrome 147 on real Windows TPM hardware. No third-party security audit. The W3C spec is still draft, so future minor wire-format changes are possible (the library tracks Chromium's implementation).
+Short version: yes for the Express + Redis/Postgres path; the wire protocol is verified end-to-end against Chrome 147 on real Windows TPM hardware. No third-party security audit. The W3C spec is still draft, so future minor wire-format changes are possible. The full breakdown is in the Production readiness section just below.
+
+---
+
+## Production readiness
+
+Honest table of what you're getting and where the rough edges are.
+
+| Area | Status | Confidence |
+|------|--------|-----------|
+| Core protocol (registration + refresh + verification) | Stable | High — verified against real Chrome 147 + TPM 2.0 |
+| Bound polyfill (`/dbsc-bound/*` + client SDK) | New in v2.0.0 | Medium — unit-tested; cross-browser verification on the live demo |
+| Express adapter | Stable | High — used in the live demo, exercised on Render |
+| Fastify / Hono / Next.js adapters | Stable | Medium — unit tests pass, share core code with Express, not battle-tested in production |
+| `MemoryStorage` | Dev / test only | N/A — explicitly non-production |
+| `RedisStorage` | Stable | Medium — atomic challenge consume via Lua, tested locally |
+| `PostgresStorage` | Stable | Medium — migrations included, tested locally |
+| Security audit | None | — |
+| W3C spec stability | Draft, library tracks Chromium's implementation | Spec may evolve; expect occasional wire-format adjustments |
+
+**Should you use this in production?** Yes, with three conditions:
+
+1. **Use Redis or Postgres storage**, not memory. Memory storage on a server that ever restarts produces a broken loop where browsers hold cookies that no longer match any stored key.
+2. **Treat it as defense-in-depth**, never the only auth layer. Your existing session cookie, password, MFA, rate limiting — all still required. This library raises the floor on session-replay attacks; it doesn't replace anything else.
+3. **Pin a version.** Pin `dbsc-toolkit@~2.0.0` (patch updates only) and read the changelog before bumping. v2 dropped the HMAC and WebAuthn tiers — see CHANGELOG for the migration path.
+
+The realistic adoption pattern: ship it as the second layer behind your existing auth. The bound polyfill means you don't have to lock non-Chromium users out. Gate genuinely high-value actions (payments, password change, admin) on `tier === "dbsc"`; gate everything else on `tier !== "none"`. See [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md).
 
 ---
 
 ## Further reading
 
-- [README.md](./README.md) — quick-start, install, production-readiness assessment.
+- [README.md](./README.md) — quick-start, install, subpath imports.
 - [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md) — bolting DBSC onto an existing app with its own session cookie.
 - [docs/api-reference.md](./docs/api-reference.md) — every public export across all subpaths.
 - [docs/protocol.md](./docs/protocol.md) — exact wire format with every header value and JSON shape.

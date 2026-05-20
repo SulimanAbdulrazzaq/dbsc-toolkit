@@ -27,7 +27,7 @@ It does not protect against:
 - Malware with kernel-level access that can interface with the TPM directly. That is an OS-level concern, not a library-level one.
 - Phishing attacks that intercept the initial authentication step. The library binds an existing session — it does not authenticate the user.
 
-The `bound` tier defeats remote cookie theft (XSS, network capture, log leaks, paste-into-other-browser) but does not defeat infostealer malware reading the browser profile directory. The IndexedDB-stored key is `extractable: false` (JS cannot export it) but the encrypted key blob still lives on disk. For routes that must defeat that threat, gate on `tier === "dbsc"` specifically — native DBSC keeps the private key inside TPM / Secure Enclave / Android Keystore.
+The `bound` tier defeats remote cookie theft (XSS, network capture, log leaks, paste-into-other-browser) but does not defeat infostealer malware reading the browser profile directory. The IndexedDB-stored key is `extractable: false` (JS cannot export it) but the encrypted key blob still lives on disk. For routes that must defeat that threat, gate on `tier === "dbsc"` specifically. Native DBSC keeps the private key inside TPM / Secure Enclave / Android Keystore.
 
 See [docs/security/threat-model.md](./docs/security/threat-model.md) for the STRIDE analysis and [docs/bound-polyfill.md](./docs/bound-polyfill.md) for the per-attack threat table.
 
