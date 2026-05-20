@@ -538,6 +538,12 @@ document.getElementById('login-btn').onclick = async () => {
   show(r);
   if (r.status === 200) {
     lastLoginAt = Date.now();
+    // Re-kick the bound polyfill. On page-load it exited early because
+    // no session existed yet; now that /login has set the registration
+    // cookies, it can run through registration.
+    if (typeof window.initBoundDbsc === 'function') {
+      window.initBoundDbsc().catch((err) => console.error('[bound-sdk]', err));
+    }
     pollDbscReady();
   }
 };
@@ -591,6 +597,7 @@ document.getElementById('clear-btn').onclick = async () => {
 
 <script type="module">
   import { initBoundDbsc } from '/dbsc-client/index.js';
+  window.initBoundDbsc = initBoundDbsc;
   initBoundDbsc().catch((err) => console.error('[bound-sdk]', err));
 </script>
 </body>

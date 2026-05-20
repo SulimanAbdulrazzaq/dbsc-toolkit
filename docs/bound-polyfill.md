@@ -122,6 +122,19 @@ The underlying encrypted blob still lives in the browser's profile directory on 
 
 After a successful registration or on a `phase: "bound", tier: "bound"` init, the SDK schedules a `setTimeout` for `refreshIntervalMs - refreshMarginMs` (default 5s margin) and refreshes silently. On refresh success, it schedules the next one. On refresh failure, it stops. The next page load will re-run the init flow and re-bind if appropriate.
 
+### Re-invoke after login
+
+If your login flow doesn't reload the page (most SPA logins), the page-load `initBoundDbsc()` already ran while the user was unauthenticated, saw `phase: "unbound"`, and exited. To pick up the new registration cookies set by `bindSession`, call `initBoundDbsc()` again after a successful login:
+
+```js
+const r = await fetch("/login", { ... });
+if (r.ok && typeof window.initBoundDbsc === "function") {
+  window.initBoundDbsc();
+}
+```
+
+Expose the function on `window` from your module script so non-module code can reach it. Chrome doesn't need this — its native DBSC client reacts to the `Secure-Session-Registration` response header from `/login` directly — but Firefox and Safari do.
+
 ## Mounting the SDK
 
 The SDK is a plain ES module. The simplest deployment is to serve the built artifact from `node_modules/dbsc-toolkit/dist/client/` and import it from your HTML:
