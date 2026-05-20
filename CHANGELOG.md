@@ -2,6 +2,16 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.1.1] — 2026-05-21
+
+### Fixed
+
+- **Chrome racing the polyfill on slow networks.** The bound polyfill's `nativeProbeWindowMs` default was 3 seconds. On deployments with cold-start latency (Render free tier is the canonical case) or slow TPMs, native Chrome DBSC registration could land past that window, letting the polyfill register first and pinning the session to `tier: "bound"` even though the browser had full TPM support. Symptom: Chrome users seeing `tier: "bound"` instead of `tier: "dbsc"` on the live demo after the v2.1.0 deploy. Default raised to 5 seconds, which covers normal latency without making Firefox/Safari users wait noticeably longer.
+
+### Demo
+
+- The Render demo now passes `nativeProbeWindowMs: 8000` explicitly. 5 seconds is enough for typical hosts; 8 is the conservative number for the free-tier cold-start case the demo runs on.
+
 ## [2.1.0] — 2026-05-20
 
 ### Added

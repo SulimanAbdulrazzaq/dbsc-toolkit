@@ -87,7 +87,30 @@ Full walk-through, including the post-login race and how to absorb it: [docs/get
 
 ## Adding to an existing app
 
-Already have a session cookie? You don't migrate the store, you don't rewrite login. Add one `bindSession()` call at the end of your existing login route, or set `autoBind` on the middleware and never touch login at all. Per-route policy table and rollout timeline in [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md).
+You don't rewrite login, you don't migrate the session store. DBSC sits alongside your existing session cookie and binds to the same session id. For a typical Express app with cookie-based sessions and a guard on protected routes, integration is **6 setup lines, plus one guard per sensitive route**.
+
+**The 6 setup lines:**
+
+1. Top of the file — `import { dbsc, bindSession, requireBoundProof } from "dbsc-toolkit/express";`
+2. Top of the file — `import { RedisStorage } from "dbsc-toolkit/storage/redis";`
+3. During app boot — `const dbscStorage = new RedisStorage(new Redis(process.env.REDIS_URL));`
+4. During app boot, once — `app.use(dbsc({ storage: dbscStorage }));`
+5. At the end of `/login`, after the password check — `await bindSession(res, sessionId, dbscStorage, { userId: user.id });`
+6. At the start of `/logout`, before tearing down your own session — `await res.locals.dbsc.revoke();`
+
+`sessionId` on line 5 is whatever id your existing session store already issues. DBSC binds to that same id; you don't manage a second id-space.
+
+**One guard per sensitive route — required, not optional:**
+
+```ts
+app.post("/payment",          requireBoundProof({ storage: dbscStorage }), paymentHandler);
+app.post("/settings/password", requireBoundProof({ storage: dbscStorage }), passwordHandler);
+app.use("/admin",             requireBoundProof({ storage: dbscStorage }));   // gates everything under /admin
+```
+
+The `tier` field on every request is informational. Without a guard, a stolen cookie still reaches your handler — the library cannot infer which routes are sensitive, you mark them. `requireBoundProof` lets native DBSC traffic (`tier: "dbsc"`) through automatically (Chromium enforces session validity browser-side); Firefox / Safari traffic (`tier: "bound"`) must carry a fresh per-request signature, which the client-side [`wrapFetch()`](./docs/per-request-signing.md) adds for you.
+
+Fastify / Hono / Next.js variants of these six lines, plus the per-route policy table and a 30-day rollout timeline, are in [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md).
 
 ## Subpath imports
 

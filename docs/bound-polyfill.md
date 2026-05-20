@@ -118,7 +118,7 @@ The underlying encrypted blob still lives in the browser's profile directory on 
 2. **`phase: "unbound"`** → clear any stale IndexedDB record, return. User isn't logged in.
 3. **`phase: "bound", tier: "dbsc"`** → native DBSC won the race. Do nothing.
 4. **`phase: "bound", tier: "bound"`** → the server thinks we're bound. Verify the IndexedDB key still matches. If not, clear it and retry registration.
-5. **`phase: "needs-registration"`** → wait `nativeProbeWindowMs` (default 3000 ms), then re-check `/state`. If native DBSC still hasn't landed, run the polyfill registration. If it has, do nothing.
+5. **`phase: "needs-registration"`** → wait `nativeProbeWindowMs` (default 5000 ms), then re-check `/state`. If native DBSC still hasn't landed, run the polyfill registration. If it has, do nothing.
 
 After a successful registration or on a `phase: "bound", tier: "bound"` init, the SDK schedules a `setTimeout` for `refreshIntervalMs - refreshMarginMs` (default 5s margin) and refreshes silently. On refresh success, it schedules the next one. On refresh failure, it stops. The next page load will re-run the init flow and re-bind if appropriate.
 
@@ -171,7 +171,7 @@ initBoundDbsc({
   challengePath: "/dbsc-bound/challenge",
   registrationPath: "/dbsc-bound/registration",
   refreshPath: "/dbsc-bound/refresh",
-  nativeProbeWindowMs: 3000,
+  nativeProbeWindowMs: 5000,
   refreshMarginMs: 5000,
 });
 ```

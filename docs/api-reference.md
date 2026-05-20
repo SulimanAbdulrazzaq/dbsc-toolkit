@@ -418,7 +418,7 @@ interface InitBoundDbscOptions {
   challengePath?: string;         // default "/dbsc-bound/challenge"
   registrationPath?: string;      // default "/dbsc-bound/registration"
   refreshPath?: string;           // default "/dbsc-bound/refresh"
-  nativeProbeWindowMs?: number;   // default 3000 — how long to wait for native DBSC before polyfilling
+  nativeProbeWindowMs?: number;   // default 5000 — how long to wait for native DBSC before polyfilling
   refreshMarginMs?: number;       // default 5000 — refresh this many ms before the bound cookie expires
 }
 

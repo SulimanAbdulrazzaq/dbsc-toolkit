@@ -654,11 +654,16 @@ document.getElementById('clear-btn').onclick = async () => {
 
 <script type="module">
   import { initBoundDbsc, wrapFetch } from '/dbsc-client/index.js';
-  window.initBoundDbsc = initBoundDbsc;
+  // 8s probe window — Render free tier's cold start can push native Chrome
+  // DBSC registration past the library's 5s default, which would let the
+  // polyfill race ahead and pin the session to tier=bound on a TPM-capable
+  // browser. 8s is the conservative number that always lets Chrome win here.
+  const boundInit = (opts = {}) => initBoundDbsc({ nativeProbeWindowMs: 8000, ...opts });
+  window.initBoundDbsc = boundInit;
   // Per-call wrapper. NOT assigned to globalThis.fetch — analytics, React Query,
   // and other third-party SDKs keep using the native fetch unaffected.
   window.dbscBoundFetch = wrapFetch();
-  initBoundDbsc().catch((err) => console.error('[bound-sdk]', err));
+  boundInit().catch((err) => console.error('[bound-sdk]', err));
 </script>
 </body>
 </html>`);

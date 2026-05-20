@@ -47,7 +47,7 @@ const DEFAULTS: ResolvedOptions = {
   challengePath: "/dbsc-bound/challenge",
   registrationPath: "/dbsc-bound/registration",
   refreshPath: "/dbsc-bound/refresh",
-  nativeProbeWindowMs: 3000,
+  nativeProbeWindowMs: 5000,
   refreshMarginMs: 5000,
 };
 
