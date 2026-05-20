@@ -2,6 +2,12 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.0.1] — 2026-05-20
+
+### Fixed
+
+- **Expose `./package.json` in the `exports` map.** The 2.0.0 demo refactor introduced a `require.resolve("dbsc-toolkit/package.json")` call so the demo can locate `dist/client/` at runtime and serve it as a static file. With strict `exports` and no `./package.json` entry, that resolve throws `ERR_PACKAGE_PATH_NOT_EXPORTED` and the demo crashes at startup on Render. Added the standard `"./package.json": "./package.json"` entry — common pattern, no behavior change for code that already imports from the published subpaths.
+
 ## [2.0.0] — 2026-05-20
 
 This is a breaking release. The four-tier system (`dbsc` / `webauthn` / `hmac` / `none`) is gone. In its place: two real tiers (`dbsc` / `bound`) plus `none`, with a Web Crypto polyfill that gives Firefox, Safari, and older Chromium the same protection against cookie theft that native DBSC delivers on Chromium 145+.
