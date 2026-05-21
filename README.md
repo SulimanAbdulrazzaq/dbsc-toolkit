@@ -48,6 +48,8 @@ npm install express cookie-parser pg         # Express + Postgres
 
 ## Quick start
 
+Copy-paste runnable. The whole picture is ~25 lines — `trust proxy`, `cookieParser`, `express.json` and the static-file mount for the polyfill all matter, and missing any of them is the #1 reason "tier is always `none`" tickets get opened.
+
 ```ts
 import express from "express";
 import cookieParser from "cookie-parser";
@@ -56,23 +58,28 @@ import { dbsc, bindSession } from "dbsc-toolkit/express";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
 const app = express();
-app.set("trust proxy", true);
-app.use(cookieParser());
-app.use(express.json());
 
-const storage = new MemoryStorage();
-app.use(dbsc({ storage }));
+app.set("trust proxy", true);          // required behind Render / Fly / Cloudflare / nginx
+app.use(cookieParser());               // required: bindSession sets HttpOnly cookies
+app.use(express.json());               // required: bound polyfill POSTs JSON
+app.use(
+  "/dbsc-client",                      // serves the browser SDK for Firefox / Safari
+  express.static(new URL("../node_modules/dbsc-toolkit/dist/client/", import.meta.url).pathname),
+);
+
+const storage = new MemoryStorage();   // swap for RedisStorage / PostgresStorage in production
+app.use(dbsc({ storage }));            // mounts /dbsc/registration, /dbsc/refresh, /dbsc-bound/*
 
 app.post("/login", async (req, res) => {
   await bindSession(res, randomUUID(), storage, { userId: req.body.username });
   res.json({ ok: true });
 });
 
-app.get("/me", (req, res) => res.json(res.locals.dbsc));
+app.get("/me", (_req, res) => res.json(res.locals.dbsc));
 app.listen(3000);
 ```
 
-`app.use(dbsc(...))` mounts the protocol routes automatically; your code never sees them. `bindSession()` is the one-liner you add to your existing login route. For the polyfill to cover non-Chromium browsers, include this on your page:
+In your HTML, load the polyfill once so Firefox / Safari / older Chromium reach `tier: "bound"`:
 
 ```html
 <script type="module">
@@ -81,24 +88,31 @@ app.listen(3000);
 </script>
 ```
 
-(Serve `node_modules/dbsc-toolkit/dist/client/` as a static directory; the demo shows the pattern.)
+Without the script tag those browsers stay on `tier: "none"`. Native Chromium 145+ does not need the script — it negotiates the protocol on its own from the headers `dbsc()` sets.
 
-Full walk-through, including the post-login race and how to absorb it: [docs/getting-started.md](./docs/getting-started.md).
+### Common failure modes
+
+- **`tier` always reads `"none"` on Chromium 145+?** Forgot `trust proxy`, on plain HTTP, or middleware order is wrong (cookieParser must run before `dbsc`).
+- **Chrome loops registration?** Storage was wiped — switch off `MemoryStorage` to Redis or Postgres before deploying anywhere that ever restarts.
+- **Tier flips back to `"none"` right after login?** The race between `/login` returning and the browser running `POST /dbsc/registration`. Poll `/me` for ~1 s after login or await the bound-SDK outcome promise. The demo wires both — see [examples/express/src/server.js](./examples/express/src/server.js).
+- **Firefox / Safari still on `"none"`?** Forgot the `<script type="module">` tag above, or the static-file mount is wrong.
+
+Full walk-through: [docs/getting-started.md](./docs/getting-started.md).
 
 ## Adding to an existing app
 
-You don't rewrite login, you don't migrate the session store. DBSC sits alongside your existing session cookie and binds to the same session id. For a typical Express app with cookie-based sessions and a guard on protected routes, integration is **6 setup lines, plus one guard per sensitive route**.
+You don't rewrite login, you don't migrate the session store. DBSC sits alongside your existing session cookie and binds to the same session id. For a typical Express app, the new lines you write are:
 
-**The 6 setup lines:**
+1. `import { dbsc, bindSession, requireBoundProof } from "dbsc-toolkit/express";`
+2. `import { RedisStorage } from "dbsc-toolkit/storage/redis";`
+3. `const dbscStorage = new RedisStorage(new Redis(process.env.REDIS_URL));`
+4. `app.use(dbsc({ storage: dbscStorage }));`
+5. End of `/login`: `await bindSession(res, sessionId, dbscStorage, { userId: user.id });`
+6. Start of `/logout`: `await res.locals.dbsc.revoke();`
 
-1. Top of the file — `import { dbsc, bindSession, requireBoundProof } from "dbsc-toolkit/express";`
-2. Top of the file — `import { RedisStorage } from "dbsc-toolkit/storage/redis";`
-3. During app boot — `const dbscStorage = new RedisStorage(new Redis(process.env.REDIS_URL));`
-4. During app boot, once — `app.use(dbsc({ storage: dbscStorage }));`
-5. At the end of `/login`, after the password check — `await bindSession(res, sessionId, dbscStorage, { userId: user.id });`
-6. At the start of `/logout`, before tearing down your own session — `await res.locals.dbsc.revoke();`
+If your app isn't already set up for HTTPS-terminating proxies, `cookieParser`, or JSON bodies, you also need the four lines in the quick-start block above (`trust proxy`, `cookieParser()`, `express.json()`, and the `/dbsc-client/*` static mount for the polyfill). Most existing apps already have the first three.
 
-`sessionId` on line 5 is whatever id your existing session store already issues. DBSC binds to that same id; you don't manage a second id-space.
+`sessionId` on line 5 is whatever id your existing session store issues. DBSC binds to that same id; you don't manage a second id-space.
 
 ## Choose your protection level per route
 

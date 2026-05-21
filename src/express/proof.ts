@@ -7,27 +7,15 @@ import {
 
 export interface RequireBoundProofOptions {
   storage: StorageAdapter;
-  /** Pass true to require a proof header on tier=dbsc requests too. Defaults to false (native DBSC is enforced by Chromium). */
+  /** Require proof header on tier=dbsc too. Default false. */
   allowDbscWithoutProof?: boolean;
-  /** Accepts proofs whose ts is within ±N ms of server time. Defaults to 5 minutes. */
+  /** Accepted timestamp window, ms. Default 5 min. */
   timestampWindowMs?: number;
-  /**
-   * When true, the proof must include a `bh=` body-hash field signed into the
-   * message. The middleware reads `req.body` as raw bytes — your route MUST
-   * use `express.raw({ type: '*\/*' })` for this to work, otherwise the parsed
-   * JSON body won't match the client's pre-hash bytes. Defaults to false.
-   */
+  /** Verify SHA-256 body hash. Route must deliver raw bytes (e.g. express.raw({type:"*\/*"})). */
   signBody?: boolean;
 }
 
-/**
- * Gates a route on a fresh ECDSA P-256 proof signed by the bound key.
- *
- * Use ONLY for sensitive routes (payment, admin, password-change, etc.) —
- * the per-request signature has a measurable cost on the client and server.
- * For tier=dbsc the middleware passes through by default; Chromium's
- * browser-level DBSC enforcement handles the equivalent threat.
- */
+/** Gates a route on a fresh bound-key proof. */
 export function requireBoundProof(opts: RequireBoundProofOptions): RequestHandler {
   const allowDbsc = opts.allowDbscWithoutProof ?? true;
   const signBody = opts.signBody ?? false;

@@ -135,7 +135,10 @@ useQuery({ queryKey: ["feed"], queryFn: () => fetch("/feed").then(r => r.json())
 
 The SDK reads `X-Server-Time` from `/dbsc-bound/state`, `/dbsc-bound/registration`, and `/dbsc-bound/refresh` responses. It computes `offset = serverTime - Date.now()` and persists it in the IndexedDB record next to the key. `wrapFetch` then signs with `Date.now() + offset`. A phone with a clock that's 12 hours off still produces a timestamp the server considers fresh.
 
-The server's default acceptance window is ±5 minutes. Pass `timestampWindowMs: 30_000` to `requireBoundProof()` to tighten it, or pass a larger value if you target devices known to drift.
+Two windows live in the library:
+
+- **`requireBoundProof` proof header window:** default ±5 minutes. Pass `timestampWindowMs: 30_000` on `requireBoundProof()` to tighten.
+- **Bound polyfill refresh timestamp window:** ±5 minutes (since v2.3.2). Not configurable per-call; lives in `src/core/bound/refresh.ts`. The client SDK uses the same clock-offset correction so the window mostly only matters on the very first refresh after install.
 
 ## Telemetry
 
@@ -173,7 +176,7 @@ Per-framework raw-body recipe:
 
 - **Express**: `express.raw({ type: "*/*" })` on the route, BEFORE `requireBoundProof`. If you have `express.json()` mounted globally, also send the request with a non-JSON `Content-Type` (e.g. `application/octet-stream`) so the global parser skips it.
 - **Fastify**: register a buffer parser — `fastify.addContentTypeParser("application/octet-stream", { parseAs: "buffer" }, (_req, body, done) => done(null, body))` — then use that content type on the wire.
-- **Hono**: the middleware calls `c.req.arrayBuffer()` automatically. Downstream handlers can still use `c.req.json()` because the request is cached.
+- **Hono**: the middleware consumes the body via `c.req.arrayBuffer()`. Hono v4+ caches the body on first read, so downstream handlers can usually call `c.req.json()` afterwards — but if you target older Hono versions, parse the body inside the handler from `c.req.raw` directly to be safe.
 - **Next.js**: the helper calls `req.clone().arrayBuffer()`. Your handler can then call `await req.json()` on the original request as usual.
 
 What body signing does and doesn't defeat:

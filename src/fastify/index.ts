@@ -57,6 +57,7 @@ export interface DbscFastifyOptions extends DbscOptions {
 
 export interface BindSessionOptions {
   userId: string;
+  /** Match the value passed to dbsc({ secure }). Defaults true. Mismatch = cookies the middleware cannot read. */
   secure?: boolean;
   registrationPath?: string;
   registrationCookieTtl?: number;
@@ -90,7 +91,7 @@ export async function bindSession(
   const COOKIES = cookieNames(secure);
   const challenge = await issueChallenge(sessionId, storage);
   const regHeader = buildRegistrationHeader({
-    refreshPath: registrationPath,
+    registrationPath,
     challenge: challenge.jti,
     cookieName: COOKIES.bound,
   });
@@ -299,8 +300,26 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
       });
     } catch (err) {
       await rateLimiter.recordFailure(ip, sessionId);
+
+      const stolenCheck = await storage.getBoundKey(sessionId);
+      if (stolenCheck && err instanceof DbscVerificationError && err.code === ErrorCodes.SIGNATURE_INVALID) {
+        emit(onEvent, { type: "session_stolen", sessionId, tier: "dbsc", timestamp: Date.now(), ip });
+      }
+
       if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {
-        return reply.status(401).send({ error: err.message });
+        emit(onEvent, {
+          type: "verification_failure",
+          sessionId,
+          tier: "dbsc",
+          timestamp: Date.now(),
+          reason: (err as DbscVerificationError).code,
+          ip,
+        });
+        const challenge = await issueChallenge(sessionId, storage);
+        reply.header(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
+        reply.header(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
+        reply.setCookie(COOKIES.challenge, challenge.jti, { ...cookieOpts, maxAge: 5 * 60 });
+        return reply.status(403).send({ error: err.message });
       }
       throw err;
     }

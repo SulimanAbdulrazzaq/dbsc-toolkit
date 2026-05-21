@@ -39,8 +39,6 @@ app.set("trust proxy", true);   // required behind Render, Fly, Cloudflare, ngin
 const storage = new MemoryStorage();
 
 app.use(cookieParser());
-app.use("/dbsc/registration", express.text({ type: "*/*" }));
-app.use("/dbsc/refresh", express.text({ type: "*/*" }));
 app.use(express.json());
 
 app.use(dbsc({ storage }));

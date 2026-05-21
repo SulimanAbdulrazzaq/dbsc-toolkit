@@ -146,7 +146,9 @@ const LEGACY_CHALLENGE_HEADER: "Sec-Session-Challenge";
 
 interface RegistrationHeaderOptions {
   algorithm?: "ES256" | "RS256";
-  refreshPath: string;
+  registrationPath?: string;         // path where the browser POSTs the registration JWS
+  /** @deprecated misnamed alias for registrationPath; kept for back-compat */
+  refreshPath?: string;
   challenge: string;
   cookieName?: string;
 }

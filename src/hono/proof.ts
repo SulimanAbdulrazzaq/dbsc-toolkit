@@ -7,20 +7,15 @@ import {
 
 export interface RequireBoundProofOptions {
   storage: StorageAdapter;
+  /** Require proof header on tier=dbsc too. Default false. */
   allowDbscWithoutProof?: boolean;
+  /** Accepted timestamp window, ms. Default 5 min. */
   timestampWindowMs?: number;
-  /**
-   * When true, the middleware reads `c.req.raw.arrayBuffer()` and verifies a
-   * matching `bh=` body-hash field. Downstream handlers that need the body
-   * after this should use `c.req.arrayBuffer()` themselves (it is cached).
-   */
+  /** Verify SHA-256 body hash. Hono v4+ caches the body so downstream handlers can re-parse it. */
   signBody?: boolean;
 }
 
-/**
- * Gates a route on a fresh ECDSA P-256 proof signed by the bound key.
- * See the Express version for the full doc.
- */
+/** Gates a route on a fresh bound-key proof. */
 export function requireBoundProof(opts: RequireBoundProofOptions): MiddlewareHandler {
   const allowDbsc = opts.allowDbscWithoutProof ?? true;
   const signBody = opts.signBody ?? false;

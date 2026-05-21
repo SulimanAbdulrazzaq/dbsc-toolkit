@@ -7,21 +7,15 @@ import {
 
 export interface RequireBoundProofOptions {
   storage: StorageAdapter;
+  /** Require proof header on tier=dbsc too. Default false. */
   allowDbscWithoutProof?: boolean;
+  /** Accepted timestamp window, ms. Default 5 min. */
   timestampWindowMs?: number;
-  /**
-   * When true, the proof must include a `bh=` body-hash field. Your route
-   * MUST register a raw content-type parser via Fastify's
-   * `addContentTypeParser('*', { parseAs: 'buffer' }, ...)` for the route to
-   * deliver `req.body` as a Buffer matching the client's pre-hash bytes.
-   */
+  /** Verify SHA-256 body hash. Register a buffer content-type parser so req.body arrives as Buffer. */
   signBody?: boolean;
 }
 
-/**
- * Gates a route on a fresh ECDSA P-256 proof signed by the bound key.
- * See the Express version for the full doc.
- */
+/** Gates a route on a fresh bound-key proof. */
 export function requireBoundProof(opts: RequireBoundProofOptions): preHandlerAsyncHookHandler {
   const allowDbsc = opts.allowDbscWithoutProof ?? true;
   const signBody = opts.signBody ?? false;

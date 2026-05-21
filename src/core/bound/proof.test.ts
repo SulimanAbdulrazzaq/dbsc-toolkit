@@ -92,6 +92,25 @@ describe("parseProofHeader", () => {
   it("ignores extra unknown fields", () => {
     expect(parseProofHeader("ts=1;sig=abc;extra=ignored")).toEqual({ ts: 1, sig: "abc" });
   });
+
+  it("rejects duplicate keys", () => {
+    expect(parseProofHeader("ts=1;sig=A;sig=B")).toBeNull();
+    expect(parseProofHeader("ts=1;sig=A;bh=X;bh=Y")).toBeNull();
+  });
+
+  it("rejects headers exceeding the length cap", () => {
+    const huge = "ts=1;sig=" + "A".repeat(9000);
+    expect(parseProofHeader(huge)).toBeNull();
+  });
+
+  it("rejects headers with too many segments", () => {
+    const tooMany = "ts=1;sig=A;a=1;b=2;c=3;d=4;e=5;f=6;g=7;h=8";
+    expect(parseProofHeader(tooMany)).toBeNull();
+  });
+
+  it("rejects segments missing an =", () => {
+    expect(parseProofHeader("ts=1;sig=A;novalue")).toBeNull();
+  });
 });
 
 describe("verifyBoundProof", () => {
@@ -358,10 +377,9 @@ describe("verifyBoundProof body signing", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("ignores bh on the wire when signBody is false (backwards compat)", async () => {
+  it("rejects stray bh on the wire when signBody is false", async () => {
     const { storage, sessionId, privateKey } = await bootstrapBoundSession("sess-b5");
     const ts = Date.now();
-    // Build a body-less proof, then jam an unrelated bh field at the end of the header.
     const message = `${sessionId}.GET./x.${ts}`;
     const sig = await signMessage(privateKey, message);
     const headerWithStrayBh = `ts=${ts};sig=${sig};bh=ignored-value`;
@@ -371,6 +389,26 @@ describe("verifyBoundProof body signing", () => {
         { sessionId, proofHeader: headerWithStrayBh, method: "GET", path: "/x" },
         storage,
       ),
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({
+      name: "DbscVerificationError",
+      code: ErrorCodes.MALFORMED_PROOF,
+    });
+  });
+
+  it("rejects when signBody is true but bodyBytes are not supplied", async () => {
+    const { storage, sessionId, privateKey } = await bootstrapBoundSession("sess-b6");
+    const ts = Date.now();
+    const sig = await signMessage(privateKey, `${sessionId}.POST./x.${ts}.unused`);
+    const header = `ts=${ts};sig=${sig};bh=anyhash`;
+
+    await expect(
+      verifyBoundProof(
+        { sessionId, proofHeader: header, method: "POST", path: "/x", signBody: true },
+        storage,
+      ),
+    ).rejects.toMatchObject({
+      name: "DbscVerificationError",
+      code: ErrorCodes.MALFORMED_PROOF,
+    });
   });
 });

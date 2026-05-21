@@ -1,6 +1,6 @@
 {
   "name": "dbsc-fastify-demo",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
-    "dbsc-toolkit": "^2.3.0",
+    "dbsc-toolkit": "^2.4.0",
     "fastify": "^5.8.5"
   }
 }

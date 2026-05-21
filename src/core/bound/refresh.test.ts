@@ -94,7 +94,7 @@ describe("handleBoundRefresh", () => {
   it("rejects timestamps outside the acceptance window", async () => {
     const { storage, sessionId, privateKey } = await bootstrapBoundSession("sess-r3");
     const challenge = await issueChallenge(sessionId, storage);
-    const skewed = Date.now() - 120_000;
+    const skewed = Date.now() - 10 * 60_000;
     const signature = await signMessage(privateKey, `${challenge.jti}.${skewed}`);
 
     await expect(

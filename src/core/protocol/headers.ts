@@ -1,13 +1,18 @@
 export interface RegistrationHeaderOptions {
   algorithm?: "ES256" | "RS256";
-  refreshPath: string;
+  /** Path where the browser will POST the registration JWS. */
+  registrationPath?: string;
+  /** @deprecated misnamed alias for registrationPath; kept for back-compat. */
+  refreshPath?: string;
   challenge: string;
   cookieName?: string;
 }
 
 export function buildRegistrationHeader(opts: RegistrationHeaderOptions): string {
   const alg = opts.algorithm ?? "ES256";
-  const parts = [`(${alg})`, `path="${opts.refreshPath}"`, `challenge="${opts.challenge}"`];
+  const path = opts.registrationPath ?? opts.refreshPath;
+  if (!path) throw new Error("buildRegistrationHeader: registrationPath is required");
+  const parts = [`(${alg})`, `path="${path}"`, `challenge="${opts.challenge}"`];
   if (opts.cookieName) parts.push(`id="${opts.cookieName}"`);
   return parts.join(";");
 }

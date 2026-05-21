@@ -61,6 +61,7 @@ function cookieBase(secure: boolean) {
 
 export interface BindSessionOptions {
   userId: string;
+  /** Match the value passed to createDbscMiddleware({ secure }). Defaults true. Mismatch = cookies the middleware cannot read. */
   secure?: boolean;
   registrationPath?: string;
   registrationCookieTtl?: number;
@@ -94,7 +95,7 @@ export async function bindSession(
   const COOKIES = cookieNames(secure);
   const challenge = await issueChallenge(sessionId, storage);
   const regHeader = buildRegistrationHeader({
-    refreshPath: registrationPath,
+    registrationPath,
     challenge: challenge.jti,
     cookieName: COOKIES.bound,
   });
@@ -280,8 +281,30 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
         return res;
       } catch (err) {
         await rateLimiter.recordFailure(ip, sessionId);
+
+        const stolenCheck = await storage.getBoundKey(sessionId);
+        if (stolenCheck && err instanceof DbscVerificationError && err.code === ErrorCodes.SIGNATURE_INVALID) {
+          emit(onEvent, { type: "session_stolen", sessionId, tier: "dbsc", timestamp: Date.now(), ip });
+        }
+
         if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {
-          return NextResponse.json({ error: err.message }, { status: 401 });
+          emit(onEvent, {
+            type: "verification_failure",
+            sessionId,
+            tier: "dbsc",
+            timestamp: Date.now(),
+            reason: (err as DbscVerificationError).code,
+            ip,
+          });
+          const challenge = await issueChallenge(sessionId, storage);
+          const res = NextResponse.json({ error: err.message }, { status: 403 });
+          res.headers.set(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
+          res.headers.set(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
+          res.cookies.set(COOKIES.challenge, challenge.jti, {
+            ...cookieBase(secure),
+            maxAge: 5 * 60,
+          });
+          return res;
         }
         throw err;
       }

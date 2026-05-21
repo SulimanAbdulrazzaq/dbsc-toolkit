@@ -33,6 +33,18 @@ Hono and Next.js derive origin from the request URL directly (`url.origin`, `req
 
 If `/dbsc/refresh` never fires in your logs after a working `/dbsc/registration`, this is the first thing to check. Symptom looks identical to several other failure modes; trust-proxy is the cheapest fix to verify.
 
+## Cold-start hosts (Render free tier, Fly free tier)
+
+The bound-polyfill SDK has a probe window — it waits a few seconds for native Chromium DBSC to complete before falling back. Default is 5 seconds. On a cold-started container the first request can take 3–5 seconds just to wake the dyno, leaving native DBSC no headroom before the polyfill takes over. Symptom: Chrome users see `tier: "bound"` instead of `tier: "dbsc"`.
+
+Fix on the client init:
+
+```ts
+initBoundDbsc({ nativeProbeWindowMs: 8000 });
+```
+
+8 seconds is enough for the free-tier cold-start case. Lower the value when you move off cold-start hosts; the SDK clamps a minimum so a very small value still gets one poll cycle.
+
 ## Render
 
 The live demo runs here. Steps:

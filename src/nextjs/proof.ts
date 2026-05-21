@@ -9,14 +9,11 @@ import {
 
 export interface RequireBoundProofOptions {
   storage: StorageAdapter;
+  /** Require proof header on tier=dbsc too. Default false. */
   allowDbscWithoutProof?: boolean;
+  /** Accepted timestamp window, ms. Default 5 min. */
   timestampWindowMs?: number;
-  /**
-   * When true, the helper calls `req.arrayBuffer()` and verifies a matching
-   * `bh=` body-hash field. Note: NextRequest.arrayBuffer() consumes the body
-   * stream — the caller must either re-read the body via a clone or call
-   * `req.json()` on a clone afterwards.
-   */
+  /** Verify SHA-256 body hash. Helper clones req before reading so handler can still parse the original. */
   signBody?: boolean;
 }
 
@@ -27,16 +24,7 @@ export interface RequireBoundProofContext {
 
 export type RequireBoundProofResult = { ok: true } | { ok: false; response: NextResponse };
 
-/**
- * Checks the X-Dbsc-Bound-Proof header. Returns { ok: true } when the request
- * may proceed, or { ok: false, response } with a 403 response to short-circuit.
- *
- * Use inside a Next.js App Router route handler:
- *
- *   const session = await getDbscSession(req, storage);
- *   const gate = await requireBoundProof(req, session, { storage });
- *   if (!gate.ok) return gate.response;
- */
+/** Gates a route on a fresh bound-key proof. Use inside an App Router handler. */
 export async function requireBoundProof(
   req: NextRequest,
   session: RequireBoundProofContext,

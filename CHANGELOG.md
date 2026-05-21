@@ -2,6 +2,41 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.4.0] — 2026-05-22
+
+This release closes a handful of audit findings — a couple are real, the rest are hygiene. Nothing on the wire format moves; the visible behaviour change is that native `/dbsc/refresh` now returns 403 instead of 401 on a bad signature, which is what the spec asked for in the first place.
+
+### Fixed
+
+- **`signBody` server semantics no longer drift from the client.** `verifyBoundProof` used `signBody === true || bodyBytes?.byteLength > 0` to decide whether to demand a `bh=` field. Two ways that goes wrong: an adapter author passing `bodyBytes` defensively without setting `signBody` silently flips on body verification, and a caller setting `signBody: true` without supplying `bodyBytes` hashes an empty buffer and almost always 403s the route with no useful error. Now the check is exactly `signBody === true`, callers must supply `bodyBytes` when signing, and a stray `bh=` on the wire with `signBody: false` is rejected as `MALFORMED_PROOF` rather than ignored. The client (`wrapFetch`) was updated to always hash and emit `bh=sha256("")` for empty bodies when `signBody: true` is set, so legitimate empty-body POSTs keep working.
+
+- **Native `/dbsc/refresh` returns 403 on verification failure.** Chromium only restarts the refresh algorithm on 403; a 401 leaves the session in a stuck state. The "missing proof" branch was already correct — this fixes the "proof present but bad" branch on Express, Fastify, Hono, and Next.js. The handler also issues a fresh challenge in the 403 response so the browser can immediately retry. The bound-polyfill refresh route still returns 401 on failure — that path is driven by the client SDK in JavaScript, which reads the status code directly.
+
+- **Bound-polyfill refresh accepts ±5 minutes of clock skew.** Was 60 seconds, which is tight on phones with drifted clocks. The matching default on `requireBoundProof` was already 5 minutes; aligning them removes the surprise.
+
+- **Atomic challenge burn on a bad signature.** Both `handleRefresh` and `handleBoundRefresh` now mark the challenge consumed before throwing on a bad signature. Previously an attacker who could replay couldn't gain access (signature is still bad) but could trigger the demotion path repeatedly and spam telemetry.
+
+- **`parseProofHeader` hygiene.** Rejects duplicate keys (`bh=A;bh=B` used to last-write-win), caps the header at 8 KB and 8 segments, and rejects malformed segments (`novalue` with no `=`).
+
+- **Renamed `RegistrationHeaderOptions.refreshPath` → `registrationPath`.** The old name was wrong — Chrome posts the registration JWS to that path, not the refresh URL. The deprecated alias is kept so adapter authors who copied the field name don't break.
+
+### Docs
+
+- **README quick-start is honest now.** The "6 setup lines" framing was selling a fantasy: a real Express integration needs `trust proxy`, `cookieParser`, `express.json`, and the static-file mount for the polyfill on top of the six DBSC-specific lines. The new quick-start is one copy-paste runnable block with all of them in order, plus a "common failure modes" box covering the four most-asked symptoms (tier always none, registration loops, post-login race, polyfill not loading).
+- **`docs/getting-started.md`** no longer mounts `express.text()` on the DBSC routes. The middleware reads the JWS from a header, not the body; the parser line was misleading and made readers think it was a prerequisite.
+- **Two timestamp windows are documented as two windows.** `requireBoundProof` and `handleBoundRefresh` both default to ±5 minutes; the CHANGELOG previously claimed only `verifyBoundProof` had widened.
+- **`nativeProbeWindowMs: 8000`** is now in `docs/deployment.md` under a cold-start section, with the reasoning. Used to live only in the demo source.
+- **Hono body-cache claim softened** in `docs/per-request-signing.md` — v4+ caches but older versions don't, so the doc now tells you to read the body once and parse locally.
+- **`bindSession({ secure })`** has a JSDoc warning across all four adapters spelling out that the value must match `dbsc({ secure })` or the middleware can't read the cookies the helper just set.
+
+### Tests
+
+- 6 new tests: signBody/bodyBytes asymmetry rejection, stray `bh` rejection, `parseProofHeader` duplicate-key / length-cap / segment-cap / malformed-segment cases, and an end-to-end check that native refresh returns 403 with both challenge header names on verification failure. Suite is now 113 tests; previous count 107.
+
+### Breaking-ish
+
+The `RegistrationHeaderOptions.refreshPath` rename is the only public-API change, and it's source-compatible — the deprecated field still works. The stricter `parseProofHeader` and `verifyBoundProof` semantics are tighter than before; callers that depended on the permissive behaviour (passing `bodyBytes` without `signBody`, sending `bh` on the wire without `signBody`) will now see `MALFORMED_PROOF` errors instead of silent success. The 401 → 403 change on native refresh is observable to anyone watching network logs; behaviour against real Chromium is strictly better.
+
 ## [2.3.1] — 2026-05-21
 
 ### Docs

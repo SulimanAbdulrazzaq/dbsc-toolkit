@@ -1,30 +1,10 @@
 import { getKeyRecord } from "./keystore.js";
 
-/**
- * Wraps a `fetch` function so every outgoing request carries a fresh ECDSA P-256
- * signature in the `X-Dbsc-Bound-Proof` header.
- *
- * Use this ONLY for calls to sensitive routes you've gated with
- * `requireBoundProof()` on the server (payment, admin, password-change, etc).
- * It is per-call by design — keep it out of `globalThis.fetch` so third-party
- * SDKs (analytics, React Query, SWR, etc) keep using the native `fetch`.
- *
- * If no bound key is present in IndexedDB the wrapped fetch transparently falls
- * back to the underlying fetch — Chromium native DBSC paths and the
- * unauthenticated paths keep working.
- */
+/** Per-call fetch wrapper that signs requests with the bound key. Never assign to globalThis.fetch. */
 export interface WrapFetchOptions {
   fetch?: typeof fetch;
   headerName?: string;
-  /**
-   * When true, the wrapper computes sha256(body) and signs it into the proof
-   * header. The server must be configured with `requireBoundProof({ signBody: true })`
-   * for the matching route. Defaults to false.
-   *
-   * Cost: one extra SHA-256 hash per request (~0.1 ms for typical JSON
-   * payloads). Cannot be used with streaming request bodies — the wrapper
-   * reads the body into memory to hash it.
-   */
+  /** SHA-256 the body into the proof header. ReadableStream bodies not supported. */
   signBody?: boolean;
 }
 
@@ -47,15 +27,17 @@ export function wrapFetch(opts: WrapFetchOptions = {}): typeof fetch {
 
     let bodyHash = "";
     let finalBody: BodyInit | null | undefined = init.body;
-    if (signBody && init.body !== undefined && init.body !== null) {
-      const bodyBytes = await readBodyBytes(init.body);
-      // Re-use the bytes as the actual request body so server hashes the same.
-      // Wrap in a Blob to satisfy BodyInit on every runtime (Node, browser).
-      finalBody = new Blob([bodyBytes as BlobPart]);
+    if (signBody) {
+      const bodyBytes = init.body === undefined || init.body === null
+        ? new Uint8Array(0)
+        : await readBodyBytes(init.body);
+      if (bodyBytes.byteLength > 0) {
+        finalBody = new Blob([bodyBytes as BlobPart]);
+      }
       bodyHash = await sha256B64Url(bodyBytes);
     }
 
-    const message = signBody && bodyHash
+    const message = signBody
       ? `${rec.sessionId}.${method}.${url.pathname}.${ts}.${bodyHash}`
       : `${rec.sessionId}.${method}.${url.pathname}.${ts}`;
 
@@ -67,7 +49,7 @@ export function wrapFetch(opts: WrapFetchOptions = {}): typeof fetch {
     const sig = base64url(new Uint8Array(sigBytes));
 
     const headers = new Headers(init.headers);
-    const headerValue = bodyHash
+    const headerValue = signBody
       ? `ts=${ts};sig=${sig};bh=${bodyHash}`
       : `ts=${ts};sig=${sig}`;
     headers.set(headerName, headerValue);

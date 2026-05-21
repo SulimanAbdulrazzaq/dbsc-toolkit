@@ -86,6 +86,7 @@ function serializeCookie(name: string, value: string, opts: ReturnType<typeof co
 
 export interface BindSessionOptions {
   userId: string;
+  /** Match the value passed to dbsc({ secure }). Defaults true. Mismatch = cookies the middleware cannot read. */
   secure?: boolean;
   registrationPath?: string;
   registrationCookieTtl?: number;
@@ -119,7 +120,7 @@ export async function bindSession(
 
   const challenge = await issueChallenge(sessionId, storage);
   const regHeader = buildRegistrationHeader({
-    refreshPath: registrationPath,
+    registrationPath,
     challenge: challenge.jti,
     cookieName: COOKIES.bound,
   });
@@ -316,7 +317,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       await rateLimiter.recordFailure(ip, sessionId);
 
       const stolenCheck = await storage.getBoundKey(sessionId);
-      if (stolenCheck) {
+      if (stolenCheck && err instanceof DbscVerificationError && err.code === ErrorCodes.SIGNATURE_INVALID) {
         emit(onEvent, {
           type: "session_stolen",
           sessionId,
@@ -335,7 +336,14 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
           reason: (err as DbscVerificationError).code,
           ip,
         });
-        res.status(401).json({ error: err.message });
+        const challenge = await issueChallenge(sessionId, storage);
+        res.setHeader(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
+        res.setHeader(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
+        res.setHeader(
+          "Set-Cookie",
+          serializeCookie(COOKIES.challenge, challenge.jti, cookieOpts(5 * 60 * 1000, secure)),
+        );
+        res.status(403).json({ error: err.message });
         return;
       }
       throw err;

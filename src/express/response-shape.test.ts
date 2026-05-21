@@ -98,6 +98,48 @@ describe("registration response shape matches Chromium 145+ / W3C spec", () => {
     }
   });
 
+  it("native refresh returns 403 with a fresh challenge on verification failure", async () => {
+    const storage = new MemoryStorage();
+    const sessionId = "sess-refresh-403";
+
+    const { challenge: regChallenge, token: regToken } = await seedRegistration(storage, sessionId);
+    const { url, close } = await startServer(storage);
+    try {
+      const regRes = await fetch(`${url}/dbsc/registration`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain",
+          "Sec-Session-Response": regToken,
+          "Cookie": `dbsc-reg=${sessionId}; dbsc-challenge=${regChallenge.jti}`,
+        },
+        body: regToken,
+      });
+      expect(regRes.status).toBe(200);
+
+      const refreshChallenge = await issueChallenge(sessionId, storage);
+      const badToken = await new SignJWT({ jti: "wrong-jti" })
+        .setProtectedHeader({ alg: "ES256", typ: "dbsc+jwt", jwk: publicJwk as JWK })
+        .sign(privateKey);
+
+      const res = await fetch(`${url}/dbsc/refresh`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain",
+          "Sec-Session-Response": badToken,
+          "Sec-Secure-Session-Id": sessionId,
+          "Cookie": `dbsc-challenge=${refreshChallenge.jti}`,
+        },
+        body: badToken,
+      });
+
+      expect(res.status).toBe(403);
+      expect(res.headers.get("secure-session-challenge")).toBeTruthy();
+      expect(res.headers.get("sec-session-challenge")).toBeTruthy();
+    } finally {
+      await close();
+    }
+  });
+
   it("Set-Cookie SameSite uses capital Lax matching the JSON attributes", async () => {
     const storage = new MemoryStorage();
     const sessionId = "sess-cookie";

@@ -2,7 +2,7 @@ import { DbscProtocolError, DbscVerificationError, ErrorCodes } from "../errors.
 import type { RefreshProof, StorageAdapter } from "../types.js";
 import { verifyP256Signature } from "./verify.js";
 
-const TIMESTAMP_WINDOW_MS = 60_000;
+const TIMESTAMP_WINDOW_MS = 5 * 60 * 1000;
 
 export interface BoundRefreshRequest {
   sessionId: string;
@@ -49,6 +49,7 @@ export async function handleBoundRefresh(
   const message = `${req.expectedJti}.${req.timestamp}`;
   const ok = await verifyP256Signature(key.jwk, req.signature, message);
   if (!ok) {
+    await storage.consumeChallenge(req.expectedJti);
     const session = await storage.getSession(req.sessionId);
     if (session) {
       await storage.setSession({ ...session, tier: "none" });

@@ -43,6 +43,7 @@ export async function handleRefresh(
     await verifyDbscJws(token, key.jwk, req.expectedJti);
   } catch (err) {
     if (err instanceof DbscVerificationError && err.code === ErrorCodes.SIGNATURE_INVALID) {
+      await storage.consumeChallenge(req.expectedJti);
       const session = await storage.getSession(req.sessionId);
       if (session) {
         await storage.setSession({ ...session, tier: "none" });
