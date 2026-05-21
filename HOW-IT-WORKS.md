@@ -111,7 +111,7 @@ One gotcha that catches almost every first-time integrator: **registration is as
 
 A couple more subtleties worth burning into memory:
 
-- **The refresh route returns 403, not 401, when proof is missing.** Chromium only restarts the challenge flow on `403`. A `401` is silently ignored. We learned this the hard way.
+- **The refresh route returns 403, not 401 — on missing proof AND on verification failure.** Chromium only restarts the challenge flow on `403`. A `401` is silently ignored. We learned this the hard way for the missing-proof case in early 1.x; we re-learned it for the verify-failure case in 2.4.0, when a transient bad signature would leave the session stuck instead of triggering a fresh challenge. Both branches now respond 403 and the verify-failure branch issues a fresh `Secure-Session-Challenge` for the browser to retry against.
 - **The session ID on refresh arrives in the `Sec-Secure-Session-Id` header — both prefixes.** The bound cookie is absent at that point because it just expired. If you only read from the cookie you get `undefined` and every refresh fails.
 - **Both header names ship on every server response.** `Secure-Session-*` is the current spec name. `Sec-Session-*` is the older draft. Some Chromium builds straddle the cutover; we send both.
 - **The registration response body is required.** A bare `204 No Content` after registration looks fine in DevTools but causes the browser to silently terminate the session — registration appears successful, but no refresh ever happens. The JSON body with `session_identifier`, `refresh_url`, `scope`, and `credentials` is mandatory.
@@ -314,7 +314,7 @@ Honest table of what you're getting and where the rough edges are.
 
 1. **Use Redis or Postgres storage**, not memory. Memory storage on a server that ever restarts produces a broken loop where browsers hold cookies that no longer match any stored key.
 2. **Treat it as defense-in-depth**, never the only auth layer. Your existing session cookie, password, MFA, rate limiting — all still required. This library raises the floor on session-replay attacks; it doesn't replace anything else.
-3. **Pin a version.** Pin `dbsc-toolkit@~2.0.0` (patch updates only) and read the changelog before bumping. v2 dropped the HMAC and WebAuthn tiers — see CHANGELOG for the migration path.
+3. **Pin a version.** Pin `dbsc-toolkit@~2.4.0` (patch updates only) and read the changelog before bumping. 2.4.0 tightened a few proof-header semantics and changed native refresh to 403-on-verify-failure — see CHANGELOG for the full list. v2.0 dropped the HMAC and WebAuthn tiers; if you're still on v1, see the 2.0.0 migration entry first.
 
 The realistic adoption pattern: ship it as the second layer behind your existing auth. The bound polyfill means you don't have to lock non-Chromium users out. Gate genuinely high-value actions (payments, password change, admin) on `tier === "dbsc"`; gate everything else on `tier !== "none"`. See [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md).
 
