@@ -108,7 +108,7 @@ app.post("/settings/password", requireBoundProof({ storage: dbscStorage }), pass
 app.use("/admin",             requireBoundProof({ storage: dbscStorage }));   // gates everything under /admin
 ```
 
-The `tier` field on every request is informational. Without a guard, a stolen cookie still reaches your handler — the library cannot infer which routes are sensitive, you mark them. `requireBoundProof` lets native DBSC traffic (`tier: "dbsc"`) through automatically (Chromium enforces session validity browser-side); Firefox / Safari traffic (`tier: "bound"`) must carry a fresh per-request signature, which the client-side [`wrapFetch()`](./docs/per-request-signing.md) adds for you.
+The `tier` field on every request is informational. Without a guard, a stolen cookie still reaches your handler — the library cannot infer which routes are sensitive, you mark them. `requireBoundProof` lets native DBSC traffic (`tier: "dbsc"`) through automatically (Chromium enforces session validity browser-side); Firefox / Safari traffic (`tier: "bound"`) must carry a fresh per-request signature, which the client-side [`wrapFetch()`](./docs/per-request-signing.md) adds for you. For payment routes, pass `signBody: true` to both helpers (v2.3.0+) so the body hash is signed into the proof — closes the MITM body-substitution gap.
 
 Fastify / Hono / Next.js variants of these six lines, plus the per-route policy table and a 30-day rollout timeline, are in [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md).
 

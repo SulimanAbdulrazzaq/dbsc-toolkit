@@ -150,7 +150,16 @@ Consumers should await this instead of polling `/me` for the tier — that polli
 
 The bound tier signs *refresh* requests but not every individual request. Between refreshes, the cookie alone is the credential — a copy of it pasted into another browser will work as the legitimate user until the next refresh fails. Native DBSC has the same window in principle but Chromium enforces the cookie-to-key association browser-side, so the cookie naturally dies on a profile that has no DBSC state. The bound polyfill lives in JavaScript and has no equivalent enforcement.
 
-If you need same-time stolen-cookie protection on Firefox / Safari for specific sensitive routes (payment, admin, password change), v2.1.0 ships per-request signing as an opt-in feature: `wrapFetch()` on the client signs every outgoing request, `requireBoundProof()` on the server verifies. Use it only where it matters — see [per-request-signing.md](./per-request-signing.md) for the full design, threat boundary, and integration recipe.
+If you need same-time stolen-cookie protection on Firefox / Safari for specific sensitive routes (payment, admin, password change), v2.1.0 ships per-request signing as an opt-in feature: `wrapFetch()` on the client signs every outgoing request, `requireBoundProof()` on the server verifies. v2.3.0 adds opt-in body signing (`signBody: true`) so an MITM cannot substitute the request body within the timestamp window. Use it only where it matters — see [per-request-signing.md](./per-request-signing.md) for the full design, threat boundary, and integration recipe.
+
+## Clearing the key on logout (v2.3.0+)
+
+`clearBoundKey()` is exported from `dbsc-toolkit/client`. Call it after a successful logout request so the IndexedDB record drops immediately. The SDK will still recover on the next page load if you skip this — it detects the session-id mismatch and clears lazily — but the explicit call avoids the wasted re-registration round-trip on the next login.
+
+```js
+await fetch("/logout", { method: "POST", credentials: "include" });
+await clearBoundKey();
+```
 
 ### Re-invoke after login
 

@@ -253,5 +253,7 @@ Important to communicate to your team and users:
 - [ ] Storage backups configured
 - [ ] If using the bound polyfill: `initBoundDbsc()` script tag included on every authenticated page
 - [ ] On Firefox / Safari, the routes you'd want to gate on `tier === "dbsc"` if you could should instead use `requireBoundProof()` so stolen cookies cannot ride along during the freshness window. See [per-request-signing.md](../per-request-signing.md) for the threat boundary and when to use it
+- [ ] For payment / fund-transfer routes specifically, pass `signBody: true` to both `requireBoundProof()` and `wrapFetch()` (v2.3.0+). Without body signing, an MITM can capture a valid signature and change the amount or recipient within the timestamp window; with it, the proof carries `bh=sha256(body)` and the server rejects any substitution
+- [ ] Call `clearBoundKey()` from `dbsc-toolkit/client` after the logout request completes — drops the IndexedDB record explicitly instead of waiting for the SDK to detect the mismatch on next login
 - [ ] User notification flow for `session_stolen`
 - [ ] Tier requirements documented per route (which routes require `tier === "dbsc"` vs `tier !== "none"`)
