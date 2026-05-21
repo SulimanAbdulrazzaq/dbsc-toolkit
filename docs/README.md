@@ -4,6 +4,7 @@ Server-side W3C Device Bound Session Credentials (DBSC) for Node.js.
 
 ## Start here
 
+- [Usage](./usage.md) — the 6-line setup and the per-route protection table in order, with code for each lever. Read this first.
 - [Getting started](./getting-started.md) — install, first working example, what to look for in the browser.
 - [Protocol reference](./protocol.md) — the wire format Chrome speaks, header by header.
 - [API reference](./api-reference.md) — every export across all subpaths.

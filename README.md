@@ -102,6 +102,8 @@ You don't rewrite login, you don't migrate the session store. DBSC sits alongsid
 
 ## Choose your protection level per route
 
+> **First time here?** [docs/usage.md](./docs/usage.md) walks the 6-line setup and the table below in order, with concrete code for each lever. Five-minute read.
+
 After the 6-line setup, every request through the middleware has a `tier` field on the request context. The library does not auto-protect anything — you pick the level per route. The library exposes three levers; this table tells you which one to reach for.
 
 | Your route does… | Use this guard | What it stops | Detailed in |
