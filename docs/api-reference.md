@@ -292,7 +292,8 @@ interface RequireBoundProofOptions {
   storage: StorageAdapter;
   allowDbscWithoutProof?: boolean;   // default true — tier=dbsc passes through
   timestampWindowMs?: number;        // default 5 * 60 * 1000
-  signBody?: boolean;                // default false — when true, verifies bh=sha256(body) (2.3.0+)
+  signBody?: boolean;                // default false — when true, verifies bh=sha256(body) for tier=bound only (2.3.0+).
+                                     // tier=dbsc still passes through unless allowDbscWithoutProof is set to false.
 }
 function requireBoundProof(opts: RequireBoundProofOptions): RequestHandler;
 ```

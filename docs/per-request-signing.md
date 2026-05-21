@@ -150,6 +150,8 @@ A sustained spike of `MISSING_PROOF` or `SIGNATURE_INVALID` on a single session 
 
 ## Body signing setup (v2.3.0+)
 
+**Bound-tier only by default.** Like the rest of `requireBoundProof`, body signing inherits the `allowDbscWithoutProof: true` default — `tier: "dbsc"` requests pass through without proof and without body verification. Chromium's native DBSC protocol does not sign request bodies, so demanding `bh=` from Chrome users would only work if they also called `wrapFetch({ signBody: true })` for those routes. If you want body signing on every tier including native DBSC, pass `allowDbscWithoutProof: false` *and* make sure your Chrome users hit those routes through `wrapFetch({ signBody: true })`.
+
 Enable on both sides:
 
 ```ts
