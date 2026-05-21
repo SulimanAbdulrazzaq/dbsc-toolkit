@@ -88,6 +88,8 @@ interface DbscOptions {
   refreshPath?: string;             // default "/dbsc/refresh"
   boundCookieTtl?: number;          // default 600000 (10 min, in ms)
   registrationCookieTtl?: number;   // default 86400000 (24h, in ms)
+  refreshGraceMs?: number;          // default 30000 — see below (2.5.0+)
+  cookieScope?: "host" | "site";    // default "host" — "site" not yet implemented, see ROADMAP.md
   rateLimiter?: RateLimiter;
   onEvent?: (event: AnyTelemetryEvent) => void;
   autoBind?: (req: any) => Promise<AutoBindResult | null> | AutoBindResult | null;
@@ -100,6 +102,23 @@ interface AutoBindResult {
 ```
 
 `autoBind` is the transparent-migration hook. The middleware calls it on every request that does not carry the bound cookie yet, passing the framework-native request. Return a `{ sessionId, userId }` to start binding, or `null` to skip. See [integrating-existing-auth.md](./integrating-existing-auth.md).
+
+`refreshGraceMs` (2.5.0+) extends the freshness check. A bound cookie's freshness lapses at `lastRefreshAt + boundCookieTtl`, but the browser's next `/dbsc/refresh` lands a short moment later — during that gap a `/me`-style poll would see `tier: "none"`. The middleware keeps the previous tier until `lastRefreshAt + boundCookieTtl + refreshGraceMs`. Default 30000 ms. Set `0` to demote the instant freshness lapses (use on routes that tolerate no grace).
+
+`cookieScope` is reserved. `"host"` (default, current behavior) uses `__Host-` cookies. `"site"` for multi-subdomain apps is planned but not yet implemented — see [ROADMAP.md](../ROADMAP.md). Passing `"site"` today has no effect.
+
+### `deriveSessionId`
+
+```ts
+interface DeriveSessionIdInput {
+  userId: string;        // stable user id — the JWT `sub` claim is the canonical choice
+  deviceHint?: string;   // optional — distinct value per device for separate bindings
+  namespace?: string;    // optional — defaults to "default"
+}
+function deriveSessionId(input: DeriveSessionIdInput): Promise<string>;
+```
+
+Produces a stable, deterministic, opaque `sessionId` for `bindSession()` when the caller has no server-side session row to take an id from — JWT-mode NextAuth, iron-session, Lucia stateless, raw JWT cookies. Same input always returns the same id. SHA-256 of `${namespace}.${userId}.${deviceHint ?? ""}`, base64url-encoded. See [integration-recipes.md](./integration-recipes.md).
 
 ### Telemetry events
 
@@ -397,7 +416,7 @@ function createDbscMiddleware(opts: DbscNextOptions): (req: NextRequest) => Prom
 function getDbscSession(
   req: NextRequest,
   storage: StorageAdapter,
-  opts?: { boundCookieTtl?: number; res?: NextResponse; secure?: boolean },
+  opts?: { boundCookieTtl?: number; refreshGraceMs?: number; res?: NextResponse; secure?: boolean },
 ): Promise<DbscSessionInfo>;
 
 function bindSession(

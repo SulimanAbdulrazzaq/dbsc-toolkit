@@ -2,6 +2,26 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.5.0] — 2026-05-22
+
+This release makes JWT-based session systems first-class and closes the post-refresh tier flicker. It's additive — existing callers see no change.
+
+### Added
+
+- **`deriveSessionId()`** — new export from `dbsc-toolkit`. Apps without a server-side session row (NextAuth in JWT mode, iron-session, Lucia stateless, raw JWT cookies) had no stable `sessionId` to hand to `bindSession()`. `deriveSessionId({ userId, deviceHint?, namespace? })` produces a stable, deterministic, opaque id — same input always yields the same id, so the binding made at login is the one looked up on every refresh. SHA-256 of the inputs, base64url-encoded; not a secret, just a stable key. `deviceHint` lets one user have separate per-device bindings (the "active sessions" page pattern).
+
+- **`refreshGraceMs` option on `dbsc({...})`** — default 30000 (30s). A bound cookie's freshness lapses at `lastRefreshAt + boundCookieTtl`, but the browser's next `/dbsc/refresh` lands a moment later. In that gap a `/me`-style poll used to read `tier: "none"`, which SPAs that auto-logout on `tier === "none"` would false-alarm on, once per `boundCookieTtl` cycle. The freshness check now holds the previous tier until `lastRefreshAt + boundCookieTtl + refreshGraceMs`. Set `refreshGraceMs: 0` for the old strict behavior on routes that tolerate no grace. Wired across Express, Fastify, Hono, and Next.js (`getDbscSession` accepts it too).
+
+- **`docs/integration-recipes.md`** — a copy-paste cookbook for the session systems large apps actually run on: express-session, NextAuth (JWT mode, via `autoBind` + `deriveSessionId`), iron-session, Lucia (DB and stateless), OAuth/SSO callbacks, per-device bindings, rate limiting, telemetry/alerting, and a "when NOT to use DBSC" section (mobile, server-to-server, API keys).
+
+- **`ROADMAP.md`** — public list of planned-but-not-shipped features.
+
+### Notes
+
+- `cookieScope` appears in `DbscOptions` as a reserved field. `"site"` (multi-subdomain `__Secure-` cookies) is **not yet implemented** — it changes the cookie-prefix security model and is deferred to its own focused release. See ROADMAP.md. Passing `"site"` today has no effect; the default `"host"` is the only active mode.
+
+- 7 new `deriveSessionId` tests + 2 `refreshGraceMs` tests. Suite is now 134, was 113.
+
 ## [2.4.0] — 2026-05-22
 
 This release closes a handful of audit findings — a couple are real, the rest are hygiene. Nothing on the wire format moves; the visible behaviour change is that native `/dbsc/refresh` now returns 403 instead of 401 on a bad signature, which is what the spec asked for in the first place.

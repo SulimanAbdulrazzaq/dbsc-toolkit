@@ -114,6 +114,8 @@ If your app isn't already set up for HTTPS-terminating proxies, `cookieParser`, 
 
 `sessionId` on line 5 is whatever id your existing session store issues. DBSC binds to that same id; you don't manage a second id-space.
 
+Using **NextAuth (JWT mode), iron-session, Lucia, or a hand-rolled JWT cookie**? Those have no server-side session id — call `deriveSessionId({ userId })` to get a stable one to pass to `bindSession()`. Copy-paste recipes for every common session system: [docs/integration-recipes.md](./docs/integration-recipes.md).
+
 ## Choose your protection level per route
 
 > **First time here?** [docs/usage.md](./docs/usage.md) walks the 6-line setup and the table below in order, with concrete code for each lever. Five-minute read.

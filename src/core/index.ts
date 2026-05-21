@@ -52,3 +52,6 @@ export type { VerifyBoundProofRequest } from "./bound/proof.js";
 
 export { NoopRateLimiter } from "./ratelimit/interface.js";
 export { emit } from "./telemetry/hooks.js";
+
+export { deriveSessionId } from "./derive-session-id.js";
+export type { DeriveSessionIdInput } from "./derive-session-id.js";

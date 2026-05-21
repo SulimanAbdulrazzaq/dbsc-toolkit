@@ -11,6 +11,7 @@ Server-side W3C Device Bound Session Credentials (DBSC) for Node.js.
 
 ## Per-feature guides
 
+- [Integration recipes](./integration-recipes.md) — copy-paste wiring for express-session, NextAuth (JWT mode), iron-session, Lucia, OAuth callbacks, rate limiting, telemetry.
 - [Adapters](./adapters.md) — Express, Fastify, Hono, Next.js. Plus how to write your own for Koa, Hapi, raw `http`, Bun, Deno, Cloudflare Workers.
 - [Storage](./storage.md) — memory, Redis, Postgres. Plus how to implement `StorageAdapter` against any backend.
 - [Bound polyfill](./bound-polyfill.md) — the Web Crypto path for Firefox / Safari / older Chromium. Wire protocol, key storage, threat coverage.

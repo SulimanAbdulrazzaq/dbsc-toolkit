@@ -151,6 +151,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
     boundRegistrationPath = "/dbsc-bound/registration",
     boundRefreshPath = "/dbsc-bound/refresh",
     boundCookieTtl = DEFAULT_BOUND_TTL,
+    refreshGraceMs = 30_000,
     registrationCookieTtl = DEFAULT_REG_TTL,
     rateLimiter = new NoopRateLimiter(),
     onEvent,
@@ -598,7 +599,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
     if (sessionId) {
       const session = await storage.getSession(sessionId);
       if (session) {
-        const staleAfter = session.lastRefreshAt + boundCookieTtl;
+        const staleAfter = session.lastRefreshAt + boundCookieTtl + refreshGraceMs;
         const refreshable = session.tier === "dbsc" || session.tier === "bound";
         if (refreshable && Date.now() > staleAfter) {
           res.locals.dbsc.tier = "none";

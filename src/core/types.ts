@@ -108,6 +108,23 @@ export interface DbscOptions {
   refreshPath?: string;
   boundCookieTtl?: number;
   registrationCookieTtl?: number;
+  /**
+   * Grace window, in ms, applied after a bound cookie's freshness expires.
+   * Between cookie expiry and the browser's next /dbsc/refresh there is a
+   * short in-flight gap; without grace, freshness polls during that gap see
+   * tier="none" and may false-alarm an auto-logout. The middleware keeps the
+   * previous tier until `lastRefreshAt + boundCookieTtl + refreshGraceMs`.
+   * Defaults to 30000 (30s). Set 0 to demote the instant freshness expires.
+   */
+  refreshGraceMs?: number;
+  /**
+   * Cookie prefix scope. "host" (default) uses `__Host-` cookies — origin
+   * locked, no Domain attribute, strongest. "site" uses `__Secure-` cookies
+   * with a Domain attribute so the binding works across subdomains
+   * (app.example.com + api.example.com); this drops `__Host-`'s
+   * subdomain-takeover protection. See docs/integration-recipes.md.
+   */
+  cookieScope?: "host" | "site";
   rateLimiter?: RateLimiter;
   onEvent?: (event: AnyTelemetryEvent) => void;
   /**

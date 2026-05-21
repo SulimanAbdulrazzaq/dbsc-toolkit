@@ -2,6 +2,8 @@
 
 Most production sites already have a working session story: a login route, a session table, a `sid` cookie, middleware that reads it. None of that needs to change to add DBSC. This guide shows the two patterns for layering hardware binding on top of what you already have.
 
+> **Using NextAuth (JWT mode), iron-session, Lucia, or a hand-rolled JWT cookie?** Those have no server-side session id to bind to. See [integration-recipes.md](./integration-recipes.md) for the `deriveSessionId()` recipe for each — this page assumes a cookie-session store like `express-session`.
+
 ## The two-cookie picture
 
 After integration your responses set two HttpOnly cookies, not one:

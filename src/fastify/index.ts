@@ -119,6 +119,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     boundRegistrationPath = "/dbsc-bound/registration",
     boundRefreshPath = "/dbsc-bound/refresh",
     boundCookieTtl = DEFAULT_BOUND_TTL_MS,
+    refreshGraceMs = 30_000,
     registrationCookieTtl = DEFAULT_REG_TTL_MS,
     rateLimiter = new NoopRateLimiter(),
     onEvent,
@@ -154,7 +155,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     if (sessionId) {
       const session = await storage.getSession(sessionId);
       if (session) {
-        const staleAfter = session.lastRefreshAt + boundCookieTtl;
+        const staleAfter = session.lastRefreshAt + boundCookieTtl + refreshGraceMs;
         const refreshable = session.tier === "dbsc" || session.tier === "bound";
         if (refreshable && Date.now() > staleAfter) {
           req.dbsc.tier = "none";

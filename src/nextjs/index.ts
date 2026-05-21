@@ -504,7 +504,7 @@ export interface DbscSessionInfo {
 export async function getDbscSession(
   req: NextRequest,
   storage: DbscOptions["storage"],
-  opts: { boundCookieTtl?: number; res?: NextResponse; secure?: boolean } = {},
+  opts: { boundCookieTtl?: number; refreshGraceMs?: number; res?: NextResponse; secure?: boolean } = {},
 ): Promise<DbscSessionInfo> {
   const skippedRaw: Record<string, string | undefined> = {
     "secure-session-skipped": req.headers.get("secure-session-skipped") ?? undefined,
@@ -529,7 +529,8 @@ export async function getDbscSession(
   if (!session) return { sessionId: null, tier: "none", skipped, revoke };
 
   const boundCookieTtl = opts.boundCookieTtl ?? DEFAULT_BOUND_TTL_MS;
-  const staleAfter = session.lastRefreshAt + boundCookieTtl;
+  const refreshGraceMs = opts.refreshGraceMs ?? 30_000;
+  const staleAfter = session.lastRefreshAt + boundCookieTtl + refreshGraceMs;
   const refreshable = session.tier === "dbsc" || session.tier === "bound";
   if (refreshable && Date.now() > staleAfter) {
     return { sessionId, tier: "none", skipped, revoke };

@@ -372,3 +372,85 @@ describe("requireBoundProof middleware", () => {
     }
   });
 });
+
+describe("refreshGraceMs", () => {
+  // A server with a tiny TTL and an explicit grace window, plus a /tier route
+  // that echoes res.locals.dbsc.tier so the freshness check is observable.
+  async function startGraceServer(boundCookieTtl: number, refreshGraceMs: number) {
+    const storage = new MemoryStorage();
+    const app = express();
+    app.use(cookieParser());
+    app.use(express.json());
+    app.use(dbsc({ storage, secure: false, boundCookieTtl, refreshGraceMs }));
+    app.get("/tier", (_req, res) => res.json({ tier: res.locals.dbsc.tier }));
+    const server = createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+    return {
+      storage,
+      url: `http://127.0.0.1:${port}`,
+      close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    };
+  }
+
+  it("keeps tier alive within boundCookieTtl + refreshGraceMs, demotes past it", async () => {
+    const boundCookieTtl = 1_000;
+    const refreshGraceMs = 5_000;
+    const ctx = await startGraceServer(boundCookieTtl, refreshGraceMs);
+    try {
+      // Seed a bound session whose last refresh is old enough that the cookie
+      // TTL has lapsed but the grace window has not.
+      const now = Date.now();
+      await ctx.storage.setSession({
+        id: "grace-1",
+        userId: "u1",
+        tier: "bound",
+        createdAt: now - 10_000,
+        expiresAt: now + 60_000,
+        lastRefreshAt: now - (boundCookieTtl + 2_000), // 2s into the 5s grace
+      });
+
+      const inGrace = await fetch(`${ctx.url}/tier`, {
+        headers: { Cookie: "dbsc-session=grace-1" },
+      });
+      expect((await inGrace.json()).tier).toBe("bound");
+
+      // Now push lastRefreshAt past the grace window entirely.
+      const sess = (await ctx.storage.getSession("grace-1"))!;
+      await ctx.storage.setSession({
+        ...sess,
+        lastRefreshAt: now - (boundCookieTtl + refreshGraceMs + 2_000),
+      });
+
+      const pastGrace = await fetch(`${ctx.url}/tier`, {
+        headers: { Cookie: "dbsc-session=grace-1" },
+      });
+      expect((await pastGrace.json()).tier).toBe("none");
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("refreshGraceMs: 0 demotes the instant the cookie TTL lapses", async () => {
+    const boundCookieTtl = 1_000;
+    const ctx = await startGraceServer(boundCookieTtl, 0);
+    try {
+      const now = Date.now();
+      await ctx.storage.setSession({
+        id: "grace-2",
+        userId: "u1",
+        tier: "bound",
+        createdAt: now - 10_000,
+        expiresAt: now + 60_000,
+        lastRefreshAt: now - (boundCookieTtl + 500), // 0.5s past TTL, no grace
+      });
+
+      const res = await fetch(`${ctx.url}/tier`, {
+        headers: { Cookie: "dbsc-session=grace-2" },
+      });
+      expect((await res.json()).tier).toBe("none");
+    } finally {
+      await ctx.close();
+    }
+  });
+});

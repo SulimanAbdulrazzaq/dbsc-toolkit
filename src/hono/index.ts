@@ -122,6 +122,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
     boundRegistrationPath = "/dbsc-bound/registration",
     boundRefreshPath = "/dbsc-bound/refresh",
     boundCookieTtl = DEFAULT_BOUND_TTL_MS,
+    refreshGraceMs = 30_000,
     registrationCookieTtl = DEFAULT_REG_TTL_MS,
     rateLimiter = new NoopRateLimiter(),
     onEvent,
@@ -444,7 +445,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
     if (sessionId) {
       const session = await storage.getSession(sessionId);
       if (session) {
-        const staleAfter = session.lastRefreshAt + boundCookieTtl;
+        const staleAfter = session.lastRefreshAt + boundCookieTtl + refreshGraceMs;
         const refreshable = session.tier === "dbsc" || session.tier === "bound";
         if (refreshable && Date.now() > staleAfter) {
           tier = "none";
