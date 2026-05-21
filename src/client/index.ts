@@ -13,15 +13,35 @@ export interface InitBoundDbscOptions {
   refreshMarginMs?: number;
 }
 
+/**
+ * Structured outcome of an `initBoundDbsc()` call. Every exit path resolves to
+ * one of these so consumers can render a deterministic status without polling.
+ *
+ * - `native-dbsc`: Chromium 145+ registered natively. TPM-backed.
+ * - `polyfill-bound`: the Web Crypto polyfill registered. `skipReason` is set
+ *   when Chrome explicitly refused native registration (e.g. `quota_exceeded`).
+ * - `unbound`: no session is present on the server. User is logged out, or the
+ *   bound cookie points at a session row that no longer exists.
+ * - `error`: an exception was thrown somewhere in the flow. `error` carries the
+ *   message; consult the console for the underlying object.
+ */
+export type BoundDbscOutcome =
+  | { phase: "native-dbsc"; tier: "dbsc" }
+  | { phase: "polyfill-bound"; tier: "bound"; skipReason?: string | undefined }
+  | { phase: "unbound" }
+  | { phase: "error"; error: string };
+
 interface StateUnbound {
   phase: "unbound";
   sessionId: null;
+  nativeSkipped?: string[];
 }
 
 interface StateNeedsRegistration {
   phase: "needs-registration";
   sessionId: string;
   challenge: string;
+  nativeSkipped?: string[];
 }
 
 interface StateBound {
@@ -29,6 +49,7 @@ interface StateBound {
   sessionId: string;
   tier: "dbsc" | "bound";
   refreshIntervalMs: number;
+  nativeSkipped?: string[];
 }
 
 type StateResponse = StateUnbound | StateNeedsRegistration | StateBound;
@@ -53,8 +74,10 @@ const DEFAULTS: ResolvedOptions = {
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
-export async function initBoundDbsc(options: InitBoundDbscOptions = {}): Promise<void> {
-  if (typeof window === "undefined" || typeof indexedDB === "undefined") return;
+export async function initBoundDbsc(options: InitBoundDbscOptions = {}): Promise<BoundDbscOutcome> {
+  if (typeof window === "undefined" || typeof indexedDB === "undefined") {
+    return { phase: "error", error: "window or indexedDB unavailable" };
+  }
 
   const cfg: ResolvedOptions = {
     statePath: options.statePath ?? DEFAULTS.statePath,
@@ -65,38 +88,76 @@ export async function initBoundDbsc(options: InitBoundDbscOptions = {}): Promise
     refreshMarginMs: options.refreshMarginMs ?? DEFAULTS.refreshMarginMs,
   };
 
-  const state = await fetchState(cfg.statePath);
+  try {
+    const state = await fetchState(cfg.statePath);
 
-  if (state.phase === "unbound") {
-    await clearKeyRecord().catch(() => {});
-    return;
-  }
-
-  if (state.phase === "bound") {
-    if (state.tier === "dbsc") return;
-    const rec = await getKeyRecord().catch(() => null);
-    if (!rec || rec.sessionId !== state.sessionId) {
+    if (state.phase === "unbound") {
       await clearKeyRecord().catch(() => {});
-      const fresh = await fetchState(cfg.statePath);
-      if (fresh.phase === "needs-registration") {
-        await runRegistration(fresh.sessionId, fresh.challenge, cfg);
-        scheduleRefresh(cfg, state.refreshIntervalMs);
-      }
-      return;
+      return { phase: "unbound" };
     }
-    scheduleRefresh(cfg, state.refreshIntervalMs);
-    return;
+
+    if (state.phase === "bound") {
+      if (state.tier === "dbsc") return { phase: "native-dbsc", tier: "dbsc" };
+      const rec = await getKeyRecord().catch(() => null);
+      if (!rec || rec.sessionId !== state.sessionId) {
+        await clearKeyRecord().catch(() => {});
+        const fresh = await fetchState(cfg.statePath);
+        if (fresh.phase === "needs-registration") {
+          await runRegistration(fresh.sessionId, fresh.challenge, cfg);
+          scheduleRefresh(cfg, state.refreshIntervalMs);
+          return outcomeFromSkip("polyfill-bound", fresh.nativeSkipped);
+        }
+        if (fresh.phase === "bound" && fresh.tier === "dbsc") {
+          return { phase: "native-dbsc", tier: "dbsc" };
+        }
+        return { phase: "polyfill-bound", tier: "bound" };
+      }
+      scheduleRefresh(cfg, state.refreshIntervalMs);
+      return { phase: "polyfill-bound", tier: "bound" };
+    }
+
+    // phase === "needs-registration"
+    // If Chrome already skipped native (quota, unreachable, etc), do not burn
+    // the probe window — Chrome has already told us it won't register.
+    if (state.nativeSkipped && state.nativeSkipped.length > 0) {
+      await runRegistration(state.sessionId, state.challenge, cfg);
+      const final = await fetchState(cfg.statePath);
+      if (final.phase === "bound") scheduleRefresh(cfg, final.refreshIntervalMs);
+      return { phase: "polyfill-bound", tier: "bound", skipReason: state.nativeSkipped[0] };
+    }
+
+    await sleep(cfg.nativeProbeWindowMs);
+
+    const recheck = await fetchState(cfg.statePath);
+    if (recheck.phase === "bound" && recheck.tier === "dbsc") {
+      return { phase: "native-dbsc", tier: "dbsc" };
+    }
+    if (recheck.phase === "bound" && recheck.tier === "bound") {
+      // Someone else (another tab) registered during the probe window.
+      scheduleRefresh(cfg, recheck.refreshIntervalMs);
+      return { phase: "polyfill-bound", tier: "bound" };
+    }
+    if (recheck.phase !== "needs-registration") {
+      return { phase: "unbound" };
+    }
+
+    await runRegistration(recheck.sessionId, recheck.challenge, cfg);
+    const final = await fetchState(cfg.statePath);
+    if (final.phase === "bound") scheduleRefresh(cfg, final.refreshIntervalMs);
+    return outcomeFromSkip("polyfill-bound", recheck.nativeSkipped);
+  } catch (err) {
+    return { phase: "error", error: err instanceof Error ? err.message : String(err) };
   }
+}
 
-  await sleep(cfg.nativeProbeWindowMs);
-
-  const recheck = await fetchState(cfg.statePath);
-  if (recheck.phase === "bound" && recheck.tier === "dbsc") return;
-  if (recheck.phase !== "needs-registration") return;
-
-  await runRegistration(recheck.sessionId, recheck.challenge, cfg);
-  const final = await fetchState(cfg.statePath);
-  if (final.phase === "bound") scheduleRefresh(cfg, final.refreshIntervalMs);
+function outcomeFromSkip(
+  phase: "polyfill-bound",
+  skipped: string[] | undefined,
+): BoundDbscOutcome {
+  if (skipped && skipped.length > 0) {
+    return { phase, tier: "bound", skipReason: skipped[0] };
+  }
+  return { phase, tier: "bound" };
 }
 
 export function stopBoundDbsc(): void {

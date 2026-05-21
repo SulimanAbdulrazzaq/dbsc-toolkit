@@ -311,10 +311,16 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
 
   fastify.get(boundStatePath, async (req: FastifyRequest, reply: FastifyReply) => {
     reply.header("X-Server-Time", String(Date.now()));
+    const skipped = parseSessionSkippedHeader(req.headers as Record<string, string | string[] | undefined>);
+    const nativeSkipped = skipped.length ? skipped.map((s) => s.reason) : undefined;
     const sessionId = readBoundSessionId(req);
-    if (!sessionId) return reply.status(200).send({ phase: "unbound", sessionId: null });
+    if (!sessionId) {
+      return reply.status(200).send({ phase: "unbound", sessionId: null, ...(nativeSkipped && { nativeSkipped }) });
+    }
     const session = await storage.getSession(sessionId);
-    if (!session) return reply.status(200).send({ phase: "unbound", sessionId: null });
+    if (!session) {
+      return reply.status(200).send({ phase: "unbound", sessionId: null, ...(nativeSkipped && { nativeSkipped }) });
+    }
     const key = await storage.getBoundKey(sessionId);
     if (!key) {
       const challenge = await issueChallenge(sessionId, storage);
@@ -322,6 +328,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
         phase: "needs-registration",
         sessionId,
         challenge: challenge.jti,
+        ...(nativeSkipped && { nativeSkipped }),
       });
     }
     return reply.status(200).send({
@@ -329,6 +336,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
       sessionId,
       tier: session.tier,
       refreshIntervalMs: boundCookieTtl,
+      ...(nativeSkipped && { nativeSkipped }),
     });
   });
 

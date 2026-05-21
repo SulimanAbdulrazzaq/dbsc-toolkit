@@ -349,14 +349,16 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
 
   async function handleBoundStateRoute(req: Request, res: Response): Promise<void> {
     res.setHeader("X-Server-Time", String(Date.now()));
+    const skipped = parseSessionSkippedHeader(req.headers as Record<string, string | string[] | undefined>);
+    const nativeSkipped = skipped.length ? skipped.map((s) => s.reason) : undefined;
     const sessionId = readBoundSessionId(req);
     if (!sessionId) {
-      res.status(200).json({ phase: "unbound", sessionId: null });
+      res.status(200).json({ phase: "unbound", sessionId: null, ...(nativeSkipped && { nativeSkipped }) });
       return;
     }
     const session = await storage.getSession(sessionId);
     if (!session) {
-      res.status(200).json({ phase: "unbound", sessionId: null });
+      res.status(200).json({ phase: "unbound", sessionId: null, ...(nativeSkipped && { nativeSkipped }) });
       return;
     }
     const key = await storage.getBoundKey(sessionId);
@@ -366,6 +368,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
         phase: "needs-registration",
         sessionId,
         challenge: challenge.jti,
+        ...(nativeSkipped && { nativeSkipped }),
       });
       return;
     }
@@ -374,6 +377,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       sessionId,
       tier: session.tier,
       refreshIntervalMs: boundCookieTtl,
+      ...(nativeSkipped && { nativeSkipped }),
     });
   }
 

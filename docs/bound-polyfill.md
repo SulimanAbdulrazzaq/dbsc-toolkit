@@ -39,6 +39,14 @@ Responses:
 { "phase": "bound", "sessionId": "...", "tier": "dbsc" | "bound", "refreshIntervalMs": 600000 }
 ```
 
+Any response may include a `nativeSkipped: string[]` field — populated from the request's `Secure-Session-Skipped` header — so the SDK knows whether Chrome explicitly refused native DBSC for this session (and why):
+
+```jsonc
+{ "phase": "needs-registration", "sessionId": "...", "challenge": "...", "nativeSkipped": ["quota_exceeded"] }
+```
+
+When `nativeSkipped` is non-empty, the SDK short-circuits its native-probe wait and registers immediately — there is no reason to wait for a refusal Chrome has already issued. Added in 2.2.0.
+
 The `challenge` field appears only in the `needs-registration` phase. It is a one-use JTI the client signs and posts back.
 
 ### `GET /dbsc-bound/challenge`
@@ -121,6 +129,20 @@ The underlying encrypted blob still lives in the browser's profile directory on 
 5. **`phase: "needs-registration"`** → wait `nativeProbeWindowMs` (default 5000 ms), then re-check `/state`. If native DBSC still hasn't landed, run the polyfill registration. If it has, do nothing.
 
 After a successful registration or on a `phase: "bound", tier: "bound"` init, the SDK schedules a `setTimeout` for `refreshIntervalMs - refreshMarginMs` (default 5s margin) and refreshes silently. On refresh success, it schedules the next one. On refresh failure, it stops. The next page load will re-run the init flow and re-bind if appropriate.
+
+### Outcome promise (2.2.0+)
+
+`initBoundDbsc()` resolves with a structured `BoundDbscOutcome` describing exactly what happened:
+
+```ts
+type BoundDbscOutcome =
+  | { phase: "native-dbsc"; tier: "dbsc" }
+  | { phase: "polyfill-bound"; tier: "bound"; skipReason?: string }
+  | { phase: "unbound" }
+  | { phase: "error"; error: string };
+```
+
+Consumers should await this instead of polling `/me` for the tier — that polling pattern races the SDK's internal probe window and produces misleading "no binding" UX even when the polyfill is succeeding. The outcome is deterministic: it resolves once and reflects the actual end state. See the live demo's `awaitBindingOutcome` for the exact pattern.
 
 ## Closing the ride-along gap
 

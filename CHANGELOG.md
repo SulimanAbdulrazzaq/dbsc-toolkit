@@ -2,6 +2,25 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.2.0] — 2026-05-21
+
+### Added
+
+- **`initBoundDbsc()` now resolves with a structured `BoundDbscOutcome`.** Consumers no longer need to poll `/me` to find out what the SDK did. The outcome describes exactly which path was taken: `{ phase: "native-dbsc" }`, `{ phase: "polyfill-bound", skipReason? }`, `{ phase: "unbound" }`, or `{ phase: "error", error }`. Every previous early-return and swallowed error in the SDK now surfaces as a concrete outcome value.
+- **`/dbsc-bound/state` includes `nativeSkipped` when Chrome refused.** The state handler in every adapter (Express, Fastify, Hono, Next.js) reads the request's `Secure-Session-Skipped` header and returns the reasons (`quota_exceeded`, `unreachable`, `server_error`) so the SDK knows whether to wait for native DBSC or fall back immediately.
+
+### Fixed
+
+- **The "no binding after 8s" race on quota-exhausted Chrome.** When Chrome explicitly skipped native DBSC, the SDK previously still burned the full `nativeProbeWindowMs` (5–8 s) before registering via polyfill. By the time it finished, the demo's `/me` poll had already given up and the banner read "No binding after 8s" — even though the polyfill had succeeded a fraction of a second later. The SDK now short-circuits the probe wait when `nativeSkipped` is set, and the demo awaits the outcome promise directly instead of polling. Every flake pattern in the v2.1.x bug reports (silent failures, two-tab disagreement, "stays none forever") becomes a deterministic banner with a concrete reason.
+
+### Demo
+
+- `pollDbscReady` replaced with `awaitBindingOutcome`. The status banner is now a pure function of the SDK's resolved outcome. New banners cover the quota-exhausted and unreachable cases with actionable hints (Incognito window, network diagnostic) instead of a generic "no binding" message.
+
+### Migration
+
+`initBoundDbsc()` previously returned `Promise<void>`. The 2.2.0 return type is `Promise<BoundDbscOutcome>`. JavaScript callers and TypeScript callers that did `await initBoundDbsc()` or `initBoundDbsc().catch(...)` keep working — the resolved value can be discarded as before. TypeScript callers that explicitly typed the return as `Promise<void>` need to update the type annotation. No wire-format changes; no breaking server-side changes.
+
 ## [2.1.1] — 2026-05-21
 
 ### Fixed

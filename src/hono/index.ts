@@ -279,16 +279,33 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
 
     if (c.req.method === "GET" && url.pathname === boundStatePath) {
       c.header("X-Server-Time", String(Date.now()));
+      const skippedRaw: Record<string, string | undefined> = {
+        "secure-session-skipped": c.req.header("secure-session-skipped"),
+        "sec-session-skipped": c.req.header("sec-session-skipped"),
+      };
+      const skipped = parseSessionSkippedHeader(skippedRaw);
+      const nativeSkipped = skipped.length ? skipped.map((s) => s.reason) : undefined;
       const sid = readBoundSessionId();
-      if (!sid) return c.json({ phase: "unbound", sessionId: null });
+      if (!sid) return c.json({ phase: "unbound", sessionId: null, ...(nativeSkipped && { nativeSkipped }) });
       const session = await storage.getSession(sid);
-      if (!session) return c.json({ phase: "unbound", sessionId: null });
+      if (!session) return c.json({ phase: "unbound", sessionId: null, ...(nativeSkipped && { nativeSkipped }) });
       const key = await storage.getBoundKey(sid);
       if (!key) {
         const challenge = await issueChallenge(sid, storage);
-        return c.json({ phase: "needs-registration", sessionId: sid, challenge: challenge.jti });
+        return c.json({
+          phase: "needs-registration",
+          sessionId: sid,
+          challenge: challenge.jti,
+          ...(nativeSkipped && { nativeSkipped }),
+        });
       }
-      return c.json({ phase: "bound", sessionId: sid, tier: session.tier, refreshIntervalMs: boundCookieTtl });
+      return c.json({
+        phase: "bound",
+        sessionId: sid,
+        tier: session.tier,
+        refreshIntervalMs: boundCookieTtl,
+        ...(nativeSkipped && { nativeSkipped }),
+      });
     }
 
     if (c.req.method === "GET" && url.pathname === boundChallengePath) {

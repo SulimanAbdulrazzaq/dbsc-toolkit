@@ -511,7 +511,7 @@ async function req(method, path, body) {
   return first;
 }
 
-// ─── DBSC status indicator + polling after login ───
+// ─── DBSC status indicator — driven by the SDK's outcome promise ───
 const statusEl = () => document.getElementById('dbsc-status');
 
 function setStatus(state, text) {
@@ -520,31 +520,43 @@ function setStatus(state, text) {
   el.textContent = text;
 }
 
-let pollAbort = null;
-
-async function pollDbscReady() {
-  if (pollAbort) pollAbort.aborted = true;
-  const token = { aborted: false };
-  pollAbort = token;
-
-  setStatus('pending', 'Binding session… (native DBSC on Chromium 145+, Web Crypto polyfill on other browsers)');
-  const deadline = Date.now() + RETRY_WINDOW_MS;
-
-  while (!token.aborted && Date.now() < deadline) {
-    const r = await rawReq('GET', '/me');
-    if (token.aborted) return;
-    const tier = r && r.body && r.body.dbsc && r.body.dbsc.tier;
-    if (tier && tier !== 'none') {
-      const label = tier === 'dbsc'
-        ? 'Session bound (tier: dbsc) — hardware-backed key, native DBSC.'
-        : 'Session bound (tier: bound) — Web Crypto polyfill. Cookies replayed elsewhere will fail refresh.';
-      setStatus('ready', label);
-      return;
-    }
-    await new Promise((res) => setTimeout(res, 600));
+// Banner copy is a pure function of the outcome shape — no race, no polling,
+// no "we don't know yet" intermediate state once the promise resolves.
+function bannerForOutcome(outcome) {
+  if (!outcome) return ['unsupported', 'Binding SDK did not return an outcome. Check the console.'];
+  switch (outcome.phase) {
+    case 'native-dbsc':
+      return ['ready', 'Session bound (tier: dbsc) — TPM-backed, native DBSC.'];
+    case 'polyfill-bound':
+      if (outcome.skipReason === 'quota_exceeded') {
+        return ['unsupported', "Chrome's DBSC quota for this origin is exhausted. Polyfill took over (tier: bound). Open an Incognito window to test native DBSC."];
+      }
+      if (outcome.skipReason === 'unreachable') {
+        return ['unsupported', 'Chrome could not reach the DBSC registration endpoint. Polyfill took over (tier: bound).'];
+      }
+      if (outcome.skipReason) {
+        return ['unsupported', 'Chrome skipped native DBSC (' + outcome.skipReason + '). Polyfill took over (tier: bound).'];
+      }
+      return ['ready', 'Session bound (tier: bound) — Web Crypto polyfill. Cookies replayed elsewhere will fail refresh.'];
+    case 'unbound':
+      return ['unsupported', 'No active binding — log in to start one.'];
+    case 'error':
+      return ['unsupported', 'Binding SDK error: ' + outcome.error];
+    default:
+      return ['unsupported', 'Unknown outcome: ' + JSON.stringify(outcome)];
   }
-  if (!token.aborted) {
-    setStatus('unsupported', 'No binding after ' + (RETRY_WINDOW_MS / 1000) + 's. Check the browser console for SDK errors, or that cookies and IndexedDB are not blocked.');
+}
+
+async function awaitBindingOutcome(promise) {
+  setStatus('pending', 'Binding session…');
+  try {
+    const outcome = await promise;
+    console.log('%c[bound-sdk outcome]', 'color:#0a7;font-weight:bold', outcome);
+    const [state, text] = bannerForOutcome(outcome);
+    setStatus(state, text);
+  } catch (err) {
+    console.error('[bound-sdk] outcome rejected', err);
+    setStatus('unsupported', 'Binding SDK threw: ' + (err && err.message ? err.message : String(err)));
   }
 }
 
@@ -563,17 +575,14 @@ document.getElementById('login-btn').onclick = async () => {
   show(r);
   if (r.status === 200) {
     lastLoginAt = Date.now();
-    // Re-kick the bound polyfill. On page-load it exited early because
-    // no session existed yet; now that /login has set the registration
-    // cookies, it can run through registration.
+    // Re-kick the bound polyfill and await its outcome directly. No /me
+    // polling. The outcome promise resolves with exactly what happened.
     if (typeof window.initBoundDbsc === 'function') {
-      window.initBoundDbsc().catch((err) => console.error('[bound-sdk]', err));
+      awaitBindingOutcome(window.initBoundDbsc());
     }
-    pollDbscReady();
   }
 };
 document.getElementById('logout-btn').onclick = async () => {
-  if (pollAbort) pollAbort.aborted = true;
   setStatus('', '');
   statusEl().style.display = 'none';
   show(await rawReq('POST', '/logout'));
@@ -663,7 +672,14 @@ document.getElementById('clear-btn').onclick = async () => {
   // Per-call wrapper. NOT assigned to globalThis.fetch — analytics, React Query,
   // and other third-party SDKs keep using the native fetch unaffected.
   window.dbscBoundFetch = wrapFetch();
-  boundInit().catch((err) => console.error('[bound-sdk]', err));
+  // On page load, feed the outcome into the same status banner the login
+  // handler uses. Covers the case where the user reloads on an active session.
+  const initialPromise = boundInit();
+  if (typeof window.awaitBindingOutcome === 'function') {
+    window.awaitBindingOutcome(initialPromise);
+  } else {
+    initialPromise.then((o) => console.log('[bound-sdk outcome]', o)).catch((e) => console.error('[bound-sdk]', e));
+  }
 </script>
 </body>
 </html>`);

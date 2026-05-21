@@ -293,21 +293,32 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
     if (req.method === "GET" && url === boundStatePath) {
       const sid = readBoundSessionId();
       const xServerTime = String(Date.now());
+      const skippedRaw: Record<string, string | undefined> = {
+        "secure-session-skipped": req.headers.get("secure-session-skipped") ?? undefined,
+        "sec-session-skipped": req.headers.get("sec-session-skipped") ?? undefined,
+      };
+      const skipped = parseSessionSkippedHeader(skippedRaw);
+      const nativeSkipped = skipped.length ? skipped.map((s) => s.reason) : undefined;
       if (!sid) {
-        const res = NextResponse.json({ phase: "unbound", sessionId: null });
+        const res = NextResponse.json({ phase: "unbound", sessionId: null, ...(nativeSkipped && { nativeSkipped }) });
         res.headers.set("X-Server-Time", xServerTime);
         return res;
       }
       const session = await storage.getSession(sid);
       if (!session) {
-        const res = NextResponse.json({ phase: "unbound", sessionId: null });
+        const res = NextResponse.json({ phase: "unbound", sessionId: null, ...(nativeSkipped && { nativeSkipped }) });
         res.headers.set("X-Server-Time", xServerTime);
         return res;
       }
       const key = await storage.getBoundKey(sid);
       if (!key) {
         const challenge = await issueChallenge(sid, storage);
-        const res = NextResponse.json({ phase: "needs-registration", sessionId: sid, challenge: challenge.jti });
+        const res = NextResponse.json({
+          phase: "needs-registration",
+          sessionId: sid,
+          challenge: challenge.jti,
+          ...(nativeSkipped && { nativeSkipped }),
+        });
         res.headers.set("X-Server-Time", xServerTime);
         return res;
       }
@@ -316,6 +327,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
         sessionId: sid,
         tier: session.tier,
         refreshIntervalMs: boundCookieTtl,
+        ...(nativeSkipped && { nativeSkipped }),
       });
       res.headers.set("X-Server-Time", xServerTime);
       return res;

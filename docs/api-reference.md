@@ -422,7 +422,16 @@ interface InitBoundDbscOptions {
   refreshMarginMs?: number;       // default 5000 — refresh this many ms before the bound cookie expires
 }
 
-function initBoundDbsc(options?: InitBoundDbscOptions): Promise<void>;
+// Returns a structured outcome (2.2.0+). Awaiters that previously discarded
+// the void return value continue to work; type-strict consumers that declared
+// `Promise<void>` will need to update.
+type BoundDbscOutcome =
+  | { phase: "native-dbsc"; tier: "dbsc" }
+  | { phase: "polyfill-bound"; tier: "bound"; skipReason?: string }
+  | { phase: "unbound" }
+  | { phase: "error"; error: string };
+
+function initBoundDbsc(options?: InitBoundDbscOptions): Promise<BoundDbscOutcome>;
 function stopBoundDbsc(): void;
 
 // Per-request signing for sensitive routes — see docs/per-request-signing.md.
