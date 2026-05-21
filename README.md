@@ -100,17 +100,20 @@ You don't rewrite login, you don't migrate the session store. DBSC sits alongsid
 
 `sessionId` on line 5 is whatever id your existing session store already issues. DBSC binds to that same id; you don't manage a second id-space.
 
-**One guard per sensitive route — required, not optional:**
+## Choose your protection level per route
 
-```ts
-app.post("/payment",          requireBoundProof({ storage: dbscStorage }), paymentHandler);
-app.post("/settings/password", requireBoundProof({ storage: dbscStorage }), passwordHandler);
-app.use("/admin",             requireBoundProof({ storage: dbscStorage }));   // gates everything under /admin
-```
+After the 6-line setup, every request through the middleware has a `tier` field on the request context. The library does not auto-protect anything — you pick the level per route. The library exposes three levers; this table tells you which one to reach for.
 
-The `tier` field on every request is informational. Without a guard, a stolen cookie still reaches your handler — the library cannot infer which routes are sensitive, you mark them. `requireBoundProof` lets native DBSC traffic (`tier: "dbsc"`) through automatically (Chromium enforces session validity browser-side); Firefox / Safari traffic (`tier: "bound"`) must carry a fresh per-request signature, which the client-side [`wrapFetch()`](./docs/per-request-signing.md) adds for you. For payment routes, pass `signBody: true` to both helpers (v2.3.0+) so the body hash is signed into the proof — closes the MITM body-substitution gap.
+| Your route does… | Use this guard | What it stops | Detailed in |
+|---|---|---|---|
+| Public / read-only (feed, search, public profile) | Nothing | n/a — no auth gate at all | n/a |
+| Authenticated action with no money / takeover risk (post, comment, upvote, edit own bio) | `if (req.dbsc.tier === "none") return 403` | Stolen cookie loses access after one refresh cycle (~60s–10min depending on `boundCookieTtl`) | [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md) (per-route policy table) |
+| Account takeover risk (password change, email change, admin actions) | `requireBoundProof({ storage })` | Stolen cookie cannot ride along even while the victim is online — Firefox / Safari now have the same guarantee Chrome gets from native DBSC | [docs/per-request-signing.md](./docs/per-request-signing.md) |
+| Moves money or numeric input that matters (payment, transfer, refund, withdraw) | `requireBoundProof({ storage, signBody: true })` on the server + `wrapFetch({ signBody: true })` on the client | All of the above PLUS an active MITM cannot substitute the request body (amount, recipient, etc.) within the timestamp window | [docs/per-request-signing.md#body-signing-setup-v230](./docs/per-request-signing.md) |
 
-Fastify / Hono / Next.js variants of these six lines, plus the per-route policy table and a 30-day rollout timeline, are in [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md).
+**Each row is opt-in and additive.** A route can sit at row 2 today and graduate to row 3 next quarter when you ship payments — no migration, no wire-format change, no version bump. The defaults (no guard) give DBSC's binding semantics without enforcement; pick the row your threat model needs.
+
+The full threat boundary for each level, the per-framework wiring (Fastify / Hono / Next.js), and the migration timeline for an existing app are in [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md) and [docs/per-request-signing.md](./docs/per-request-signing.md).
 
 ## Subpath imports
 

@@ -2,6 +2,15 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.3.1] — 2026-05-21
+
+### Docs
+
+- **README "Choose your protection level per route" table.** After the 6-line setup, the README now leads with a 4-row decision table: route is public → no guard; authenticated action → tier-check; takeover risk → `requireBoundProof()`; moves money → `+ signBody: true`. Each row links to the doc where the full threat boundary and per-framework recipe live. The "which lever do I reach for" question now answers in five seconds of reading instead of cross-referencing three docs.
+- Clarification that `signBody` is bound-tier-only by default (in `docs/per-request-signing.md` and `docs/api-reference.md`) — Chromium's native DBSC protocol does not sign request bodies, so demanding `bh=` from Chrome users only makes sense paired with `allowDbscWithoutProof: false` + `wrapFetch({ signBody: true })` on the Chrome side too.
+
+No behavior change; library tarball is byte-identical to 2.3.0 except the bundled README.
+
 ## [2.3.0] — 2026-05-21
 
 ### Added
