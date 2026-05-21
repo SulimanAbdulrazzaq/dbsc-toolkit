@@ -47,6 +47,8 @@ Any response may include a `nativeSkipped: string[]` field — populated from th
 
 When `nativeSkipped` is non-empty, the SDK short-circuits its native-probe wait and registers immediately — there is no reason to wait for a refusal Chrome has already issued. Added in 2.2.0.
 
+Chrome attaches `Secure-Session-Skipped` to *subsequent* requests after the skip decision, not to the /login response itself. So the first `/dbsc-bound/state` call right after login usually arrives before Chrome has the header attached; the second one (typically within 500ms–1s) carries it. The SDK handles this by actively polling `/dbsc-bound/state` every `pollIntervalMs` (default 1000ms) during the probe window — see "When the SDK kicks in" below. The short-circuit fires whichever poll first sees the header.
+
 The `challenge` field appears only in the `needs-registration` phase. It is a one-use JTI the client signs and posts back.
 
 ### `GET /dbsc-bound/challenge`
@@ -126,7 +128,7 @@ The underlying encrypted blob still lives in the browser's profile directory on 
 2. **`phase: "unbound"`** → clear any stale IndexedDB record, return. User isn't logged in.
 3. **`phase: "bound", tier: "dbsc"`** → native DBSC won the race. Do nothing.
 4. **`phase: "bound", tier: "bound"`** → the server thinks we're bound. Verify the IndexedDB key still matches. If not, clear it and retry registration.
-5. **`phase: "needs-registration"`** → wait `nativeProbeWindowMs` (default 5000 ms), then re-check `/state`. If native DBSC still hasn't landed, run the polyfill registration. If it has, do nothing.
+5. **`phase: "needs-registration"`** → actively poll `/state` every `pollIntervalMs` (default 1000 ms) up to `nativeProbeWindowMs` (default 5000 ms). Exit early whenever the poll observes either: (a) `phase: "bound", tier: "dbsc"` → native won, return as `native-dbsc`; (b) `nativeSkipped` non-empty → Chrome refused, run the polyfill registration immediately with the skip reason on the outcome; (c) `phase: "unbound"` → session got revoked, return as `unbound`. If the loop times out without a verdict, run the polyfill registration with no skip reason. The poll catches Chrome's lagging skip header within ~1s instead of after the full probe window.
 
 After a successful registration or on a `phase: "bound", tier: "bound"` init, the SDK schedules a `setTimeout` for `refreshIntervalMs - refreshMarginMs` (default 5s margin) and refreshes silently. On refresh success, it schedules the next one. On refresh failure, it stops. The next page load will re-run the init flow and re-bind if appropriate.
 
@@ -195,6 +197,7 @@ initBoundDbsc({
   refreshPath: "/dbsc-bound/refresh",
   nativeProbeWindowMs: 5000,
   refreshMarginMs: 5000,
+  pollIntervalMs: 1000,   // active poll cadence during the probe window. Min 250ms.
 });
 ```
 

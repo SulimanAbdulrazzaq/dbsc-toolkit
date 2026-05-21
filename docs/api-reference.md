@@ -419,6 +419,7 @@ interface InitBoundDbscOptions {
   registrationPath?: string;      // default "/dbsc-bound/registration"
   refreshPath?: string;           // default "/dbsc-bound/refresh"
   nativeProbeWindowMs?: number;   // default 5000 — how long to wait for native DBSC before polyfilling
+  pollIntervalMs?: number;        // default 1000 — active poll cadence during the probe window. Min 250
   refreshMarginMs?: number;       // default 5000 — refresh this many ms before the bound cookie expires
 }
 

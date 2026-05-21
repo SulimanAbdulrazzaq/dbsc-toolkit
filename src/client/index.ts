@@ -11,6 +11,13 @@ export interface InitBoundDbscOptions {
   refreshPath?: string;
   nativeProbeWindowMs?: number;
   refreshMarginMs?: number;
+  /**
+   * How often to re-check `/dbsc-bound/state` during the probe window. The
+   * SDK polls instead of blocking-sleeping so it can detect either native
+   * DBSC completion or Chrome's `Secure-Session-Skipped` header as soon as
+   * they appear. Default 1000ms. Minimum 250ms (smaller values are clamped).
+   */
+  pollIntervalMs?: number;
 }
 
 /**
@@ -61,6 +68,7 @@ interface ResolvedOptions {
   refreshPath: string;
   nativeProbeWindowMs: number;
   refreshMarginMs: number;
+  pollIntervalMs: number;
 }
 
 const DEFAULTS: ResolvedOptions = {
@@ -70,7 +78,9 @@ const DEFAULTS: ResolvedOptions = {
   refreshPath: "/dbsc-bound/refresh",
   nativeProbeWindowMs: 5000,
   refreshMarginMs: 5000,
+  pollIntervalMs: 1000,
 };
+const MIN_POLL_INTERVAL_MS = 250;
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -86,6 +96,7 @@ export async function initBoundDbsc(options: InitBoundDbscOptions = {}): Promise
     refreshPath: options.refreshPath ?? DEFAULTS.refreshPath,
     nativeProbeWindowMs: options.nativeProbeWindowMs ?? DEFAULTS.nativeProbeWindowMs,
     refreshMarginMs: options.refreshMarginMs ?? DEFAULTS.refreshMarginMs,
+    pollIntervalMs: Math.max(MIN_POLL_INTERVAL_MS, options.pollIntervalMs ?? DEFAULTS.pollIntervalMs),
   };
 
   try {
@@ -117,8 +128,9 @@ export async function initBoundDbsc(options: InitBoundDbscOptions = {}): Promise
     }
 
     // phase === "needs-registration"
-    // If Chrome already skipped native (quota, unreachable, etc), do not burn
-    // the probe window — Chrome has already told us it won't register.
+    // Fast-path: if Chrome already attached its Skipped header to the first
+    // /state call, register immediately. Common only on the second page load
+    // or re-invocation — see the poll loop below for the first-page case.
     if (state.nativeSkipped && state.nativeSkipped.length > 0) {
       await runRegistration(state.sessionId, state.challenge, cfg);
       const final = await fetchState(cfg.statePath);
@@ -126,25 +138,45 @@ export async function initBoundDbsc(options: InitBoundDbscOptions = {}): Promise
       return { phase: "polyfill-bound", tier: "bound", skipReason: state.nativeSkipped[0] };
     }
 
-    await sleep(cfg.nativeProbeWindowMs);
+    // Active poll across the probe window. Chrome's Skipped header is a
+    // lagging signal that lands ~100-500ms after the registration attempt;
+    // native registration also completes asynchronously after /login. A
+    // blocking sleep cannot observe either. A poll loop catches whichever
+    // event happens first.
+    const deadline = Date.now() + cfg.nativeProbeWindowMs;
+    let last: StateResponse = state;
+    while (Date.now() < deadline) {
+      await sleep(cfg.pollIntervalMs);
+      const s = await fetchState(cfg.statePath);
+      last = s;
+      if (s.phase === "bound" && s.tier === "dbsc") {
+        return { phase: "native-dbsc", tier: "dbsc" };
+      }
+      if (s.phase === "bound" && s.tier === "bound") {
+        // Another tab registered during our probe window.
+        scheduleRefresh(cfg, s.refreshIntervalMs);
+        return { phase: "polyfill-bound", tier: "bound" };
+      }
+      if (s.phase === "needs-registration" && s.nativeSkipped && s.nativeSkipped.length > 0) {
+        await runRegistration(s.sessionId, s.challenge, cfg);
+        const finalState = await fetchState(cfg.statePath);
+        if (finalState.phase === "bound") scheduleRefresh(cfg, finalState.refreshIntervalMs);
+        return { phase: "polyfill-bound", tier: "bound", skipReason: s.nativeSkipped[0] };
+      }
+      if (s.phase === "unbound") {
+        return { phase: "unbound" };
+      }
+      // still needs-registration without a skip reason — keep polling.
+    }
 
-    const recheck = await fetchState(cfg.statePath);
-    if (recheck.phase === "bound" && recheck.tier === "dbsc") {
-      return { phase: "native-dbsc", tier: "dbsc" };
-    }
-    if (recheck.phase === "bound" && recheck.tier === "bound") {
-      // Someone else (another tab) registered during the probe window.
-      scheduleRefresh(cfg, recheck.refreshIntervalMs);
-      return { phase: "polyfill-bound", tier: "bound" };
-    }
-    if (recheck.phase !== "needs-registration") {
+    // Window elapsed without a verdict from Chrome. Run polyfill registration.
+    if (last.phase !== "needs-registration") {
       return { phase: "unbound" };
     }
-
-    await runRegistration(recheck.sessionId, recheck.challenge, cfg);
+    await runRegistration(last.sessionId, last.challenge, cfg);
     const final = await fetchState(cfg.statePath);
     if (final.phase === "bound") scheduleRefresh(cfg, final.refreshIntervalMs);
-    return outcomeFromSkip("polyfill-bound", recheck.nativeSkipped);
+    return outcomeFromSkip("polyfill-bound", last.nativeSkipped);
   } catch (err) {
     return { phase: "error", error: err instanceof Error ? err.message : String(err) };
   }

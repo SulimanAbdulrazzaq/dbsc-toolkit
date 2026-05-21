@@ -4,14 +4,15 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 
 ## [2.2.0] — 2026-05-21
 
-### Added
-
-- **`initBoundDbsc()` now resolves with a structured `BoundDbscOutcome`.** Consumers no longer need to poll `/me` to find out what the SDK did. The outcome describes exactly which path was taken: `{ phase: "native-dbsc" }`, `{ phase: "polyfill-bound", skipReason? }`, `{ phase: "unbound" }`, or `{ phase: "error", error }`. Every previous early-return and swallowed error in the SDK now surfaces as a concrete outcome value.
-- **`/dbsc-bound/state` includes `nativeSkipped` when Chrome refused.** The state handler in every adapter (Express, Fastify, Hono, Next.js) reads the request's `Secure-Session-Skipped` header and returns the reasons (`quota_exceeded`, `unreachable`, `server_error`) so the SDK knows whether to wait for native DBSC or fall back immediately.
-
 ### Fixed
 
-- **The "no binding after 8s" race on quota-exhausted Chrome.** When Chrome explicitly skipped native DBSC, the SDK previously still burned the full `nativeProbeWindowMs` (5–8 s) before registering via polyfill. By the time it finished, the demo's `/me` poll had already given up and the banner read "No binding after 8s" — even though the polyfill had succeeded a fraction of a second later. The SDK now short-circuits the probe wait when `nativeSkipped` is set, and the demo awaits the outcome promise directly instead of polling. Every flake pattern in the v2.1.x bug reports (silent failures, two-tab disagreement, "stays none forever") becomes a deterministic banner with a concrete reason.
+- **The "no binding after 8s" race on quota-exhausted Chrome — for real this time.** The SDK now actively polls `/dbsc-bound/state` every `pollIntervalMs` (default 1000 ms) during the probe window instead of blocking-sleeping. Chrome attaches `Secure-Session-Skipped` to *subsequent* requests after deciding to skip — not to the /login response — so a single-check short-circuit would miss it on the first state call (typically arrives within 400 ms of /login) and only see it ~1 s later. The poll loop catches the lagging header on the second tick and falls back to the polyfill immediately. Quota-exhausted Chrome now reaches `tier: "bound"` in ~1.5 s instead of 8 s. The same poll also detects successful native registration as soon as it completes, instead of waiting out the full window.
+
+### Added
+
+- **`initBoundDbsc()` resolves with a structured `BoundDbscOutcome`.** Consumers no longer need to poll `/me` to find out what the SDK did. The outcome describes exactly which path was taken: `{ phase: "native-dbsc" }`, `{ phase: "polyfill-bound", skipReason? }`, `{ phase: "unbound" }`, or `{ phase: "error", error }`. Every previous early-return and swallowed error in the SDK now surfaces as a concrete outcome value.
+- **`/dbsc-bound/state` includes `nativeSkipped` when Chrome refused.** The state handler in every adapter (Express, Fastify, Hono, Next.js) reads the request's `Secure-Session-Skipped` header and returns the reasons (`quota_exceeded`, `unreachable`, `server_error`) so the SDK knows to fall back immediately.
+- **`pollIntervalMs` option on `initBoundDbsc()`.** Default 1000 ms. Minimum 250 ms (smaller values are clamped). Controls how often the SDK re-checks `/dbsc-bound/state` during the probe window.
 
 ### Demo
 
