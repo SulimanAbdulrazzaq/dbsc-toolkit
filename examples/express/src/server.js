@@ -248,13 +248,28 @@ app.post("/logout", async (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── /clear-cookies — diagnostic helper: wipes every cookie for the origin ───
-// Useful for resetting state between test scenarios. Real apps don't ship this.
-app.post("/clear-cookies", (req, res) => {
+// ─── /clear-cookies — diagnostic helper: wipes every cookie + tears down
+// the server-side DBSC binding so it cannot respawn on next page load.
+// Real apps don't ship this.
+app.post("/clear-cookies", async (req, res) => {
   const names = Object.keys(req.cookies ?? {});
+
+  // Tear down server-side state first so /dbsc-bound/state cannot find a
+  // session row + issue a fresh challenge on the next GET.
+  try {
+    await res.locals.dbsc.revoke();
+  } catch { /* */ }
+  await new Promise((resolve) => req.session.destroy(() => resolve()));
+
+  // Now wipe every cookie the browser sent us. __Host- cookies need exact
+  // attributes (Path=/, Secure, no Domain) or the browser ignores the clear.
+  const HOST_ATTRS = { path: "/", secure: true, httpOnly: true, sameSite: "lax" };
+  const PLAIN_ATTRS = { path: "/" };
   for (const name of names) {
-    res.clearCookie(name, { path: "/", secure: true, httpOnly: true, sameSite: "lax" });
+    const opts = name.startsWith("__Host-") ? HOST_ATTRS : PLAIN_ATTRS;
+    res.clearCookie(name, opts);
   }
+
   res.json({ ok: true, cleared: names });
 });
 
@@ -740,7 +755,14 @@ document.getElementById('tamper-btn').onclick = async () => {
   show({ method: 'POST', path: '/payment (tampered)', status: r.status, body: parsed });
 };
 document.getElementById('clear-btn').onclick = async () => {
-  show(await req('POST', '/clear-cookies'));
+  const r = await rawReq('POST', '/clear-cookies');
+  show(r);
+  // Tear down client-side state too: IndexedDB key + UI status.
+  if (typeof window.clearBoundKey === 'function') {
+    await window.clearBoundKey().catch((err) => console.error('[bound-sdk] clear', err));
+  }
+  setStatus('', '');
+  statusEl().style.display = 'none';
 };
 
 // Live server log stream
