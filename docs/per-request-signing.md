@@ -46,7 +46,7 @@ What this defeats that the plain bound tier did not:
 
 What this does *not* defeat:
 
-- **Active MITM that can substitute request bodies.** A v1 limitation. The signed message includes method + path + timestamp, not the body. An attacker with TLS-stripping or a malicious proxy on the same network could capture a valid signature and substitute the body within the timestamp window. TLS, which any modern HTTPS app relies on, prevents this from being a practical threat. Body signing is on the roadmap as v1.1, opt-in via `requireBoundProof({ signBody: true })`.
+- **Active MITM that can substitute request bodies.** Closed in v2.3.0 via opt-in body signing. Pass `signBody: true` to both `wrapFetch()` and `requireBoundProof()` and the proof header gains a `bh=sha256(body)` field signed into the message. The server hashes the received body and rejects on mismatch. The route must deliver raw body bytes — see "Body signing setup" below.
 - **Infostealer malware on the victim's machine.** Same boundary as the plain bound tier. Malware that can decrypt the browser's IndexedDB keystore can also sign, which means it can produce valid proofs. Gate on `tier === "dbsc"` for routes that need to defeat this — that's what hardware-backed keys are for.
 - **Compromised browser process.** A rogue extension or a browser RCE can call `subtle.sign()` directly. Both tiers are defenseless here.
 
@@ -148,6 +148,38 @@ Proof failures emit `verification_failure` events with `reason` set to one of:
 
 A sustained spike of `MISSING_PROOF` or `SIGNATURE_INVALID` on a single session id is a credible cookie-theft signal. The plain bound-tier `session_stolen` event already fires on refresh-signature mismatch; this gives you a second, earlier signal at request time.
 
+## Body signing setup (v2.3.0+)
+
+Enable on both sides:
+
+```ts
+// Server (Express)
+import express from "express";
+app.post(
+  "/payment",
+  express.raw({ type: "*/*" }),                              // raw body bytes
+  requireBoundProof({ storage, signBody: true }),
+  paymentHandler,
+);
+
+// Client
+const boundFetch = wrapFetch({ signBody: true });
+await boundFetch("/payment", { method: "POST", body: JSON.stringify(payload) });
+```
+
+Per-framework raw-body recipe:
+
+- **Express**: `express.raw({ type: "*/*" })` on the route, BEFORE `requireBoundProof`. If you have `express.json()` mounted globally, also send the request with a non-JSON `Content-Type` (e.g. `application/octet-stream`) so the global parser skips it.
+- **Fastify**: register a buffer parser — `fastify.addContentTypeParser("application/octet-stream", { parseAs: "buffer" }, (_req, body, done) => done(null, body))` — then use that content type on the wire.
+- **Hono**: the middleware calls `c.req.arrayBuffer()` automatically. Downstream handlers can still use `c.req.json()` because the request is cached.
+- **Next.js**: the helper calls `req.clone().arrayBuffer()`. Your handler can then call `await req.json()` on the original request as usual.
+
+What body signing does and doesn't defeat:
+
+- Defeats MITM body substitution within the timestamp window.
+- Does NOT defeat MITM that can capture AND replay the entire request unchanged (same body, same signature) within the window. Combine with a server-side replay cache (`(sessionId, ts)` dedup in Redis) if you need strict same-second replay rejection on top.
+- Does NOT defeat malware running as the victim — same threat boundary as the rest of the bound tier.
+
 ## What's in v1, and what's coming later
 
 In v2.1.0:
@@ -158,6 +190,9 @@ In v2.1.0:
 - `BOUND_PROOF_HEADER` constant for adapter authors
 - New error codes `MISSING_PROOF` and `MALFORMED_PROOF`
 
-Deferred to a later minor release:
-- Body signing (`{ signBody: true }` option, signs `sha256(body)` into the message)
+In v2.3.0:
+- Body signing (`{ signBody: true }` option, hashes the body into the proof header)
+- `clearBoundKey()` helper for explicit logout cleanup
+
+Deferred:
 - Server-side replay cache (`(sessionId, ts)` dedup in Redis) for apps that want strict same-second replay rejection on top of the timestamp window

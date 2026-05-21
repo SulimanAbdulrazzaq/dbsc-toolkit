@@ -2,6 +2,21 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.3.0] — 2026-05-21
+
+### Added
+
+- **`clearBoundKey()`** exported from `dbsc-toolkit/client`. Call this on logout to drop the IndexedDB key record so the next login starts from a clean slate. The previous behavior — letting the SDK detect the session mismatch and clear lazily on the next page load — kept working, but was wasted work.
+- **`signBody` option on `requireBoundProof()` and `wrapFetch()`**. When enabled, the proof header carries an additional `bh=` field containing the SHA-256 of the request body (base64url). The server verifies the hash before checking the signature. Closes the MITM body-substitution gap for payment / settings routes where the attacker could otherwise capture a valid signature and modify the body. Wired across all four adapters (Express, Fastify, Hono, Next.js).
+- **Test coverage**: 52 new tests this release. Client SDK (jsdom + fake-indexeddb): outcome promise, active-poll behavior, clock-skew correction, `wrapFetch` signing, body signing, `clearBoundKey`. Adapter route tests: Express (12), Fastify (8), Hono (8), Next.js (7). Core body-signing tests (5). Total suite: 119 tests, was 67 at the start of 2.3.0 work.
+- **CI matrix expanded** to ubuntu-latest + windows-latest + macos-latest × Node 20 / 22 (6 cells, previously ubuntu-only × 2 nodes).
+- Minimal `examples/fastify/` and `examples/hono/` runnable demos (no UI, curl-testable). The `examples/express/` demo remains the full visual walkthrough.
+
+### Notes
+
+- Body signing requires the protected route to deliver raw body bytes — see [docs/per-request-signing.md](./docs/per-request-signing.md) for the per-framework recipe (`express.raw({ type: '*\/*' })`, Fastify `addContentTypeParser` with `parseAs: 'buffer'`, Hono's `arrayBuffer()`, Next.js `req.clone().arrayBuffer()`).
+- `signBody: false` is the default; existing callers see no change.
+
 ## [2.2.0] — 2026-05-21
 
 ### Fixed

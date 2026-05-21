@@ -292,6 +292,7 @@ interface RequireBoundProofOptions {
   storage: StorageAdapter;
   allowDbscWithoutProof?: boolean;   // default true — tier=dbsc passes through
   timestampWindowMs?: number;        // default 5 * 60 * 1000
+  signBody?: boolean;                // default false — when true, verifies bh=sha256(body) (2.3.0+)
 }
 function requireBoundProof(opts: RequireBoundProofOptions): RequestHandler;
 ```
@@ -435,11 +436,15 @@ type BoundDbscOutcome =
 function initBoundDbsc(options?: InitBoundDbscOptions): Promise<BoundDbscOutcome>;
 function stopBoundDbsc(): void;
 
+// Drops the IndexedDB key record. Call after logout (2.3.0+).
+function clearBoundKey(): Promise<void>;
+
 // Per-request signing for sensitive routes — see docs/per-request-signing.md.
 // Returns a NEW fetch-shaped function. Do not assign to globalThis.fetch.
 interface WrapFetchOptions {
   fetch?: typeof fetch;
   headerName?: string;            // default "X-Dbsc-Bound-Proof"
+  signBody?: boolean;             // default false — when true, adds bh=sha256(body) (2.3.0+)
 }
 function wrapFetch(options?: WrapFetchOptions): typeof fetch;
 ```

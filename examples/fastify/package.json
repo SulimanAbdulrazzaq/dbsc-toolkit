@@ -1,5 +1,5 @@
 {
-  "name": "dbsc-express-demo",
+  "name": "dbsc-fastify-demo",
   "version": "2.3.0",
   "private": true,
   "type": "module",
@@ -7,12 +7,8 @@
     "start": "node src/server.js"
   },
   "dependencies": {
-    "bcryptjs": "^2.4.3",
-    "cookie-parser": "^1.4.6",
+    "@fastify/cookie": "^11.0.2",
     "dbsc-toolkit": "^2.3.0",
-    "express": "^5.2.1",
-    "express-session": "^1.18.0",
-    "ioredis": "^5.4.1"
+    "fastify": "^5.8.5"
   }
 }
-

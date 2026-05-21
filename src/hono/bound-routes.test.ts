@@ -1,0 +1,212 @@
+import { describe, it, expect } from "vitest";
+import { Hono } from "hono";
+import { createHash } from "node:crypto";
+import { dbsc, bindSession, requireBoundProof } from "./index.js";
+import { MemoryStorage } from "../core/testing/memory-storage-stub.js";
+
+function buildApp(register?: (app: Hono, storage: MemoryStorage) => void) {
+  const storage = new MemoryStorage();
+  const app = new Hono();
+  app.use("*", dbsc({ storage, secure: false }));
+  if (register) register(app, storage);
+  return { storage, app };
+}
+
+function parseSetCookie(res: Response): Record<string, string> {
+  const out: Record<string, string> = {};
+  const all = res.headers.getSetCookie?.() ?? [];
+  for (const c of all) {
+    const [pair] = c.split(";");
+    const [k, v] = pair!.split("=");
+    if (k && v) out[k] = v;
+  }
+  return out;
+}
+
+function cookieHeader(jar: Record<string, string>): string {
+  return Object.entries(jar).map(([k, v]) => `${k}=${v}`).join("; ");
+}
+
+function b64url(b: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i] as number);
+  return Buffer.from(s, "binary").toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+async function signMessage(privateKey: CryptoKey, message: string): Promise<string> {
+  const data = new TextEncoder().encode(message);
+  const sig = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    privateKey,
+    data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer,
+  );
+  return b64url(new Uint8Array(sig));
+}
+
+describe("Hono GET /dbsc-bound/state", () => {
+  it("returns phase: unbound and emits X-Server-Time", async () => {
+    const { app } = buildApp();
+    const res = await app.fetch(new Request("http://x/dbsc-bound/state"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Server-Time")).toBeTruthy();
+    const body = await res.json() as any;
+    expect(body.phase).toBe("unbound");
+  });
+
+  it("returns nativeSkipped when Secure-Session-Skipped header is present", async () => {
+    const { app } = buildApp();
+    const res = await app.fetch(new Request("http://x/dbsc-bound/state", {
+      headers: { "Secure-Session-Skipped": `quota_exceeded;session_identifier="abc"` },
+    }));
+    const body = await res.json() as any;
+    expect(body.nativeSkipped).toEqual(["quota_exceeded"]);
+  });
+});
+
+async function registerBoundSession(app: Hono, sessionId: string) {
+  const loginRes = await app.fetch(new Request("http://x/login", { method: "POST" }));
+  const jar = parseSetCookie(loginRes);
+
+  const stateRes = await app.fetch(new Request("http://x/dbsc-bound/state", {
+    headers: { Cookie: cookieHeader(jar) },
+  }));
+  const state = await stateRes.json() as any;
+  expect(state.phase).toBe("needs-registration");
+
+  const pair = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  );
+  const publicKey = await crypto.subtle.exportKey("jwk", pair.publicKey);
+  const signature = await signMessage(pair.privateKey, state.challenge);
+
+  const regRes = await app.fetch(new Request("http://x/dbsc-bound/registration", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookieHeader(jar) },
+    body: JSON.stringify({ publicKey, signature, challenge: state.challenge }),
+  }));
+  expect(regRes.status).toBe(200);
+  Object.assign(jar, parseSetCookie(regRes));
+  return { jar, privateKey: pair.privateKey, sessionId };
+}
+
+describe("Hono bound registration + refresh", () => {
+  it("registration flips tier to bound", async () => {
+    const { storage, app } = buildApp((a, s) => {
+      a.post("/login", async (c) => {
+        await bindSession(c, "hono-reg-1", s, { userId: "u1", secure: false });
+        return c.json({ ok: true });
+      });
+    });
+    await registerBoundSession(app, "hono-reg-1");
+    const sess = await storage.getSession("hono-reg-1");
+    expect(sess?.tier).toBe("bound");
+  });
+
+  it("refresh updates lastRefreshAt", async () => {
+    const { storage, app } = buildApp((a, s) => {
+      a.post("/login", async (c) => {
+        await bindSession(c, "hono-ref-1", s, { userId: "u1", secure: false });
+        return c.json({ ok: true });
+      });
+    });
+    const { jar, privateKey } = await registerBoundSession(app, "hono-ref-1");
+    const before = (await storage.getSession("hono-ref-1"))!.lastRefreshAt;
+    await new Promise((r) => setTimeout(r, 10));
+
+    const challengeRes = await app.fetch(new Request("http://x/dbsc-bound/challenge", {
+      headers: { Cookie: cookieHeader(jar) },
+    }));
+    const { challenge } = await challengeRes.json() as any;
+    const ts = Date.now();
+    const sig = await signMessage(privateKey, `${challenge}.${ts}`);
+
+    const refRes = await app.fetch(new Request("http://x/dbsc-bound/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookieHeader(jar) },
+      body: JSON.stringify({ challenge, signature: sig, timestamp: ts }),
+    }));
+    expect(refRes.status).toBe(200);
+    const after = (await storage.getSession("hono-ref-1"))!.lastRefreshAt;
+    expect(after).toBeGreaterThan(before);
+  });
+});
+
+describe("Hono requireBoundProof", () => {
+  it("rejects tier=none with 403", async () => {
+    const { app } = buildApp((a, s) => {
+      a.get("/strict", requireBoundProof({ storage: s }), (c) => c.json({ ok: true }));
+    });
+    const res = await app.fetch(new Request("http://x/strict"));
+    expect(res.status).toBe(403);
+  });
+
+  it("passes tier=bound with valid proof", async () => {
+    const { app } = buildApp((a, s) => {
+      a.post("/login", async (c) => {
+        await bindSession(c, "hono-pr-1", s, { userId: "u1", secure: false });
+        return c.json({ ok: true });
+      });
+      a.get("/strict", requireBoundProof({ storage: s }), (c) => c.json({ ok: true }));
+    });
+    const { jar, privateKey } = await registerBoundSession(app, "hono-pr-1");
+    const ts = Date.now();
+    const sig = await signMessage(privateKey, `hono-pr-1.GET./strict.${ts}`);
+    const res = await app.fetch(new Request("http://x/strict", {
+      headers: {
+        Cookie: cookieHeader(jar),
+        "X-Dbsc-Bound-Proof": `ts=${ts};sig=${sig}`,
+      },
+    }));
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects MISSING_PROOF when header is absent", async () => {
+    const { app } = buildApp((a, s) => {
+      a.post("/login", async (c) => {
+        await bindSession(c, "hono-pr-2", s, { userId: "u1", secure: false });
+        return c.json({ ok: true });
+      });
+      a.get("/strict", requireBoundProof({ storage: s }), (c) => c.json({ ok: true }));
+    });
+    const { jar } = await registerBoundSession(app, "hono-pr-2");
+    const res = await app.fetch(new Request("http://x/strict", {
+      headers: { Cookie: cookieHeader(jar) },
+    }));
+    expect(res.status).toBe(403);
+    const body = await res.json() as any;
+    expect(body.code).toBe("MISSING_PROOF");
+  });
+
+  it("signBody: rejects substituted body", async () => {
+    const { app } = buildApp((a, s) => {
+      a.post("/login", async (c) => {
+        await bindSession(c, "hono-pr-3", s, { userId: "u1", secure: false });
+        return c.json({ ok: true });
+      });
+      a.post("/pay", requireBoundProof({ storage: s, signBody: true }), (c) => c.json({ ok: true }));
+    });
+    const { jar, privateKey } = await registerBoundSession(app, "hono-pr-3");
+    const signedBody = '{"amount":1}';
+    const sentBody = '{"amount":1000}';
+    const ts = Date.now();
+    const signedBytes = new TextEncoder().encode(signedBody);
+    const bh = b64url(new Uint8Array(createHash("sha256").update(signedBytes).digest()));
+    const message = `hono-pr-3.POST./pay.${ts}.${bh}`;
+    const sig = await signMessage(privateKey, message);
+
+    const res = await app.fetch(new Request("http://x/pay", {
+      method: "POST",
+      headers: {
+        Cookie: cookieHeader(jar),
+        "X-Dbsc-Bound-Proof": `ts=${ts};sig=${sig};bh=${bh}`,
+        "Content-Type": "application/octet-stream",
+      },
+      body: sentBody,
+    }));
+    expect(res.status).toBe(403);
+    const body = await res.json() as any;
+    expect(body.code).toBe("SIGNATURE_INVALID");
+  });
+});
