@@ -11,6 +11,13 @@ export interface RequireBoundProofOptions {
   storage: StorageAdapter;
   allowDbscWithoutProof?: boolean;
   timestampWindowMs?: number;
+  /**
+   * When true, the helper calls `req.arrayBuffer()` and verifies a matching
+   * `bh=` body-hash field. Note: NextRequest.arrayBuffer() consumes the body
+   * stream — the caller must either re-read the body via a clone or call
+   * `req.json()` on a clone afterwards.
+   */
+  signBody?: boolean;
 }
 
 export interface RequireBoundProofContext {
@@ -48,6 +55,12 @@ export async function requireBoundProof(
   if (session.tier === "dbsc" && allowDbsc) return { ok: true };
 
   try {
+    const signBody = opts.signBody ?? false;
+    let bodyBytes: Uint8Array | undefined;
+    if (signBody) {
+      const ab = await req.clone().arrayBuffer();
+      bodyBytes = new Uint8Array(ab);
+    }
     await verifyBoundProof(
       {
         sessionId: session.sessionId,
@@ -55,6 +68,8 @@ export async function requireBoundProof(
         method: req.method,
         path: req.nextUrl.pathname,
         timestampWindowMs: opts.timestampWindowMs,
+        signBody,
+        bodyBytes,
       },
       opts.storage,
     );

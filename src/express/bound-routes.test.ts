@@ -1,0 +1,374 @@
+import { describe, it, expect } from "vitest";
+import express from "express";
+import cookieParser from "cookie-parser";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { createHash } from "node:crypto";
+import { dbsc, bindSession, requireBoundProof } from "./index.js";
+import { MemoryStorage } from "../core/testing/memory-storage-stub.js";
+
+async function startServer(register: (app: express.Application, storage: MemoryStorage) => void) {
+  const storage = new MemoryStorage();
+  const app = express();
+  app.use(cookieParser());
+  app.use(express.json());
+  app.use(dbsc({ storage, secure: false }));
+  register(app, storage);
+  const server = createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    storage,
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
+function parseSetCookie(setCookie: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const c of setCookie) {
+    const [pair] = c.split(";");
+    const [k, v] = pair!.split("=");
+    if (k && v) out[k] = v;
+  }
+  return out;
+}
+
+function cookieHeader(jar: Record<string, string>): string {
+  return Object.entries(jar).map(([k, v]) => `${k}=${v}`).join("; ");
+}
+
+function b64url(b: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i] as number);
+  return Buffer.from(s, "binary").toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+async function signMessage(privateKey: CryptoKey, message: string): Promise<string> {
+  const data = new TextEncoder().encode(message);
+  const sig = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    privateKey,
+    data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer,
+  );
+  return b64url(new Uint8Array(sig));
+}
+
+describe("GET /dbsc-bound/state", () => {
+  it("returns phase: unbound when no session cookie is set", async () => {
+    const ctx = await startServer(() => {});
+    try {
+      const res = await fetch(`${ctx.url}/dbsc-bound/state`);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toEqual({ phase: "unbound", sessionId: null });
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("emits X-Server-Time response header", async () => {
+    const ctx = await startServer(() => {});
+    try {
+      const before = Date.now();
+      const res = await fetch(`${ctx.url}/dbsc-bound/state`);
+      const after = Date.now();
+      const serverTime = Number(res.headers.get("X-Server-Time"));
+      expect(serverTime).toBeGreaterThanOrEqual(before);
+      expect(serverTime).toBeLessThanOrEqual(after);
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("returns nativeSkipped when client sends Secure-Session-Skipped", async () => {
+    const ctx = await startServer(() => {});
+    try {
+      const res = await fetch(`${ctx.url}/dbsc-bound/state`, {
+        headers: {
+          "Secure-Session-Skipped": `quota_exceeded;session_identifier="abc"`,
+        },
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.nativeSkipped).toEqual(["quota_exceeded"]);
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("returns phase: needs-registration after bindSession", async () => {
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, res) => {
+        await bindSession(res, "sess-state-1", storage, { userId: "u1", secure: false });
+        res.json({ ok: true });
+      });
+    });
+    try {
+      const loginRes = await fetch(`${ctx.url}/login`, { method: "POST" });
+      const setCookie = loginRes.headers.getSetCookie?.() ?? [];
+      const jar = parseSetCookie(setCookie);
+      const stateRes = await fetch(`${ctx.url}/dbsc-bound/state`, {
+        headers: { Cookie: cookieHeader(jar) },
+      });
+      const body = await stateRes.json();
+      expect(body.phase).toBe("needs-registration");
+      expect(body.sessionId).toBe("sess-state-1");
+      expect(body.challenge).toBeTruthy();
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
+async function registerBoundSession(ctx: Awaited<ReturnType<typeof startServer>>) {
+  const loginRes = await fetch(`${ctx.url}/login`, { method: "POST" });
+  const setCookie = loginRes.headers.getSetCookie?.() ?? [];
+  const jar = parseSetCookie(setCookie);
+
+  const stateRes = await fetch(`${ctx.url}/dbsc-bound/state`, {
+    headers: { Cookie: cookieHeader(jar) },
+  });
+  const state = await stateRes.json();
+  expect(state.phase).toBe("needs-registration");
+
+  const pair = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  );
+  const publicKey = await crypto.subtle.exportKey("jwk", pair.publicKey);
+  const signature = await signMessage(pair.privateKey, state.challenge);
+
+  const regRes = await fetch(`${ctx.url}/dbsc-bound/registration`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookieHeader(jar) },
+    body: JSON.stringify({ publicKey, signature, challenge: state.challenge }),
+  });
+  expect(regRes.status).toBe(200);
+  const regSet = regRes.headers.getSetCookie?.() ?? [];
+  const regJar = parseSetCookie(regSet);
+  Object.assign(jar, regJar);
+  return { jar, privateKey: pair.privateKey, sessionId: state.sessionId as string };
+}
+
+describe("POST /dbsc-bound/registration", () => {
+  it("happy path: stores BoundKey, flips session tier to bound, sets bound cookie", async () => {
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, res) => {
+        await bindSession(res, "sess-reg-1", storage, { userId: "u1", secure: false });
+        res.json({ ok: true });
+      });
+    });
+    try {
+      const { sessionId } = await registerBoundSession(ctx);
+      const session = await ctx.storage.getSession(sessionId);
+      expect(session?.tier).toBe("bound");
+      const key = await ctx.storage.getBoundKey(sessionId);
+      expect(key).toBeTruthy();
+      expect(key?.algorithm).toBe("ES256");
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("rejects when publicKey is missing", async () => {
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, res) => {
+        await bindSession(res, "sess-reg-2", storage, { userId: "u1", secure: false });
+        res.json({ ok: true });
+      });
+    });
+    try {
+      const loginRes = await fetch(`${ctx.url}/login`, { method: "POST" });
+      const jar = parseSetCookie(loginRes.headers.getSetCookie?.() ?? []);
+      const stateRes = await fetch(`${ctx.url}/dbsc-bound/state`, { headers: { Cookie: cookieHeader(jar) } });
+      const state = await stateRes.json();
+      const regRes = await fetch(`${ctx.url}/dbsc-bound/registration`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: cookieHeader(jar) },
+        body: JSON.stringify({ signature: "x", challenge: state.challenge }),
+      });
+      expect(regRes.status).toBe(400);
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
+describe("POST /dbsc-bound/refresh", () => {
+  it("happy path: updates lastRefreshAt, keeps tier=bound", async () => {
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, res) => {
+        await bindSession(res, "sess-ref-1", storage, { userId: "u1", secure: false });
+        res.json({ ok: true });
+      });
+    });
+    try {
+      const { jar, privateKey, sessionId } = await registerBoundSession(ctx);
+      const before = (await ctx.storage.getSession(sessionId))!.lastRefreshAt;
+      await new Promise((r) => setTimeout(r, 10));
+
+      const challengeRes = await fetch(`${ctx.url}/dbsc-bound/challenge`, {
+        headers: { Cookie: cookieHeader(jar) },
+      });
+      const { challenge } = await challengeRes.json();
+      const ts = Date.now();
+      const sig = await signMessage(privateKey, `${challenge}.${ts}`);
+
+      const refRes = await fetch(`${ctx.url}/dbsc-bound/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: cookieHeader(jar) },
+        body: JSON.stringify({ challenge, signature: sig, timestamp: ts }),
+      });
+      expect(refRes.status).toBe(200);
+
+      const after = (await ctx.storage.getSession(sessionId))!.lastRefreshAt;
+      expect(after).toBeGreaterThan(before);
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
+describe("requireBoundProof middleware", () => {
+  it("rejects tier=none with 403", async () => {
+    const ctx = await startServer((app, storage) => {
+      app.get("/strict", requireBoundProof({ storage }), (_req, res) => res.json({ ok: true }));
+    });
+    try {
+      const res = await fetch(`${ctx.url}/strict`);
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error).toBe("no active binding");
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("passes tier=bound when proof is valid", async () => {
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, res) => {
+        await bindSession(res, "sess-pr-1", storage, { userId: "u1", secure: false });
+        res.json({ ok: true });
+      });
+      app.get("/strict", requireBoundProof({ storage }), (_req, res) => res.json({ ok: true }));
+    });
+    try {
+      const { jar, privateKey, sessionId } = await registerBoundSession(ctx);
+      const ts = Date.now();
+      const message = `${sessionId}.GET./strict.${ts}`;
+      const sig = await signMessage(privateKey, message);
+
+      const res = await fetch(`${ctx.url}/strict`, {
+        headers: {
+          Cookie: cookieHeader(jar),
+          "X-Dbsc-Bound-Proof": `ts=${ts};sig=${sig}`,
+        },
+      });
+      expect(res.status).toBe(200);
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("rejects tier=bound with MISSING_PROOF when no header is sent", async () => {
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, res) => {
+        await bindSession(res, "sess-pr-2", storage, { userId: "u1", secure: false });
+        res.json({ ok: true });
+      });
+      app.get("/strict", requireBoundProof({ storage }), (_req, res) => res.json({ ok: true }));
+    });
+    try {
+      const { jar } = await registerBoundSession(ctx);
+      const res = await fetch(`${ctx.url}/strict`, { headers: { Cookie: cookieHeader(jar) } });
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.code).toBe("MISSING_PROOF");
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("signBody: rejects substituted body", async () => {
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, res) => {
+        await bindSession(res, "sess-pr-3", storage, { userId: "u1", secure: false });
+        res.json({ ok: true });
+      });
+      app.post(
+        "/pay",
+        express.raw({ type: "*/*" }),
+        requireBoundProof({ storage, signBody: true }),
+        (_req, res) => res.json({ ok: true }),
+      );
+    });
+    try {
+      const { jar, privateKey, sessionId } = await registerBoundSession(ctx);
+      const signedBody = '{"amount":1}';
+      const sentBody = '{"amount":1000}';
+      const ts = Date.now();
+      const signedBytes = new TextEncoder().encode(signedBody);
+      const bh = b64url(new Uint8Array(createHash("sha256").update(signedBytes).digest()));
+      const message = `${sessionId}.POST./pay.${ts}.${bh}`;
+      const sig = await signMessage(privateKey, message);
+
+      const res = await fetch(`${ctx.url}/pay`, {
+        method: "POST",
+        headers: {
+          Cookie: cookieHeader(jar),
+          "X-Dbsc-Bound-Proof": `ts=${ts};sig=${sig};bh=${bh}`,
+          "Content-Type": "application/octet-stream",
+        },
+        body: sentBody,
+      });
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.code).toBe("SIGNATURE_INVALID");
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("signBody: accepts matching body", async () => {
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, res) => {
+        await bindSession(res, "sess-pr-4", storage, { userId: "u1", secure: false });
+        res.json({ ok: true });
+      });
+      app.post(
+        "/pay",
+        express.raw({ type: "*/*" }),
+        requireBoundProof({ storage, signBody: true }),
+        (_req, res) => res.json({ ok: true }),
+      );
+    });
+    try {
+      const { jar, privateKey, sessionId } = await registerBoundSession(ctx);
+      const payload = '{"amount":1}';
+      const bytes = new TextEncoder().encode(payload);
+      const ts = Date.now();
+      const bh = b64url(new Uint8Array(createHash("sha256").update(bytes).digest()));
+      const message = `${sessionId}.POST./pay.${ts}.${bh}`;
+      const sig = await signMessage(privateKey, message);
+
+      // Use application/octet-stream so the global express.json() parser skips
+      // it and the route-level express.raw({ type: "*/*" }) captures the body
+      // bytes unchanged. Real apps using signBody mount raw before json or
+      // bypass json on signed routes — see docs/per-request-signing.md.
+      const res = await fetch(`${ctx.url}/pay`, {
+        method: "POST",
+        headers: {
+          Cookie: cookieHeader(jar),
+          "X-Dbsc-Bound-Proof": `ts=${ts};sig=${sig};bh=${bh}`,
+          "Content-Type": "application/octet-stream",
+        },
+        body: payload,
+      });
+      expect(res.status).toBe(200);
+    } finally {
+      await ctx.close();
+    }
+  });
+});

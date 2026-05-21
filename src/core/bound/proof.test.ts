@@ -266,3 +266,111 @@ describe("verifyBoundProof", () => {
     ).resolves.toBeUndefined();
   });
 });
+
+async function sha256B64Url(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+  );
+  let s = "";
+  const b = new Uint8Array(digest);
+  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i] as number);
+  return Buffer.from(s, "binary").toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+async function buildProofWithBody(
+  privateKey: CryptoKey,
+  sessionId: string,
+  method: string,
+  path: string,
+  ts: number,
+  bodyBytes: Uint8Array,
+): Promise<string> {
+  const bh = await sha256B64Url(bodyBytes);
+  const message = `${sessionId}.${method.toUpperCase()}.${path}.${ts}.${bh}`;
+  const sig = await signMessage(privateKey, message);
+  return `ts=${ts};sig=${sig};bh=${bh}`;
+}
+
+describe("verifyBoundProof body signing", () => {
+  it("accepts a proof whose body hash matches the signed body", async () => {
+    const { storage, sessionId, privateKey } = await bootstrapBoundSession("sess-b1");
+    const body = new TextEncoder().encode('{"amount":1,"to":"alice"}');
+    const ts = Date.now();
+    const header = await buildProofWithBody(privateKey, sessionId, "POST", "/payment", ts, body);
+
+    await expect(
+      verifyBoundProof(
+        { sessionId, proofHeader: header, method: "POST", path: "/payment", signBody: true, bodyBytes: body },
+        storage,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects MALFORMED_PROOF when signBody is true but bh is missing", async () => {
+    const { storage, sessionId, privateKey } = await bootstrapBoundSession("sess-b2");
+    const body = new TextEncoder().encode("hello");
+    const ts = Date.now();
+    // Build a proof WITHOUT the bh field.
+    const header = await buildProof(privateKey, sessionId, "POST", "/x", ts);
+
+    await expect(
+      verifyBoundProof(
+        { sessionId, proofHeader: header, method: "POST", path: "/x", signBody: true, bodyBytes: body },
+        storage,
+      ),
+    ).rejects.toMatchObject({
+      name: "DbscVerificationError",
+      code: ErrorCodes.MALFORMED_PROOF,
+    });
+  });
+
+  it("rejects when body hash on the wire does not match the actual body bytes", async () => {
+    const { storage, sessionId, privateKey } = await bootstrapBoundSession("sess-b3");
+    const signedBody = new TextEncoder().encode('{"amount":1}');
+    const sentBody = new TextEncoder().encode('{"amount":1000}');
+    const ts = Date.now();
+    const header = await buildProofWithBody(privateKey, sessionId, "POST", "/payment", ts, signedBody);
+
+    // Attacker substitutes the body; bh in header reflects the original signed body.
+    await expect(
+      verifyBoundProof(
+        { sessionId, proofHeader: header, method: "POST", path: "/payment", signBody: true, bodyBytes: sentBody },
+        storage,
+      ),
+    ).rejects.toMatchObject({
+      name: "DbscVerificationError",
+      code: ErrorCodes.SIGNATURE_INVALID,
+    });
+  });
+
+  it("treats empty body as a valid empty-body signature", async () => {
+    const { storage, sessionId, privateKey } = await bootstrapBoundSession("sess-b4");
+    const empty = new Uint8Array(0);
+    const ts = Date.now();
+    const header = await buildProofWithBody(privateKey, sessionId, "POST", "/x", ts, empty);
+
+    await expect(
+      verifyBoundProof(
+        { sessionId, proofHeader: header, method: "POST", path: "/x", signBody: true, bodyBytes: empty },
+        storage,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("ignores bh on the wire when signBody is false (backwards compat)", async () => {
+    const { storage, sessionId, privateKey } = await bootstrapBoundSession("sess-b5");
+    const ts = Date.now();
+    // Build a body-less proof, then jam an unrelated bh field at the end of the header.
+    const message = `${sessionId}.GET./x.${ts}`;
+    const sig = await signMessage(privateKey, message);
+    const headerWithStrayBh = `ts=${ts};sig=${sig};bh=ignored-value`;
+
+    await expect(
+      verifyBoundProof(
+        { sessionId, proofHeader: headerWithStrayBh, method: "GET", path: "/x" },
+        storage,
+      ),
+    ).resolves.toBeUndefined();
+  });
+});

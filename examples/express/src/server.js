@@ -586,6 +586,11 @@ document.getElementById('logout-btn').onclick = async () => {
   setStatus('', '');
   statusEl().style.display = 'none';
   show(await rawReq('POST', '/logout'));
+  // Clear the IndexedDB key record too. Server-side revoke() already cleared
+  // the cookie + storage row; this is the matching client-side cleanup.
+  if (typeof window.clearBoundKey === 'function') {
+    await window.clearBoundKey().catch((err) => console.error('[bound-sdk] clear', err));
+  }
 };
 document.getElementById('me-btn').onclick = async () => {
   show(await req('GET', '/me'));
@@ -662,7 +667,8 @@ document.getElementById('clear-btn').onclick = async () => {
 </script>
 
 <script type="module">
-  import { initBoundDbsc, wrapFetch } from '/dbsc-client/index.js';
+  import { initBoundDbsc, wrapFetch, clearBoundKey } from '/dbsc-client/index.js';
+  window.clearBoundKey = clearBoundKey;
   // 8s probe window — Render free tier's cold start can push native Chrome
   // DBSC registration past the library's 5s default, which would let the
   // polyfill race ahead and pin the session to tier=bound on a TPM-capable

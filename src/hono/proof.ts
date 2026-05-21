@@ -9,6 +9,12 @@ export interface RequireBoundProofOptions {
   storage: StorageAdapter;
   allowDbscWithoutProof?: boolean;
   timestampWindowMs?: number;
+  /**
+   * When true, the middleware reads `c.req.raw.arrayBuffer()` and verifies a
+   * matching `bh=` body-hash field. Downstream handlers that need the body
+   * after this should use `c.req.arrayBuffer()` themselves (it is cached).
+   */
+  signBody?: boolean;
 }
 
 /**
@@ -17,6 +23,7 @@ export interface RequireBoundProofOptions {
  */
 export function requireBoundProof(opts: RequireBoundProofOptions): MiddlewareHandler {
   const allowDbsc = opts.allowDbscWithoutProof ?? true;
+  const signBody = opts.signBody ?? false;
   return async (c: Context, next): Promise<Response | void> => {
     const dbsc = c.get("dbsc");
     if (!dbsc?.sessionId || dbsc.tier === "none") {
@@ -29,6 +36,11 @@ export function requireBoundProof(opts: RequireBoundProofOptions): MiddlewareHan
     try {
       const proofHeader = c.req.header("x-dbsc-bound-proof");
       const url = new URL(c.req.url);
+      let bodyBytes: Uint8Array | undefined;
+      if (signBody) {
+        const ab = await c.req.arrayBuffer();
+        bodyBytes = new Uint8Array(ab);
+      }
       await verifyBoundProof(
         {
           sessionId: dbsc.sessionId,
@@ -36,6 +48,8 @@ export function requireBoundProof(opts: RequireBoundProofOptions): MiddlewareHan
           method: c.req.method,
           path: url.pathname,
           timestampWindowMs: opts.timestampWindowMs,
+          signBody,
+          bodyBytes,
         },
         opts.storage,
       );

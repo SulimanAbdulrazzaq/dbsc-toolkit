@@ -9,6 +9,13 @@ export interface RequireBoundProofOptions {
   storage: StorageAdapter;
   allowDbscWithoutProof?: boolean;
   timestampWindowMs?: number;
+  /**
+   * When true, the proof must include a `bh=` body-hash field. Your route
+   * MUST register a raw content-type parser via Fastify's
+   * `addContentTypeParser('*', { parseAs: 'buffer' }, ...)` for the route to
+   * deliver `req.body` as a Buffer matching the client's pre-hash bytes.
+   */
+  signBody?: boolean;
 }
 
 /**
@@ -17,6 +24,7 @@ export interface RequireBoundProofOptions {
  */
 export function requireBoundProof(opts: RequireBoundProofOptions): preHandlerAsyncHookHandler {
   const allowDbsc = opts.allowDbscWithoutProof ?? true;
+  const signBody = opts.signBody ?? false;
   return async function preHandler(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const dbsc = req.dbsc;
     if (!dbsc?.sessionId || dbsc.tier === "none") {
@@ -27,6 +35,19 @@ export function requireBoundProof(opts: RequireBoundProofOptions): preHandlerAsy
     try {
       const proofHeaderRaw = req.headers["x-dbsc-bound-proof"];
       const proofHeader = Array.isArray(proofHeaderRaw) ? proofHeaderRaw[0] : proofHeaderRaw;
+      let bodyBytes: Uint8Array | undefined;
+      if (signBody) {
+        const raw = req.body as unknown;
+        if (raw instanceof Buffer) {
+          bodyBytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
+        } else if (raw instanceof Uint8Array) {
+          bodyBytes = raw;
+        } else if (typeof raw === "string") {
+          bodyBytes = new TextEncoder().encode(raw);
+        } else {
+          bodyBytes = new Uint8Array(0);
+        }
+      }
       await verifyBoundProof(
         {
           sessionId: dbsc.sessionId,
@@ -34,6 +55,8 @@ export function requireBoundProof(opts: RequireBoundProofOptions): preHandlerAsy
           method: req.method,
           path: req.url.split("?")[0] ?? req.url,
           timestampWindowMs: opts.timestampWindowMs,
+          signBody,
+          bodyBytes,
         },
         opts.storage,
       );

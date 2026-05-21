@@ -16,11 +16,22 @@ import { getKeyRecord } from "./keystore.js";
 export interface WrapFetchOptions {
   fetch?: typeof fetch;
   headerName?: string;
+  /**
+   * When true, the wrapper computes sha256(body) and signs it into the proof
+   * header. The server must be configured with `requireBoundProof({ signBody: true })`
+   * for the matching route. Defaults to false.
+   *
+   * Cost: one extra SHA-256 hash per request (~0.1 ms for typical JSON
+   * payloads). Cannot be used with streaming request bodies — the wrapper
+   * reads the body into memory to hash it.
+   */
+  signBody?: boolean;
 }
 
 export function wrapFetch(opts: WrapFetchOptions = {}): typeof fetch {
   const base = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const headerName = opts.headerName ?? "X-Dbsc-Bound-Proof";
+  const signBody = opts.signBody ?? false;
 
   return (async (input, init = {}) => {
     const rec = await getKeyRecord().catch(() => null);
@@ -33,17 +44,66 @@ export function wrapFetch(opts: WrapFetchOptions = {}): typeof fetch {
     const method = (init.method ?? "GET").toUpperCase();
     const offset = rec.clockOffsetMs ?? 0;
     const ts = Date.now() + offset;
-    const message = `${rec.sessionId}.${method}.${url.pathname}.${ts}`;
+
+    let bodyHash = "";
+    let finalBody: BodyInit | null | undefined = init.body;
+    if (signBody && init.body !== undefined && init.body !== null) {
+      const bodyBytes = await readBodyBytes(init.body);
+      // Re-use the bytes as the actual request body so server hashes the same.
+      // Wrap in a Blob to satisfy BodyInit on every runtime (Node, browser).
+      finalBody = new Blob([bodyBytes as BlobPart]);
+      bodyHash = await sha256B64Url(bodyBytes);
+    }
+
+    const message = signBody && bodyHash
+      ? `${rec.sessionId}.${method}.${url.pathname}.${ts}.${bodyHash}`
+      : `${rec.sessionId}.${method}.${url.pathname}.${ts}`;
+
     const sigBytes = await crypto.subtle.sign(
       { name: "ECDSA", hash: "SHA-256" },
       rec.keyPair.privateKey,
       new TextEncoder().encode(message),
     );
     const sig = base64url(new Uint8Array(sigBytes));
+
     const headers = new Headers(init.headers);
-    headers.set(headerName, `ts=${ts};sig=${sig}`);
-    return base(input, { ...init, headers, credentials: init.credentials ?? "include" });
+    const headerValue = bodyHash
+      ? `ts=${ts};sig=${sig};bh=${bodyHash}`
+      : `ts=${ts};sig=${sig}`;
+    headers.set(headerName, headerValue);
+
+    const nextInit: RequestInit = {
+      ...init,
+      headers,
+      credentials: init.credentials ?? "include",
+    };
+    if (finalBody !== undefined && finalBody !== null) {
+      nextInit.body = finalBody as BodyInit;
+    }
+    return base(input, nextInit);
   }) as typeof fetch;
+}
+
+async function readBodyBytes(body: BodyInit): Promise<Uint8Array> {
+  if (body instanceof Uint8Array) return body;
+  if (body instanceof ArrayBuffer) return new Uint8Array(body);
+  if (typeof body === "string") return new TextEncoder().encode(body);
+  if (body instanceof Blob) return new Uint8Array(await body.arrayBuffer());
+  if (body instanceof FormData || body instanceof URLSearchParams) {
+    return new TextEncoder().encode(body.toString());
+  }
+  if (body instanceof ReadableStream) {
+    throw new Error("wrapFetch with signBody: ReadableStream body is not supported");
+  }
+  return new TextEncoder().encode(String(body));
+}
+
+async function sha256B64Url(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+  );
+  return base64url(new Uint8Array(digest));
 }
 
 function base64url(b: Uint8Array): string {

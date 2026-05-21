@@ -4,6 +4,19 @@ import { recordServerTime } from "./clockSync.js";
 export { wrapFetch } from "./wrapFetch.js";
 export type { WrapFetchOptions } from "./wrapFetch.js";
 
+/**
+ * Clears the bound-key record from IndexedDB. Call this on logout so the next
+ * login starts from a clean slate instead of letting the SDK detect a session
+ * mismatch and clear it lazily on the next page load.
+ */
+export async function clearBoundKey(): Promise<void> {
+  await clearKeyRecord().catch(() => {});
+  if (refreshTimer !== null) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
 export interface InitBoundDbscOptions {
   statePath?: string;
   challengePath?: string;
