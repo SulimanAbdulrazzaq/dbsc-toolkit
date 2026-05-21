@@ -329,6 +329,28 @@ function requireDbscSession(req, res, next) {
   next();
 }
 
+// ─── /payment — strict + body signing (v2.3.0) ───
+// Demonstrates `signBody: true`. The proof header carries bh=sha256(body)
+// signed into the message, so an MITM cannot capture a valid signature and
+// then substitute the body (e.g. change the amount). Uses express.raw so the
+// middleware sees the exact bytes the client hashed.
+app.post(
+  "/payment",
+  requireDbscSession,
+  express.raw({ type: "*/*" }),
+  requireBoundProof({ storage: dbscStorage, signBody: true }),
+  (req, res) => {
+    let payload = {};
+    try { payload = JSON.parse(req.body.toString("utf8")); } catch { /* ignore */ }
+    res.json({
+      ok: true,
+      received: payload,
+      tier: res.locals.dbsc.tier,
+      note: "Body hash was verified against the signed bh field. Any attempted body substitution would have hit a 403 before reaching this handler.",
+    });
+  },
+);
+
 // ─── /profile-soft — any non-none tier ───
 // Demonstrates a route that accepts either DBSC native or the bound polyfill.
 // Both deliver cryptographic refresh signing — the only difference is whether
@@ -422,6 +444,11 @@ ${storageBanner}
 <p class="sub"><code>/profile-strict</code> demands <code>X-Dbsc-Bound-Proof</code> on tier=bound requests. The first button uses <code>wrapFetch</code> to sign automatically; the second deliberately omits it to demonstrate the rejection an attacker would hit with a stolen cookie.</p>
 <button id="profile-strict-btn" class="protected">Get profile-strict (with proof)</button>
 <button id="theft-btn">Simulate cookie theft (no proof)</button>
+
+<h2>5. Payment route — strict + body signing (v2.3.0)</h2>
+<p class="sub"><code>POST /payment</code> demands a proof header whose signed message includes <code>sha256(body)</code>. Even an active MITM that captures a valid signature cannot change the body (e.g. amount, recipient) — the server detects the hash mismatch. The first button sends a well-formed signed payment. The second sends the same signed proof but with a tampered body, to demonstrate the rejection.</p>
+<button id="pay-btn" class="protected">Send signed payment (amount: 1)</button>
+<button id="tamper-btn">Tamper: replay signature, change amount to 1000</button>
 
 <div id="alert" class="banner alert" style="display:none"></div>
 <pre id="out">(output will appear here)</pre>
@@ -633,6 +660,85 @@ document.getElementById('theft-btn').onclick = async () => {
   // enforcement handles the equivalent threat), so this only fails on Firefox/Safari.
   show(await rawReq('GET', '/profile-strict'));
 };
+document.getElementById('pay-btn').onclick = async () => {
+  if (typeof window.dbscSignedPostFetch !== 'function') {
+    show({ status: 0, body: { error: 'signed-post fetch wrapper not loaded yet' } });
+    return;
+  }
+  const body = JSON.stringify({ amount: 1, to: 'merchant' });
+  console.groupCollapsed('%c-> POST /payment (signed body)', 'color:#0a7');
+  console.log('signed body:', body);
+  try {
+    const r = await window.dbscSignedPostFetch('/payment', {
+      method: 'POST',
+      // application/octet-stream so the global express.json() parser skips it
+      // and express.raw({ type: "*/*" }) on the route captures the bytes the
+      // client hashed. A real app would either skip global json or use a more
+      // specific content type for these routes.
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body,
+    });
+    const text = await r.text();
+    let parsed; try { parsed = JSON.parse(text); } catch { parsed = text; }
+    console.log('status:', r.status, 'body:', parsed);
+    console.groupEnd();
+    show({ method: 'POST', path: '/payment', status: r.status, body: parsed });
+  } catch (err) {
+    console.error('fetch failed:', err);
+    console.groupEnd();
+    show({ method: 'POST', path: '/payment', status: 0, body: { error: String(err) } });
+  }
+};
+document.getElementById('tamper-btn').onclick = async () => {
+  if (typeof window.dbscSignedPostFetch !== 'function') {
+    show({ status: 0, body: { error: 'signed-post fetch wrapper not loaded yet' } });
+    return;
+  }
+  const honestBody = JSON.stringify({ amount: 1, to: 'merchant' });
+  const tamperedBody = JSON.stringify({ amount: 1000, to: 'attacker' });
+
+  // Step 1: sign the honest body, but intercept the proof header before it
+  // reaches the network. We use a custom fetch wrapper to capture headers.
+  let capturedProof = null;
+  const captureFetch = async (input, init = {}) => {
+    const headers = new Headers(init.headers || {});
+    capturedProof = headers.get('X-Dbsc-Bound-Proof');
+    // Don't actually send the honest request — just steal the header.
+    return new Response(null, { status: 200 });
+  };
+  const { wrapFetch } = await import('/dbsc-client/index.js');
+  const signer = wrapFetch({ fetch: captureFetch, signBody: true });
+  await signer('/payment', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: honestBody,
+  });
+
+  if (!capturedProof) {
+    show({ status: 0, body: { error: 'failed to capture proof header — are you logged in and bound?' } });
+    return;
+  }
+
+  // Step 2: replay the captured proof header with the TAMPERED body.
+  console.groupCollapsed('%c-> POST /payment (tampered body, original signature)', 'color:#c33');
+  console.log('captured proof:', capturedProof);
+  console.log('honest body that was signed:', honestBody);
+  console.log('tampered body actually sent:', tamperedBody);
+  const r = await fetch('/payment', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'X-Dbsc-Bound-Proof': capturedProof,
+    },
+    body: tamperedBody,
+  });
+  const text = await r.text();
+  let parsed; try { parsed = JSON.parse(text); } catch { parsed = text; }
+  console.log('status:', r.status, 'body:', parsed);
+  console.groupEnd();
+  show({ method: 'POST', path: '/payment (tampered)', status: r.status, body: parsed });
+};
 document.getElementById('clear-btn').onclick = async () => {
   show(await req('POST', '/clear-cookies'));
 };
@@ -669,6 +775,9 @@ document.getElementById('clear-btn').onclick = async () => {
 <script type="module">
   import { initBoundDbsc, wrapFetch, clearBoundKey } from '/dbsc-client/index.js';
   window.clearBoundKey = clearBoundKey;
+  // Body-signing wrapper for /payment. Sends bh=sha256(body) in the proof
+  // header so the server can detect any post-sign body substitution.
+  window.dbscSignedPostFetch = wrapFetch({ signBody: true });
   // 8s probe window — Render free tier's cold start can push native Chrome
   // DBSC registration past the library's 5s default, which would let the
   // polyfill race ahead and pin the session to tier=bound on a TPM-capable
