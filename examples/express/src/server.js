@@ -1,27 +1,22 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// dbsc-toolkit demo
+// dbsc-toolkit demo — sectioned showcase
 //
-// This file is structured in two halves so a new reader can see exactly what
-// DBSC adds on top of a normal Express auth flow.
+// This demo exercises every public surface of the library so you can verify
+// it end-to-end in a real browser:
 //
-//   PART 1 — "what most apps already have":
-//     signup, login, logout, session cookie, in-memory user store, bcrypt
-//     password hashing, express-session. Nothing DBSC-specific.
+//   Section 1 — Cookie-session login   (express-session → dbsc.bind(res, sid, …))
+//   Section 2 — JWT-mode login         (signed cookie  → dbsc.bind(res, { userId }))
+//   Section 3 — requireProof() routes  (GET + POST, plus a "stolen cookie" probe)
+//   Section 4 — createDbsc options     (storage / TTL / refreshGraceMs / rateLimiter)
 //
-//   PART 2 — "what DBSC adds on top":
-//     mount dbsc middleware, call bindSession() at the end of /login,
-//     gate /profile on tier === "dbsc". Three small additions to an
-//     otherwise-normal app.
-//
-// The diagnostic infrastructure (SSE log stream, request/response logging,
-// HTML alert banners) is here only to make the demo visible — it is not
-// something a real app needs.
+// The SSE log pane + request logging exist only to make the demo observable;
+// a real app needs none of it.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import express from "express";
 import session from "express-session";
 import bcrypt from "bcryptjs";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
 import Redis from "ioredis";
 
 import { createDbsc, requireProof } from "dbsc-toolkit/express";
@@ -31,7 +26,7 @@ import { RedisStorage } from "dbsc-toolkit/storage/redis";
 const app = express();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Diagnostic log stream (for the demo UI only, not part of the auth story)
+// Diagnostic log stream (demo UI only — not part of the auth story)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const LOG_BUFFER_MAX = 200;
@@ -42,9 +37,7 @@ function emitLog(entry) {
   const line = { ts: new Date().toISOString(), ...entry };
   logBuffer.push(line);
   if (logBuffer.length > LOG_BUFFER_MAX) logBuffer.shift();
-  const serialized = JSON.stringify(line);
-  console.log(serialized);
-  const frame = `data: ${serialized}\n\n`;
+  const frame = `data: ${JSON.stringify(line)}\n\n`;
   for (const res of sseClients) {
     try { res.write(frame); } catch { /* client gone */ }
   }
@@ -58,34 +51,23 @@ app.get("/debug-logs/stream", (req, res) => {
     "X-Accel-Buffering": "no",
   });
   res.write(`retry: 2000\n\n`);
-  for (const line of logBuffer) {
-    res.write(`data: ${JSON.stringify(line)}\n\n`);
-  }
+  for (const line of logBuffer) res.write(`data: ${JSON.stringify(line)}\n\n`);
   sseClients.add(res);
-  const ping = setInterval(() => {
-    try { res.write(`: ping\n\n`); } catch { /* */ }
-  }, 15000);
-  req.on("close", () => {
-    clearInterval(ping);
-    sseClients.delete(res);
-  });
+  const ping = setInterval(() => { try { res.write(`: ping\n\n`); } catch { /* */ } }, 15000);
+  req.on("close", () => { clearInterval(ping); sseClients.delete(res); });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// PART 1 — "what most apps already have"
-// Everything below this block is the kind of code you'd find in a normal
-// Express app with signup / login / sessions. No DBSC here yet.
+// PART 1 — a normal app: user store, bcrypt, express-session, JWT helper.
+// Nothing DBSC-specific here.
 // ═════════════════════════════════════════════════════════════════════════════
 
-// In-memory user store. In a real app this would be Postgres / Mongo / etc.
-// Shape: { username -> { id, username, passwordHash } }
-const users = new Map();
+// In-memory user store. Real apps use Postgres / Mongo / etc.
+const users = new Map();   // username -> { id, username, passwordHash }
 
-app.use(express.json());
+app.use(express.json());   // for this app's own routes' JSON bodies
 
-// Standard server-side session cookie. Cookie name: "connect.sid".
-// This is the user's identity cookie — exactly like Reddit, Discourse,
-// Express-session-based apps, NextAuth-with-database, etc.
+// (1a) Cookie-session — the classic stateful pattern (Reddit, Discourse, …).
 app.use(
   session({
     name: "demo.sid",
@@ -93,184 +75,203 @@ app.use(
     resave: false,
     saveUninitialized: false,
     rolling: true,
-    cookie: {
-      httpOnly: true,
-      secure: true,
-      sameSite: "lax",
-      maxAge: 24 * 60 * 60 * 1000,
-    },
+    cookie: { httpOnly: true, secure: true, sameSite: "lax", maxAge: 24 * 60 * 60 * 1000 },
   }),
 );
 
-// Request/response logger (diagnostic — not part of the auth story).
+// (1b) JWT-mode — a stateless signed cookie, NO server session row. This is the
+// NextAuth-JWT / iron-session / Lucia-stateless shape. Minimal HMAC token here;
+// a real app uses `jose` or `next-auth`.
+const JWT_SECRET = process.env.JWT_SECRET ?? randomBytes(32).toString("hex");
+
+function signToken(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const sig = createHmac("sha256", JWT_SECRET).update(body).digest("base64url");
+  return `${body}.${sig}`;
+}
+
+function verifyToken(token) {
+  if (!token) return null;
+  const [body, sig] = token.split(".");
+  if (!body || !sig) return null;
+  const expected = createHmac("sha256", JWT_SECRET).update(body).digest("base64url");
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  try { return JSON.parse(Buffer.from(body, "base64url").toString("utf8")); } catch { return null; }
+}
+
+// Request/response logger (diagnostic).
 app.use((req, res, next) => {
   if (req.path === "/debug-logs/stream") return next();
   const start = Date.now();
   const cookies = (req.headers.cookie ?? "")
-    .split(";")
-    .map((c) => c.split("=")[0].trim())
-    .filter(Boolean);
-  const interestingCookies = cookies.filter((n) => n.includes("dbsc") || n === "demo.sid");
-  const hdr = req.headers;
-  const interesting = {
-    "sec-secure-session-id": hdr["sec-secure-session-id"],
-    "secure-session-response": hdr["secure-session-response"] ? "<present>" : undefined,
-    "secure-session-skipped": hdr["secure-session-skipped"],
-  };
-  for (const k of Object.keys(interesting)) if (interesting[k] === undefined) delete interesting[k];
-  emitLog({
-    t: "req",
-    method: req.method,
-    path: req.path,
-    cookies: interestingCookies,
-    headers: Object.keys(interesting).length ? interesting : undefined,
-  });
+    .split(";").map((c) => c.split("=")[0].trim()).filter(Boolean);
+  const interesting = cookies.filter((n) => n.includes("dbsc") || n === "demo.sid" || n === "demo-jwt");
+  emitLog({ t: "req", method: req.method, path: req.path, cookies: interesting });
   res.on("finish", () => {
     emitLog({ t: "res", method: req.method, path: req.path, status: res.statusCode, ms: Date.now() - start });
   });
   next();
 });
 
-// ─── signup ───
+// ─── signup (shared by both login modes) ───
 app.post("/signup", async (req, res) => {
   const { username, password } = req.body ?? {};
-  if (!username || !password) {
-    return res.status(400).json({ error: "username and password required" });
-  }
-  if (users.has(username)) {
-    return res.status(409).json({ error: "username already taken" });
-  }
-  if (password.length < 6) {
-    return res.status(400).json({ error: "password too short (min 6 chars)" });
-  }
+  if (!username || !password) return res.status(400).json({ error: "username and password required" });
+  if (users.has(username)) return res.status(409).json({ error: "username already taken" });
+  if (password.length < 6) return res.status(400).json({ error: "password too short (min 6)" });
 
-  const passwordHash = await bcrypt.hash(password, 10);
   const id = randomBytes(8).toString("hex");
-  users.set(username, { id, username, passwordHash });
-
-  // Optional: auto-login on signup. Most apps do this.
-  req.session.userId = id;
-  req.session.username = username;
-
+  users.set(username, { id, username, passwordHash: await bcrypt.hash(password, 10) });
   emitLog({ t: "signup", username, userId: id });
   res.json({ ok: true, username });
 });
 
-// ─── logout (define BEFORE login so we can reuse the same handler later) ───
-async function destroyAppSession(req, res) {
-  await new Promise((resolve) => req.session.destroy(() => resolve()));
-  res.clearCookie("demo.sid");
+async function checkPassword(body) {
+  const { username, password } = body ?? {};
+  if (!username || !password) return { error: "username and password required", status: 400 };
+  const user = users.get(username);
+  if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+    return { error: "invalid credentials", status: 401 };
+  }
+  return { user };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// PART 2 — "what DBSC adds on top"
-//
-// Three additions:
-//   (1) createDbsc(config) + dbsc.install(app) — one configured object, one
-//       install call. Mounts the protocol routes, the bound-route JSON parser,
-//       and the /dbsc-client SDK. No cookie-parser, no manual static mount.
-//   (2) dbsc.bind() at the end of /login (one line)
-//   (3) requireProof() on sensitive routes (one call per route)
-//
-// Everything else stays the same. Your password check, your session cookie,
-// your user store — all unchanged.
+// PART 2 — what DBSC adds: createDbsc({ …options }) + install() + bind + guard.
 // ═════════════════════════════════════════════════════════════════════════════
+
+// SECTION 4 — a real rate limiter for the DBSC protocol routes. The limits are
+// demo-low so the "Trip the rate limiter" button can actually reach a 429;
+// production picks values for real traffic. /dbsc/registration uses
+// checkRegistration, /dbsc/refresh uses checkRefresh.
+const RL_LIMITS = { registration: 20, refresh: 10, windowMs: 60_000 };
+class DemoRateLimiter {
+  constructor() { this.hits = new Map(); }
+  _check(key, limit) {
+    const now = Date.now();
+    const arr = (this.hits.get(key) ?? []).filter((t) => now - t < RL_LIMITS.windowMs);
+    arr.push(now);
+    this.hits.set(key, arr);
+    const allowed = arr.length <= limit;
+    if (!allowed) emitLog({ t: "rate-limit", key, count: arr.length, limit });
+    return allowed;
+  }
+  async checkRegistration(ip) { return this._check(`reg:${ip}`, RL_LIMITS.registration); }
+  async checkRefresh(_ip, sid) { return this._check(`ref:${sid}`, RL_LIMITS.refresh); }
+  async recordFailure() { /* fire-and-forget */ }
+}
+const rateLimiter = new DemoRateLimiter();
 
 const dbscStorage = process.env.REDIS_URL
   ? new RedisStorage(new Redis(process.env.REDIS_URL))
   : new MemoryStorage();
 
-emitLog({ t: "boot", storage: process.env.REDIS_URL ? "redis" : "memory" });
-
-// Addition (1) — the configured kit. storage / TTL / telemetry set once here.
+// The kit — every option set ONCE here. `storage` is the only required one;
+// the rest are shown so the demo exercises them. (`autoBind` is the alternative
+// to the explicit dbsc.bind() calls below — not used here because this demo
+// shows the explicit path.)
+const KIT_OPTIONS = {
+  boundCookieTtl: 60 * 1000,   // 60s — short so demo viewers see refresh fire
+  refreshGraceMs: 30 * 1000,   // hold tier for 30s past expiry while refresh is in flight
+  secure: true,                // __Host- cookies + Secure flag
+  clientPath: "/dbsc-client",  // where install() serves the browser SDK
+};
 const dbscKit = createDbsc({
   storage: dbscStorage,
-  boundCookieTtl: 60 * 1000,  // 60s so demo viewers see refresh fire quickly
+  rateLimiter,
   onEvent: (event) => emitLog({ t: "dbsc-event", ...event }),
+  ...KIT_OPTIONS,
 });
 
-// install() mounts everything: the dbsc middleware (which makes
-// POST /dbsc/registration + /dbsc/refresh + /dbsc-bound/* exist and decorates
-// every request with res.locals.dbsc), scoped JSON parsing for the bound
-// routes, the /dbsc-client static SDK, and `trust proxy`.
+// install() — one call mounts: the protocol routes (/dbsc/*, /dbsc-bound/*),
+// scoped JSON parsing for the bound routes, the /dbsc-client SDK, and trust proxy.
 dbscKit.install(app);
 
-// ─── login ───
-// Exactly what a normal Express+bcrypt+session login looks like, PLUS the one
-// extra bindSession() line at the end.
+emitLog({ t: "boot", storage: process.env.REDIS_URL ? "redis" : "memory", options: KIT_OPTIONS });
+
+// ─── SECTION 1 — cookie-session login ───
+// express-session gives a stable req.session.id — pass it straight to bind().
 app.post("/login", async (req, res) => {
-  const { username, password } = req.body ?? {};
-  if (!username || !password) {
-    return res.status(400).json({ error: "username and password required" });
-  }
+  const r = await checkPassword(req.body);
+  if (r.error) return res.status(r.status).json({ error: r.error });
 
-  const user = users.get(username);
-  if (!user) {
-    return res.status(401).json({ error: "invalid credentials" });
-  }
+  req.session.userId = r.user.id;
+  req.session.username = r.user.username;
 
-  const ok = await bcrypt.compare(password, user.passwordHash);
-  if (!ok) {
-    return res.status(401).json({ error: "invalid credentials" });
-  }
+  // The one DBSC line. Same id as express-session — no second id-space.
+  await dbscKit.bind(res, req.session.id, { userId: r.user.id });
 
-  req.session.userId = user.id;
-  req.session.username = user.username;
-
-  // Addition (2) — one line. Tells the browser to start the DBSC binding.
-  // Uses the same session id as express-session, so DBSC and your app stay
-  // in sync without a second id-space to manage. (JWT apps with no server
-  // session id would call db.bind(res, { userId }) and let it derive one.)
-  await dbscKit.bind(res, req.session.id, { userId: user.id });
-
-  emitLog({ t: "login", username, userId: user.id, appSessionId: req.session.id });
-  res.json({ ok: true, username: user.username });
+  emitLog({ t: "login", mode: "cookie", username: r.user.username, sessionId: req.session.id });
+  res.json({ ok: true, mode: "cookie", username: r.user.username });
 });
 
-// ─── logout ───
+// ─── SECTION 2 — JWT-mode login ───
+// No server session row. dbsc.bind() is called WITHOUT a sessionId — the kit
+// derives a stable one from userId (deriveSessionId). Same userId on a later
+// login derives the same id, so the binding is found on refresh.
+app.post("/login-jwt", async (req, res) => {
+  const r = await checkPassword(req.body);
+  if (r.error) return res.status(r.status).json({ error: r.error });
+
+  // Stateless auth: a signed cookie carrying the user — no session store.
+  res.cookie("demo-jwt", signToken({ userId: r.user.id, username: r.user.username }), {
+    httpOnly: true, secure: true, sameSite: "lax", maxAge: 24 * 60 * 60 * 1000,
+  });
+
+  // No sessionId argument — the kit derives one from userId.
+  const derivedId = await dbscKit.bind(res, { userId: r.user.id });
+
+  emitLog({ t: "login", mode: "jwt", username: r.user.username, derivedSessionId: derivedId });
+  res.json({ ok: true, mode: "jwt", username: r.user.username, derivedSessionId: derivedId });
+});
+
+// ─── logout — tears down whichever mode is active ───
 app.post("/logout", async (req, res) => {
-  // Tear down the DBSC binding on the server + clear its cookie.
-  await res.locals.dbsc.revoke();
-  // Tear down your normal app session.
-  await destroyAppSession(req, res);
+  await res.locals.dbsc.revoke();                       // DBSC binding + cookie
+  if (req.session?.userId) {
+    await new Promise((resolve) => req.session.destroy(() => resolve()));
+    res.clearCookie("demo.sid");
+  }
+  res.clearCookie("demo-jwt");                          // JWT cookie
   res.json({ ok: true });
 });
 
-// ─── /clear-cookies — diagnostic helper: wipes every cookie + tears down
-// the server-side DBSC binding so it cannot respawn on next page load.
-// Real apps don't ship this.
+// ─── /clear-cookies — diagnostic: wipe everything so nothing respawns ───
 app.post("/clear-cookies", async (req, res) => {
   const names = Object.keys(req.cookies ?? {});
-
-  // Tear down server-side state first so /dbsc-bound/state cannot find a
-  // session row + issue a fresh challenge on the next GET.
-  try {
-    await res.locals.dbsc.revoke();
-  } catch { /* */ }
-  await new Promise((resolve) => req.session.destroy(() => resolve()));
-
-  // Now wipe every cookie the browser sent us. __Host- cookies need exact
-  // attributes (Path=/, Secure, no Domain) or the browser ignores the clear.
-  const HOST_ATTRS = { path: "/", secure: true, httpOnly: true, sameSite: "lax" };
-  const PLAIN_ATTRS = { path: "/" };
-  for (const name of names) {
-    const opts = name.startsWith("__Host-") ? HOST_ATTRS : PLAIN_ATTRS;
-    res.clearCookie(name, opts);
-  }
-
+  try { await res.locals.dbsc.revoke(); } catch { /* */ }
+  if (req.session) await new Promise((resolve) => req.session.destroy(() => resolve()));
+  const HOST = { path: "/", secure: true, httpOnly: true, sameSite: "lax" };
+  for (const name of names) res.clearCookie(name, name.startsWith("__Host-") ? HOST : { path: "/" });
   res.json({ ok: true, cleared: names });
 });
 
-// ─── /me — basic "am I logged in" check (does NOT require DBSC) ───
-// This works for any logged-in user, including Firefox / Safari users that
-// don't support DBSC. Tier will read "none" for them.
-app.get("/me", (req, res) => {
-  if (!req.session.userId) {
-    return res.status(401).json({ error: "not logged in", reason: "no app session" });
+// ─── dual-mode "who is this request" — reads cookie-session OR the JWT cookie ───
+function currentUser(req) {
+  if (req.session?.userId) {
+    return { id: req.session.userId, username: req.session.username, mode: "cookie" };
   }
+  const tok = verifyToken(req.cookies?.["demo-jwt"]);
+  if (tok?.userId) return { id: tok.userId, username: tok.username, mode: "jwt" };
+  return null;
+}
+
+function requireLogin(req, res, next) {
+  const u = currentUser(req);
+  if (!u) return res.status(401).json({ error: "not logged in" });
+  req.demoUser = u;
+  next();
+}
+
+// ─── /me — "am I logged in" (does NOT require DBSC) — works in both modes ───
+app.get("/me", (req, res) => {
+  const u = currentUser(req);
+  if (!u) return res.status(401).json({ error: "not logged in", reason: "no app session" });
   res.json({
-    username: req.session.username,
-    appSessionId: req.session.id,
+    username: u.username,
+    loginMode: u.mode,
     dbsc: {
       sessionId: res.locals.dbsc.sessionId,
       tier: res.locals.dbsc.tier,
@@ -279,481 +280,281 @@ app.get("/me", (req, res) => {
   });
 });
 
-// Addition (3) — gate sensitive routes with requireProof().
-//
-// requireProof() is a DBSC-only guard: it requires a bound device + a
-// per-request signed proof (body-hashed on POST). It does NOT know about your
-// app's login — that stays your job. requireLogin below is the app-session
-// check; chain it before requireProof on routes that need both.
-function requireLogin(req, res, next) {
-  if (!req.session.userId) {
-    return res.status(401).json({ error: "not logged in" });
-  }
-  next();
-}
+// ─── SECTION 3 — requireProof() routes ───
+// requireProof() requires a bound device + a per-request proof. One guard,
+// works on every browser. requireLogin (the app's own check) is chained first.
 
-// ─── /profile — the protected route (GET) ───
-// requireProof() replaces the ~13-line hand-written guard. It works on every
-// browser: Chromium's hardware-backed `dbsc` tier passes through, Firefox /
-// Safari's `bound` tier must carry a signed proof. A stolen cookie replayed
-// from another device sees tier=none (or fails the proof) and gets a 403.
+// GET — no body, no parser.
 app.get("/profile", requireLogin, requireProof(), (req, res) => {
   res.json({
-    username: req.session.username,
-    email: `${req.session.username}@example.com`,
-    plan: "demo",
+    username: req.demoUser.username,
+    loginMode: req.demoUser.mode,
     securityLevel: `device-bound (tier: ${res.locals.dbsc.tier})`,
-    note: "Reached only from the bound device. A stolen cookie replayed elsewhere is rejected here.",
+    note: "Reached only from the bound device. A stolen cookie replayed elsewhere is rejected.",
   });
 });
 
-// ─── /profile-strict — same guard, demonstrates the proof on a GET ───
-// requireProof() on a GET: the bound tier still presents a signed proof (with
-// an empty body hash). A stolen cookie pasted into a second Firefox profile
-// cannot produce that proof, so it is rejected even within the freshness
-// window. Storage comes from the kit; nothing is re-passed.
-app.get("/profile-strict", requireLogin, requireProof(), (req, res) => {
+// POST — requireProof() signs the body, so the route delivers raw bytes.
+app.post("/payment", requireLogin, express.raw({ type: "*/*" }), requireProof(), (req, res) => {
+  let payload = {};
+  try { payload = JSON.parse(req.body.toString("utf8")); } catch { /* */ }
   res.json({
-    username: req.session.username,
-    plan: "demo",
-    securityLevel: res.locals.dbsc.tier,
-    note: "Reached via a verified per-request proof. A stolen cookie alone cannot reach this route on Firefox/Safari.",
+    ok: true,
+    received: payload,
+    tier: res.locals.dbsc.tier,
+    note: "Body hash verified — an MITM cannot change the amount after signing.",
   });
 });
 
-// ─── /payment — requireProof() on a POST route ───
-// On a POST, requireProof() signs the request body: the proof header carries
-// bh=sha256(body) signed into the message, so an MITM cannot capture a valid
-// signature and then substitute the body (e.g. change the amount). A POST
-// guarded route mounts express.raw so the guard sees the exact bytes the
-// client hashed — requireProof stays a pure guard, it does not inject parsers.
-app.post(
-  "/payment",
-  requireLogin,
-  express.raw({ type: "*/*" }),
-  requireProof(),
-  (req, res) => {
-    let payload = {};
-    try { payload = JSON.parse(req.body.toString("utf8")); } catch { /* ignore */ }
-    res.json({
-      ok: true,
-      received: payload,
-      tier: res.locals.dbsc.tier,
-      note: "Body hash was verified against the signed bh field. Any attempted body substitution would have hit a 403 before reaching this handler.",
-    });
-  },
-);
-
-// ─── /profile-soft — same guard again ───
-// There is only one guard: requireProof(). It works on every browser, so a
-// route is never accidentally locked to Chromium-only.
-app.get("/profile-soft", requireLogin, requireProof(), (req, res) => {
+// ─── SECTION 4 — /config: echoes the live createDbsc options for the UI ───
+app.get("/config", (_req, res) => {
   res.json({
-    username: req.session.username,
-    plan: "demo",
-    securityLevel: res.locals.dbsc.tier,
-    note: `Reached via tier=${res.locals.dbsc.tier}. /profile (stricter) requires tier=dbsc.`,
+    storage: process.env.REDIS_URL ? "redis" : "memory",
+    ...KIT_OPTIONS,
+    rateLimiter: { registrationPerMin: RL_LIMITS.registration, refreshPerMin: RL_LIMITS.refresh },
   });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// HTML UI — signup/login forms + dashboard
+// HTML UI — four sections
 // ═════════════════════════════════════════════════════════════════════════════
 
 app.get("/", (_req, res) => {
   const usingRedis = !!process.env.REDIS_URL;
   const storageBanner = usingRedis
-    ? `<div class="banner ok"><strong>Storage:</strong> Redis (Upstash). Sessions survive restarts. Bound-cookie TTL is 60s so refresh kicks in fast.</div>`
-    : `<div class="banner"><strong>Heads up:</strong> running on in-memory storage. Set <code>REDIS_URL</code> for persistence.</div>`;
+    ? `<div class="banner ok"><strong>Storage:</strong> Redis — sessions survive restarts.</div>`
+    : `<div class="banner"><strong>Heads up:</strong> in-memory storage. Set <code>REDIS_URL</code> for persistence.</div>`;
 
   res.send(`<!doctype html>
 <html>
 <head>
-<title>DBSC Demo — realistic app</title>
+<title>DBSC Toolkit — demo</title>
 <style>
-  body { font-family: -apple-system, system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #222; }
-  h1 { margin-bottom: 0.25rem; }
-  h2 { margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.25rem; }
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 820px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { margin-bottom: 0.2rem; }
+  h2 { margin-top: 2rem; border-bottom: 2px solid #2b3a55; padding-bottom: 0.3rem; }
   .sub { color: #666; font-size: 0.9rem; }
-  .banner { padding: 0.75rem 1rem; border-radius: 6px; margin: 0.75rem 0; font-size: 0.9rem; }
-  .banner { background: #fff3cd; border: 1px solid #ffe28a; color: #5b4400; }
-  .banner.ok { background: #e6f4ea; border: 1px solid #b6e0c2; color: #1e4023; }
-  .banner.alert { background: #fde2e1; border: 1px solid #f5b1ae; color: #7a1b16; }
-  #dbsc-status { display: none; padding: 0.5rem 0.75rem; border-radius: 6px; margin: 0.5rem 0; font-size: 0.85rem; }
-  #dbsc-status.pending { display: block; background: #fff3cd; border: 1px solid #ffe28a; color: #5b4400; }
-  #dbsc-status.ready { display: block; background: #e6f4ea; border: 1px solid #b6e0c2; color: #1e4023; }
-  #dbsc-status.unsupported { display: block; background: #eef0f3; border: 1px solid #d3d7de; color: #444; }
-  form { margin: 0.5rem 0 1rem; }
-  input[type=text], input[type=password] { padding: 0.4rem; margin-right: 0.5rem; font-size: 1rem; }
-  button { margin-right: 0.5rem; margin-bottom: 0.5rem; padding: 0.5rem 1rem; font-size: 0.95rem; cursor: pointer; }
-  button.protected { background: #2b3a55; color: white; border: none; border-radius: 4px; }
-  pre { background: #f4f4f4; padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; }
-  .label { font-weight: 600; color: #444; }
+  .banner { padding: 0.7rem 1rem; border-radius: 6px; margin: 0.7rem 0; font-size: 0.9rem; background: #fff3cd; border: 1px solid #ffe28a; color: #5b4400; }
+  .banner.ok { background: #e6f4ea; border-color: #b6e0c2; color: #1e4023; }
+  .banner.alert { background: #fde2e1; border-color: #f5b1ae; color: #7a1b16; }
+  #dbsc-status { display:none; padding:0.5rem 0.75rem; border-radius:6px; margin:0.5rem 0; font-size:0.85rem; }
+  #dbsc-status.pending { display:block; background:#fff3cd; border:1px solid #ffe28a; color:#5b4400; }
+  #dbsc-status.ready { display:block; background:#e6f4ea; border:1px solid #b6e0c2; color:#1e4023; }
+  #dbsc-status.unsupported { display:block; background:#eef0f3; border:1px solid #d3d7de; color:#444; }
+  input { padding: 0.4rem; margin-right: 0.4rem; font-size: 0.95rem; }
+  button { margin: 0 0.4rem 0.5rem 0; padding: 0.45rem 0.9rem; font-size: 0.9rem; cursor: pointer; }
+  button.primary { background: #2b3a55; color: #fff; border: none; border-radius: 4px; }
+  pre { background: #f4f4f4; padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-size: 0.82rem; }
+  .card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 0.75rem 1rem; margin: 0.6rem 0; }
 </style>
 </head>
 <body>
-<h1>DBSC Demo</h1>
-<p class="sub">Realistic Express app — signup, login, sessions, and one route gated on hardware-bound DBSC.</p>
-
+<h1>DBSC Toolkit — demo</h1>
+<p class="sub">Four sections, exercising every public surface: two login modes, the route guard, and the kit options.</p>
 ${storageBanner}
-
-<h2>1. Sign up or log in</h2>
-<p class="sub">Standard username + password. Hashed with bcrypt. Sets a normal <code>demo.sid</code> session cookie.</p>
-<p class="sub">After signing up, click <strong>Log in</strong> to activate the hardware-bound DBSC binding. Signup alone does not trigger DBSC — <code>bindSession()</code> runs in the login route after password verification, which mirrors how a real app behaves when it requires explicit credential proof before binding to the device.</p>
-<form id="auth-form" onsubmit="return false">
-  <input type="text" id="username" placeholder="username" autocomplete="username" required>
-  <input type="password" id="password" placeholder="password (min 6)" autocomplete="current-password" required>
-  <button id="signup-btn">Sign up</button>
-  <button id="login-btn">Log in</button>
-  <button id="logout-btn">Log out</button>
-  <button id="clear-btn">Clear cookies</button>
-</form>
 <div id="dbsc-status"></div>
 
-<h2>2. Check session</h2>
-<p class="sub"><code>/me</code> works for any logged-in user (does NOT require DBSC). Shows your app session id + the DBSC tier the browser reached.</p>
-<button id="me-btn">Check session (no DBSC required)</button>
+<h2>0. Sign up</h2>
+<p class="sub">One account, usable by either login mode below. bcrypt-hashed.</p>
+<input type="text" id="su-user" placeholder="username" autocomplete="username">
+<input type="password" id="su-pass" placeholder="password (min 6)" autocomplete="new-password">
+<button id="signup-btn">Sign up</button>
 
-<h2>3. Protected routes — gated by tier</h2>
-<p class="sub">On Chromium 145+ this session is hardware-bound via native DBSC. On other browsers a silent Web Crypto polyfill kicks in within ~3 seconds of login. Either way, <code>tier !== "none"</code> is the gate to use for routes that need binding.</p>
-<p class="sub"><code>/profile</code> is gated strictly on <code>tier === "dbsc"</code> — use this for actions where you want the TPM-backed guarantee specifically.</p>
-<button id="profile-btn" class="protected">Get profile (requires tier=dbsc)</button>
-<p class="sub"><code>/profile-soft</code> accepts <code>"dbsc"</code> or <code>"bound"</code> — both deliver cryptographic refresh signing.</p>
-<button id="profile-soft-btn">Get profile-soft (any tier except none)</button>
+<h2>1. Cookie-session login</h2>
+<p class="sub">The classic stateful pattern — <code>express-session</code> issues a server-side id, passed straight to <code>dbsc.bind(res, req.session.id, { userId })</code>.</p>
+<div class="card">
+  <input type="text" id="c-user" placeholder="username" autocomplete="username">
+  <input type="password" id="c-pass" placeholder="password" autocomplete="current-password">
+  <button id="login-cookie-btn" class="primary">Log in (cookie-session)</button>
+</div>
 
-<h2>4. Strict route — requires per-request signed proof</h2>
-<p class="sub"><code>/profile-strict</code> demands <code>X-Dbsc-Bound-Proof</code> on tier=bound requests. The first button uses <code>wrapFetch</code> to sign automatically; the second deliberately omits it to demonstrate the rejection an attacker would hit with a stolen cookie.</p>
-<button id="profile-strict-btn" class="protected">Get profile-strict (with proof)</button>
-<button id="theft-btn">Simulate cookie theft (no proof)</button>
+<h2>2. JWT-mode login</h2>
+<p class="sub">Stateless — a signed cookie, no server session row (NextAuth-JWT / iron-session / Lucia shape). <code>dbsc.bind(res, { userId })</code> is called with <strong>no id</strong>; the kit derives a stable one with <code>deriveSessionId</code>.</p>
+<div class="card">
+  <input type="text" id="j-user" placeholder="username" autocomplete="username">
+  <input type="password" id="j-pass" placeholder="password" autocomplete="current-password">
+  <button id="login-jwt-btn" class="primary">Log in (JWT mode)</button>
+</div>
 
-<h2>5. Payment route — strict + body signing (v2.3.0)</h2>
-<p class="sub"><code>POST /payment</code> demands a proof header whose signed message includes <code>sha256(body)</code>. Even an active MITM that captures a valid signature cannot change the body (e.g. amount, recipient) — the server detects the hash mismatch. The first button sends a well-formed signed payment. The second sends the same signed proof but with a tampered body, to demonstrate the rejection.</p>
-<button id="pay-btn" class="protected">Send signed payment (amount: 1)</button>
-<button id="tamper-btn">Tamper: replay signature, change amount to 1000</button>
+<h2>3. Session + protected routes</h2>
+<p class="sub"><code>/me</code> works in either mode and needs no DBSC. <code>/profile</code> (GET) and <code>/payment</code> (POST) are gated by <code>requireProof()</code> — one guard, every browser. The theft button sends no proof, to show the rejection.</p>
+<button id="me-btn">Check session (/me)</button>
+<button id="profile-btn" class="primary">GET /profile (requireProof)</button>
+<button id="pay-btn" class="primary">POST /payment (requireProof + signed body)</button>
+<button id="theft-btn">Simulate stolen cookie (no proof)</button>
+<button id="tamper-btn">Tamper: replay proof, change amount</button>
+
+<h2>4. createDbsc options</h2>
+<p class="sub">The live kit config. The rate limiter guards <code>/dbsc/*</code>; the button fires 15 rapid <code>POST /dbsc/refresh</code> to trip the per-session limit (${RL_LIMITS.refresh}/min) — watch for 429s.</p>
+<button id="config-btn">Show active options (/config)</button>
+<button id="rl-btn">Trip the rate limiter</button>
+
+<button id="logout-btn">Log out</button>
+<button id="clear-btn">Clear cookies</button>
 
 <div id="alert" class="banner alert" style="display:none"></div>
-<pre id="out">(output will appear here)</pre>
+<pre id="out">(output appears here)</pre>
 
-<h2>What the server is doing</h2>
-<p class="sub">Open DevTools console for full request/response logs. Live server log stream below mirrors every request.</p>
+<h2>Server log</h2>
+<p class="sub">Open DevTools console for the full stream; this pane mirrors it.</p>
+<pre id="log" style="max-height:220px;overflow:auto">(connecting…)</pre>
 
 <script>
-const SKIP_REASON_MESSAGES = {
-  quota_exceeded: '<strong>Chrome quota exhausted for this origin.</strong> Too many DBSC attempts in a short time (login/logout loops). Recover: <code>chrome://settings/clearBrowserData</code> &rarr; Last hour &rarr; Cookies and site data, or Incognito window.',
-  unreachable: '<strong>Chrome could not reach the refresh endpoint.</strong> Network drop. Will retry.',
-  server_error: '<strong>Refresh endpoint returned 5xx.</strong> Check server logs.',
+const SKIP_MSG = {
+  quota_exceeded: "Chrome's DBSC quota for this origin is exhausted (dev login/logout loops). Recover: clear this origin's site data in chrome://settings, or use Incognito.",
+  unreachable: "Chrome could not reach the refresh endpoint — network drop.",
+  server_error: "Refresh endpoint returned 5xx — check server logs.",
 };
-
 function show(result) {
   document.getElementById('out').textContent = JSON.stringify(result, null, 2);
-  const alertEl = document.getElementById('alert');
-  alertEl.style.display = 'none';
-  alertEl.innerHTML = '';
-
+  const a = document.getElementById('alert');
+  a.style.display = 'none'; a.innerHTML = '';
   const body = result && result.body;
   const skipped = body && (body.skipped || (body.dbsc && body.dbsc.skipped));
   if (Array.isArray(skipped) && skipped.length) {
-    alertEl.innerHTML = skipped
-      .map((s) => SKIP_REASON_MESSAGES[s.reason] || ('Unknown skip reason: ' + s.reason))
-      .join('<br><br>');
-    alertEl.style.display = 'block';
+    a.innerHTML = skipped.map((s) => SKIP_MSG[s.reason] || ('skip: ' + s.reason)).join('<br><br>');
+    a.style.display = 'block';
   }
 }
-
-async function rawReq(method, path, body) {
-  const t0 = performance.now();
-  console.groupCollapsed('%c-> ' + method + ' ' + path, 'color:#0a7');
-  if (body) console.log('body:', body);
+async function rawReq(method, path, body, headers) {
   try {
     const r = await fetch(path, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : {},
-      body: body ? JSON.stringify(body) : undefined,
+      headers: headers || (body ? { 'Content-Type': 'application/json' } : {}),
+      body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
       credentials: 'include',
     });
-    const dt = (performance.now() - t0).toFixed(0);
-    console.log('status:', r.status, '(' + dt + 'ms)');
     const text = await r.text();
-    let parsed;
-    try { parsed = JSON.parse(text); } catch { parsed = text; }
-    console.log('body:', parsed);
-    console.groupEnd();
+    let parsed; try { parsed = JSON.parse(text); } catch { parsed = text; }
     return { method, path, status: r.status, body: parsed };
   } catch (err) {
-    console.error('fetch failed:', err);
-    console.groupEnd();
     return { method, path, status: 0, body: { error: String(err) } };
   }
 }
 
-// Tracks whether a login just happened. Used by the auto-retry wrapper to
-// give Chrome a moment to finish DBSC registration in the background before
-// reporting tier=none to the user.
-let lastLoginAt = 0;
-const RETRY_PATHS = new Set(['/me', '/profile', '/profile-soft']);
-const RETRY_WINDOW_MS = 8000;
-const RETRY_DELAY_MS = 1500;
-
-function looksLikeNoneTier(result) {
-  if (!result || result.status !== 200) {
-    if (result && result.status === 403 && result.body && result.body.currentTier === 'none') return true;
-    return false;
-  }
-  const b = result.body;
-  if (!b || typeof b !== 'object') return false;
-  if (b.dbsc && b.dbsc.tier === 'none') return true;
-  if (b.tier === 'none') return true;
-  return false;
-}
-
-async function req(method, path, body) {
-  const first = await rawReq(method, path, body);
-  if (RETRY_PATHS.has(path)
-      && method === 'GET'
-      && Date.now() - lastLoginAt < RETRY_WINDOW_MS
-      && looksLikeNoneTier(first)) {
-    console.log('%c[auto-retry] tier=none right after login — retrying in ' + RETRY_DELAY_MS + 'ms', 'color:#a60');
-    await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-    return rawReq(method, path, body);
-  }
-  return first;
-}
-
-// ─── DBSC status indicator — driven by the SDK's outcome promise ───
-const statusEl = () => document.getElementById('dbsc-status');
-
+// ─── DBSC binding status banner ───
 function setStatus(state, text) {
-  const el = statusEl();
-  el.className = state;
-  el.textContent = text;
+  const el = document.getElementById('dbsc-status');
+  el.className = state; el.textContent = text;
 }
-
-// Banner copy is a pure function of the outcome shape — no race, no polling,
-// no "we don't know yet" intermediate state once the promise resolves.
-function bannerForOutcome(outcome) {
-  if (!outcome) return ['unsupported', 'Binding SDK did not return an outcome. Check the console.'];
-  switch (outcome.phase) {
-    case 'native-dbsc':
-      return ['ready', 'Session bound (tier: dbsc) — TPM-backed, native DBSC.'];
-    case 'polyfill-bound':
-      if (outcome.skipReason === 'quota_exceeded') {
-        return ['unsupported', "Chrome's DBSC quota for this origin is exhausted. Polyfill took over (tier: bound). Open an Incognito window to test native DBSC."];
-      }
-      if (outcome.skipReason === 'unreachable') {
-        return ['unsupported', 'Chrome could not reach the DBSC registration endpoint. Polyfill took over (tier: bound).'];
-      }
-      if (outcome.skipReason) {
-        return ['unsupported', 'Chrome skipped native DBSC (' + outcome.skipReason + '). Polyfill took over (tier: bound).'];
-      }
-      return ['ready', 'Session bound (tier: bound) — Web Crypto polyfill. Cookies replayed elsewhere will fail refresh.'];
-    case 'unbound':
-      return ['unsupported', 'No active binding — log in to start one.'];
-    case 'error':
-      return ['unsupported', 'Binding SDK error: ' + outcome.error];
-    default:
-      return ['unsupported', 'Unknown outcome: ' + JSON.stringify(outcome)];
+function bannerForOutcome(o) {
+  if (!o) return ['unsupported', 'SDK returned no outcome — check the console.'];
+  if (o.phase === 'native-dbsc') return ['ready', 'Bound (tier: dbsc) — TPM-backed native DBSC.'];
+  if (o.phase === 'polyfill-bound') {
+    if (o.skipReason === 'quota_exceeded') return ['unsupported', "Chrome's DBSC quota exhausted. Polyfill took over (tier: bound). Clear site data or use Incognito for native DBSC."];
+    if (o.skipReason) return ['unsupported', 'Chrome skipped native DBSC (' + o.skipReason + '). Polyfill took over (tier: bound).'];
+    return ['ready', 'Bound (tier: bound) — Web Crypto polyfill.'];
   }
+  if (o.phase === 'unbound') return ['unsupported', 'No active binding — log in to start one.'];
+  if (o.phase === 'error') return ['unsupported', 'SDK error: ' + o.error];
+  return ['unsupported', 'Unknown outcome.'];
 }
-
-async function awaitBindingOutcome(promise) {
+async function awaitOutcome(promise) {
   setStatus('pending', 'Binding session…');
   try {
-    const outcome = await promise;
-    console.log('%c[bound-sdk outcome]', 'color:#0a7;font-weight:bold', outcome);
-    const [state, text] = bannerForOutcome(outcome);
-    setStatus(state, text);
+    const o = await promise;
+    console.log('[bound-sdk outcome]', o);
+    const [s, t] = bannerForOutcome(o);
+    setStatus(s, t);
   } catch (err) {
-    console.error('[bound-sdk] outcome rejected', err);
-    setStatus('unsupported', 'Binding SDK threw: ' + (err && err.message ? err.message : String(err)));
+    setStatus('unsupported', 'SDK threw: ' + (err && err.message ? err.message : String(err)));
   }
 }
 
-function creds() {
-  return {
-    username: document.getElementById('username').value.trim(),
-    password: document.getElementById('password').value,
-  };
-}
+const val = (id) => document.getElementById(id).value.trim();
 
 document.getElementById('signup-btn').onclick = async () => {
-  show(await req('POST', '/signup', creds()));
+  show(await rawReq('POST', '/signup', { username: val('su-user'), password: document.getElementById('su-pass').value }));
 };
-document.getElementById('login-btn').onclick = async () => {
-  const r = await rawReq('POST', '/login', creds());
+
+async function doLogin(path, userId, passId) {
+  const r = await rawReq('POST', path, { username: val(userId), password: document.getElementById(passId).value });
   show(r);
-  if (r.status === 200) {
-    lastLoginAt = Date.now();
-    // Re-kick the bound polyfill and await its outcome directly. No /me
-    // polling. The outcome promise resolves with exactly what happened.
-    if (typeof window.initBoundDbsc === 'function') {
-      awaitBindingOutcome(window.initBoundDbsc());
-    }
+  if (r.status === 200 && typeof window.initBoundDbsc === 'function') {
+    awaitOutcome(window.initBoundDbsc());   // re-kick the SDK, await the real outcome
   }
-};
-document.getElementById('logout-btn').onclick = async () => {
-  setStatus('', '');
-  statusEl().style.display = 'none';
-  show(await rawReq('POST', '/logout'));
-  // Clear the IndexedDB key record too. Server-side revoke() already cleared
-  // the cookie + storage row; this is the matching client-side cleanup.
-  if (typeof window.clearBoundKey === 'function') {
-    await window.clearBoundKey().catch((err) => console.error('[bound-sdk] clear', err));
-  }
-};
-document.getElementById('me-btn').onclick = async () => {
-  show(await req('GET', '/me'));
-};
+}
+document.getElementById('login-cookie-btn').onclick = () => doLogin('/login', 'c-user', 'c-pass');
+document.getElementById('login-jwt-btn').onclick = () => doLogin('/login-jwt', 'j-user', 'j-pass');
+
+document.getElementById('me-btn').onclick = async () => show(await rawReq('GET', '/me'));
+
 document.getElementById('profile-btn').onclick = async () => {
-  show(await req('GET', '/profile'));
-};
-document.getElementById('profile-soft-btn').onclick = async () => {
-  show(await req('GET', '/profile-soft'));
-};
-document.getElementById('profile-strict-btn').onclick = async () => {
-  // Uses the wrapFetch-signed version. On native DBSC the proof header is
-  // unnecessary (requireBoundProof passes tier=dbsc through), but it doesn't
-  // hurt to send it.
-  if (typeof window.dbscBoundFetch !== 'function') {
-    show({ status: 0, body: { error: 'wrapFetch SDK not loaded yet — wait a second after login' } });
-    return;
-  }
-  const t0 = performance.now();
-  console.groupCollapsed('%c-> GET /profile-strict (signed)', 'color:#0a7');
-  try {
-    const r = await window.dbscBoundFetch('/profile-strict', { method: 'GET', credentials: 'include' });
-    const dt = (performance.now() - t0).toFixed(0);
-    console.log('status:', r.status, '(' + dt + 'ms)');
-    const text = await r.text();
-    let parsed;
-    try { parsed = JSON.parse(text); } catch { parsed = text; }
-    console.log('body:', parsed);
-    console.groupEnd();
-    show({ method: 'GET', path: '/profile-strict', status: r.status, body: parsed });
-  } catch (err) {
-    console.error('fetch failed:', err);
-    console.groupEnd();
-    show({ method: 'GET', path: '/profile-strict', status: 0, body: { error: String(err) } });
-  }
-};
-document.getElementById('theft-btn').onclick = async () => {
-  // Plain fetch — no proof header. On tier=bound the server returns 403 with
-  // code:"MISSING_PROOF". On tier=dbsc the server still passes through (Chromium
-  // enforcement handles the equivalent threat), so this only fails on Firefox/Safari.
-  show(await rawReq('GET', '/profile-strict'));
+  // boundFetch signs the request (signBody:true). On Chromium the header is
+  // ignored (native DBSC passes through); on Firefox/Safari it is required.
+  if (typeof window.boundFetch !== 'function') return show({ status: 0, body: { error: 'SDK not loaded yet' } });
+  const r = await window.boundFetch('/profile', { method: 'GET', credentials: 'include' });
+  const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
+  show({ method: 'GET', path: '/profile', status: r.status, body: b });
 };
 document.getElementById('pay-btn').onclick = async () => {
-  if (typeof window.dbscSignedPostFetch !== 'function') {
-    show({ status: 0, body: { error: 'signed-post fetch wrapper not loaded yet' } });
-    return;
-  }
-  const body = JSON.stringify({ amount: 1, to: 'merchant' });
-  console.groupCollapsed('%c-> POST /payment (signed body)', 'color:#0a7');
-  console.log('signed body:', body);
-  try {
-    const r = await window.dbscSignedPostFetch('/payment', {
-      method: 'POST',
-      // application/octet-stream so the global express.json() parser skips it
-      // and express.raw({ type: "*/*" }) on the route captures the bytes the
-      // client hashed. A real app would either skip global json or use a more
-      // specific content type for these routes.
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body,
-    });
-    const text = await r.text();
-    let parsed; try { parsed = JSON.parse(text); } catch { parsed = text; }
-    console.log('status:', r.status, 'body:', parsed);
-    console.groupEnd();
-    show({ method: 'POST', path: '/payment', status: r.status, body: parsed });
-  } catch (err) {
-    console.error('fetch failed:', err);
-    console.groupEnd();
-    show({ method: 'POST', path: '/payment', status: 0, body: { error: String(err) } });
-  }
-};
-document.getElementById('tamper-btn').onclick = async () => {
-  if (typeof window.dbscSignedPostFetch !== 'function') {
-    show({ status: 0, body: { error: 'signed-post fetch wrapper not loaded yet' } });
-    return;
-  }
-  const honestBody = JSON.stringify({ amount: 1, to: 'merchant' });
-  const tamperedBody = JSON.stringify({ amount: 1000, to: 'attacker' });
-
-  // Step 1: sign the honest body, but intercept the proof header before it
-  // reaches the network. We use a custom fetch wrapper to capture headers.
-  let capturedProof = null;
-  const captureFetch = async (input, init = {}) => {
-    const headers = new Headers(init.headers || {});
-    capturedProof = headers.get('X-Dbsc-Bound-Proof');
-    // Don't actually send the honest request — just steal the header.
-    return new Response(null, { status: 200 });
-  };
-  const { wrapFetch } = await import('/dbsc-client/index.js');
-  const signer = wrapFetch({ fetch: captureFetch, signBody: true });
-  await signer('/payment', {
+  if (typeof window.boundFetch !== 'function') return show({ status: 0, body: { error: 'SDK not loaded yet' } });
+  const r = await window.boundFetch('/payment', {
     method: 'POST',
     headers: { 'Content-Type': 'application/octet-stream' },
-    body: honestBody,
-  });
-
-  if (!capturedProof) {
-    show({ status: 0, body: { error: 'failed to capture proof header — are you logged in and bound?' } });
-    return;
-  }
-
-  // Step 2: replay the captured proof header with the TAMPERED body.
-  console.groupCollapsed('%c-> POST /payment (tampered body, original signature)', 'color:#c33');
-  console.log('captured proof:', capturedProof);
-  console.log('honest body that was signed:', honestBody);
-  console.log('tampered body actually sent:', tamperedBody);
-  const r = await fetch('/payment', {
-    method: 'POST',
+    body: JSON.stringify({ amount: 1, to: 'merchant' }),
     credentials: 'include',
-    headers: {
-      'Content-Type': 'application/octet-stream',
-      'X-Dbsc-Bound-Proof': capturedProof,
-    },
-    body: tamperedBody,
   });
-  const text = await r.text();
-  let parsed; try { parsed = JSON.parse(text); } catch { parsed = text; }
-  console.log('status:', r.status, 'body:', parsed);
-  console.groupEnd();
-  show({ method: 'POST', path: '/payment (tampered)', status: r.status, body: parsed });
+  const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
+  show({ method: 'POST', path: '/payment', status: r.status, body: b });
+};
+document.getElementById('theft-btn').onclick = async () => {
+  // Plain fetch, no proof header — what a stolen cookie pasted elsewhere sends.
+  show(await rawReq('GET', '/profile'));
+};
+document.getElementById('tamper-btn').onclick = async () => {
+  // Sign the honest body, capture the proof header, replay it with a tampered body.
+  const { wrapFetch } = await import('/dbsc-client/index.js');
+  let proof = null;
+  const capture = async (_i, init = {}) => {
+    proof = new Headers(init.headers || {}).get('X-Dbsc-Bound-Proof');
+    return new Response(null, { status: 200 });
+  };
+  await wrapFetch({ fetch: capture, signBody: true })('/payment', {
+    method: 'POST', headers: { 'Content-Type': 'application/octet-stream' },
+    body: JSON.stringify({ amount: 1, to: 'merchant' }),
+  });
+  if (!proof) return show({ status: 0, body: { error: 'no proof captured — log in and bind first' } });
+  const r = await rawReq('POST', '/payment', JSON.stringify({ amount: 1000, to: 'attacker' }), {
+    'Content-Type': 'application/octet-stream', 'X-Dbsc-Bound-Proof': proof,
+  });
+  show({ ...r, path: '/payment (tampered)' });
+};
+
+document.getElementById('config-btn').onclick = async () => show(await rawReq('GET', '/config'));
+document.getElementById('rl-btn').onclick = async () => {
+  const results = await Promise.all(
+    Array.from({ length: 15 }, () => fetch('/dbsc/refresh', { method: 'POST', credentials: 'include' }).then((r) => r.status)),
+  );
+  const counts = results.reduce((m, s) => (m[s] = (m[s] || 0) + 1, m), {});
+  show({ path: '15x POST /dbsc/refresh', statusCounts: counts, note: '429 = rate limiter tripped (limit ${RL_LIMITS.refresh}/min/session)' });
+};
+
+document.getElementById('logout-btn').onclick = async () => {
+  show(await rawReq('POST', '/logout'));
+  if (typeof window.clearBoundKey === 'function') await window.clearBoundKey().catch(() => {});
+  setStatus('', ''); document.getElementById('dbsc-status').style.display = 'none';
 };
 document.getElementById('clear-btn').onclick = async () => {
-  const r = await rawReq('POST', '/clear-cookies');
-  show(r);
-  // Tear down client-side state too: IndexedDB key + UI status.
-  if (typeof window.clearBoundKey === 'function') {
-    await window.clearBoundKey().catch((err) => console.error('[bound-sdk] clear', err));
-  }
-  setStatus('', '');
-  statusEl().style.display = 'none';
+  show(await rawReq('POST', '/clear-cookies'));
+  if (typeof window.clearBoundKey === 'function') await window.clearBoundKey().catch(() => {});
+  setStatus('', ''); document.getElementById('dbsc-status').style.display = 'none';
 };
 
-// Live server log stream
-(function streamServerLogs() {
+// Server log stream
+(function stream() {
+  const pane = document.getElementById('log');
   let es;
   function connect() {
     es = new EventSource('/debug-logs/stream');
-    es.onopen = () => console.log('%c[server-stream] connected', 'color:#0a7');
-    es.onerror = () => {
-      console.warn('[server-stream] disconnected — retrying...');
-      try { es.close(); } catch (_) {}
-      setTimeout(connect, 2000);
-    };
+    es.onopen = () => { pane.textContent = '(connected)\\n'; };
+    es.onerror = () => { try { es.close(); } catch (_) {} setTimeout(connect, 2000); };
     es.onmessage = (e) => {
-      let line;
-      try { line = JSON.parse(e.data); } catch { console.log('[server]', e.data); return; }
-      const tag = line.t || 'log';
-      let color = '#06c';
-      if (tag === 'dbsc-event') color = '#a06';
-      else if (tag === 'res' && line.status >= 400) color = '#c33';
-      else if (tag === 'res') color = '#393';
-      else if (tag === 'boot' || tag === 'signup' || tag === 'login') color = '#666';
-      const rest = Object.assign({}, line);
-      delete rest.t; delete rest.ts;
-      console.log('%c[server ' + line.ts.slice(11, 23) + '] ' + tag, 'color:' + color + ';font-weight:bold', rest);
+      let line; try { line = JSON.parse(e.data); } catch { return; }
+      const rest = Object.assign({}, line); delete rest.ts;
+      pane.textContent += line.ts.slice(11, 19) + '  ' + JSON.stringify(rest) + '\\n';
+      pane.scrollTop = pane.scrollHeight;
+      console.log('[server]', line);
     };
   }
   connect();
@@ -763,33 +564,19 @@ document.getElementById('clear-btn').onclick = async () => {
 <script type="module">
   import { initBoundDbsc, wrapFetch, clearBoundKey } from '/dbsc-client/index.js';
   window.clearBoundKey = clearBoundKey;
-  // Body-signing wrapper for /payment. Sends bh=sha256(body) in the proof
-  // header so the server can detect any post-sign body substitution.
-  window.dbscSignedPostFetch = wrapFetch({ signBody: true });
-  // 8s probe window — Render free tier's cold start can push native Chrome
-  // DBSC registration past the library's 5s default, which would let the
-  // polyfill race ahead and pin the session to tier=bound on a TPM-capable
-  // browser. 8s is the conservative number that always lets Chrome win here.
-  const boundInit = (opts = {}) => initBoundDbsc({ nativeProbeWindowMs: 8000, ...opts });
-  window.initBoundDbsc = boundInit;
-  // Per-call wrapper for requireProof() routes. signBody:true because
-  // requireProof signs the request body — on a GET that is just sha256("").
-  // NOT assigned to globalThis.fetch — third-party SDKs keep native fetch.
-  window.dbscBoundFetch = wrapFetch({ signBody: true });
-  // On page load, feed the outcome into the same status banner the login
-  // handler uses. Covers the case where the user reloads on an active session.
-  const initialPromise = boundInit();
-  if (typeof window.awaitBindingOutcome === 'function') {
-    window.awaitBindingOutcome(initialPromise);
-  } else {
-    initialPromise.then((o) => console.log('[bound-sdk outcome]', o)).catch((e) => console.error('[bound-sdk]', e));
-  }
+  // boundFetch signs every request (signBody:true) so requireProof() routes
+  // pass on Firefox/Safari. Per-call — never assigned to globalThis.fetch.
+  window.boundFetch = wrapFetch({ signBody: true });
+  // 8s probe window — Render cold starts can push native registration past
+  // the 5s default, which would let the polyfill win on a TPM-capable browser.
+  window.initBoundDbsc = (opts = {}) => initBoundDbsc({ nativeProbeWindowMs: 8000, ...opts });
+  const initial = window.initBoundDbsc();
+  if (typeof window.awaitOutcome === 'function') window.awaitOutcome(initial);
+  else initial.then((o) => console.log('[bound-sdk outcome]', o)).catch((e) => console.error(e));
 </script>
 </body>
 </html>`);
 });
 
 const PORT = process.env.PORT ?? 3000;
-app.listen(PORT, () => {
-  console.log(`server on :${PORT}`);
-});
+app.listen(PORT, () => console.log(`server on :${PORT}`));
