@@ -253,4 +253,4 @@ Important to communicate to your team and users:
 - [ ] For payment / fund-transfer routes, `requireProof()` on a POST signs the request body (mount `express.raw()` in front) and the client calls `wrapFetch({ signBody: true })`. Without body signing, an MITM can capture a valid signature and change the amount or recipient within the timestamp window; with it, the proof carries `bh=sha256(body)` and the server rejects any substitution
 - [ ] Call `clearBoundKey()` from `dbsc-toolkit/client` after the logout request completes — drops the IndexedDB record explicitly instead of waiting for the SDK to detect the mismatch on next login
 - [ ] User notification flow for `session_stolen`
-- [ ] Tier requirements documented per route (which routes require `tier === "dbsc"` vs `tier !== "none"`)
+- [ ] Route policy documented: public routes (no guard) vs guarded routes (`requireProof()`). Only routes whose threat model specifically includes on-device infostealer malware additionally require `tier === "dbsc"` — and that knowingly excludes Firefox / Safari

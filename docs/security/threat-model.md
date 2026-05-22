@@ -59,7 +59,7 @@ Mitigation: The library does not log JWKs or challenge values. The `onEvent` han
 **I2: Key material exfiltration from the browser profile (bound tier only)**
 The bound polyfill stores a non-extractable ECDSA private key in IndexedDB. The JavaScript API cannot export it, but the encrypted key blob lives on disk in the browser profile directory. Infostealer malware running as the victim can read the profile directory and (depending on the OS keystore protections) decrypt it.
 
-Mitigation: For routes that must defeat this threat, gate on `tier === "dbsc"` specifically — native DBSC keeps the private key inside TPM / Secure Enclave / Android Keystore where no on-device attacker can read it. The `bound` tier is honest about defending against remote cookie theft only.
+Mitigation: The normal guard is `requireProof()` (works on every browser). For the rare route that must additionally defeat *on-device infostealer malware*, require `tier === "dbsc"` on top — native DBSC keeps the private key inside TPM / Secure Enclave / Android Keystore where no on-device attacker can read it. This deliberately excludes Firefox and Safari (they reach only `tier: "bound"`), so it is an exception for hardware-isolation-critical routes, not general routing advice. The `bound` tier is honest about defending against remote cookie theft only.
 
 ### Denial of Service
 
@@ -83,7 +83,7 @@ Mitigation: `verifyDbscJws` explicitly allows only `ES256` and `RS256`. The `non
 **E2: Bound tier treated as hardware binding**
 Application code checks `tier !== "none"` and assumes the key is in a TPM. The bound tier is software-bound (Web Crypto + IndexedDB), not hardware-bound.
 
-Mitigation: Documentation distinguishes the two tiers explicitly. Routes that need hardware-backed key isolation (defeat against infostealer malware) should gate on `tier === "dbsc"` specifically.
+Mitigation: Documentation distinguishes the two tiers explicitly. The route guard `requireProof()` does not assume hardware — it requires a per-request proof on both tiers. The rare route that needs hardware-backed key isolation (defeat against infostealer malware) additionally requires `tier === "dbsc"`, accepting that this excludes non-Chromium browsers.
 
 ## Residual risk by tier
 

@@ -177,13 +177,13 @@ The middleware does not interpose itself on your existing authentication. Your s
 | `bound` | Browser ran the `initBoundDbsc()` polyfill, server verified the ECDSA signature | IndexedDB (non-extractable `CryptoKey`) | Remote cookie theft (XSS, network, logs, paste-to-other-browser). Does NOT defeat infostealer malware reading the browser profile. |
 | `none` | Nothing succeeded, or binding has gone stale | n/a | Nothing the cookie itself doesn't defeat |
 
-A few practical patterns:
+How to gate routes:
 
-**Strict per-route.** Payments, account email change, password change, admin actions: require `tier === "dbsc"`. Routes you only want to be reachable with TPM-backed binding (defeats local malware specifically). Other browsers won't reach these without native DBSC — that's the cost of the strictest gate.
+**The normal model — one guard.** A route is either public (no guard) or authenticated (`requireProof()`). `requireProof()` requires a bound device + a per-request proof and works on every browser — Chromium passes through natively, Firefox/Safari supply a signed proof. You do **not** pick a tier per route, and you **never** gate on `tier === "dbsc"` for normal routing — that would lock out every Firefox and Safari user, who can only reach `tier: "bound"`.
 
-**Tiered by risk.** Feed, comments, profile views: accept any tier. Posts, upvotes, low-risk writes: require `tier !== "none"`. Settings, payments: require `tier === "dbsc"`. This is what most production apps end up with — the bound polyfill covers the common case while DBSC adds the extra layer for the highest-stakes actions.
+**The one exception — infostealer malware.** The `bound` tier's key blob sits on disk in the browser profile, so it does not defeat on-device infostealer malware; only native `dbsc` (TPM-resident key) does. If a route's threat model specifically includes that, it can *additionally* require `tier === "dbsc"` — accepting that this excludes non-Chromium browsers. That is a deliberate exception for hardware-isolation-critical routes, not a routing default.
 
-**The misconception to kill.** Mounting `app.use(dbsc(...))` by itself does *not* protect anything. The library negotiates the binding and tells you the tier. **You** decide what to do with it. A new adopter who mounts the middleware and forgets the per-route check gets exactly the same security as before — none from DBSC, whatever they had from their existing auth.
+**The misconception to kill.** Mounting `createDbsc().install(app)` by itself does *not* protect anything. The library negotiates the binding and tells you the tier. **You** add `requireProof()` to the routes that matter. An adopter who installs the middleware and forgets the per-route guard gets exactly the same security as before — none from DBSC, whatever they had from their existing auth.
 
 ```ts
 // This is what enforcement actually looks like — one guard per route:
@@ -316,7 +316,7 @@ Honest table of what you're getting and where the rough edges are.
 2. **Treat it as defense-in-depth**, never the only auth layer. Your existing session cookie, password, MFA, rate limiting — all still required. This library raises the floor on session-replay attacks; it doesn't replace anything else.
 3. **Pin a version.** Pin `dbsc-toolkit@~2.4.0` (patch updates only) and read the changelog before bumping. 2.4.0 tightened a few proof-header semantics and changed native refresh to 403-on-verify-failure — see CHANGELOG for the full list. v2.0 dropped the HMAC and WebAuthn tiers; if you're still on v1, see the 2.0.0 migration entry first.
 
-The realistic adoption pattern: ship it as the second layer behind your existing auth. The bound polyfill means you don't have to lock non-Chromium users out. Gate genuinely high-value actions (payments, password change, admin) on `tier === "dbsc"`; gate everything else on `tier !== "none"`. See [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md).
+The realistic adoption pattern: ship it as the second layer behind your existing auth. The bound polyfill means you don't have to lock non-Chromium users out. Add `requireProof()` to every authenticated route — it works on every browser. Only a route whose threat model specifically includes on-device infostealer malware additionally requires `tier === "dbsc"`, knowingly excluding Firefox/Safari. See [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md).
 
 ---
 

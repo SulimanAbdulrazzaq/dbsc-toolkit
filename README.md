@@ -42,8 +42,8 @@ npm install dbsc-toolkit
 Pick the framework adapter and storage you actually use (each is an optional peer dependency):
 
 ```sh
-npm install express cookie-parser ioredis    # Express + Redis
-npm install express cookie-parser pg         # Express + Postgres
+npm install express ioredis    # Express + Redis
+npm install express pg         # Express + Postgres
 ```
 
 ## Quick start
@@ -162,13 +162,20 @@ Tree-shaking eliminates anything you don't import. Using Koa, Hapi, raw `http`, 
 
 ## Protection tiers
 
+`tier` is the **state** of a session — what kind of binding the browser achieved. It is *not* a knob you gate on directly:
+
 | Tier | Mechanism | Protects against |
 |------|-----------|------------------|
 | `dbsc` | Native W3C DBSC, key in TPM / Secure Enclave / Android Keystore | Cookie theft (XSS, network, logs, paste-to-other-browser) **and** infostealer malware reading the browser profile |
 | `bound` | Web Crypto polyfill, non-extractable ECDSA P-256 key in IndexedDB | Cookie theft. Does not defeat infostealer malware on the user's machine. |
-| `none` | Plain cookie | Nothing the cookie itself doesn't already do |
+| `none` | No active / fresh binding | Nothing the cookie itself doesn't already do |
 
-The library exposes the tier; **enforcing it is your responsibility**. Gate most routes on `tier !== "none"`; gate genuinely sensitive routes (payments, password change, admin) on `tier === "dbsc"`. Full guidance in [docs/security/best-practices.md](./docs/security/best-practices.md).
+**How to gate routes — the whole decision tree:**
+
+- **Public / read-only route?** → no guard.
+- **Anything authenticated?** → `requireProof()`. That's it.
+
+There is no third option, and **never gate a route on `tier === "dbsc"`** — that locks out every Firefox and Safari user (they can only reach `tier: "bound"`), and `requireProof()` already gives those browsers the same per-request guarantee via a signed proof. `requireProof()` is the one guard; it works on every browser. Read `res.locals.dbsc.tier` only if you want to *display* binding state in the UI — not to build a gate. Full guidance in [docs/security/best-practices.md](./docs/security/best-practices.md).
 
 ## Going deeper
 
