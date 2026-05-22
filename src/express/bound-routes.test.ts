@@ -573,7 +573,7 @@ describe("createDbsc", () => {
     }
   });
 
-  it("bind() without a sessionId derives a stable id from userId", async () => {
+  it("bind() without a sessionId: two browsers derive different ids, same browser re-derives the same id", async () => {
     const ctx = await startKitServer((app, kit) => {
       app.post("/login", async (_req, res) => {
         const sid = await kit.bind(res, { userId: "user-42" });
@@ -581,11 +581,25 @@ describe("createDbsc", () => {
       });
     });
     try {
-      const a = await (await fetch(`${ctx.url}/login`, { method: "POST" })).json();
-      const b = await (await fetch(`${ctx.url}/login`, { method: "POST" })).json();
+      // Browser A — no device cookie sent → kit mints one and returns it.
+      const resA = await fetch(`${ctx.url}/login`, { method: "POST" });
+      const a = await resA.json();
+      const deviceCookie = (resA.headers.getSetCookie?.() ?? [])
+        .map((c) => c.split(";")[0])
+        .find((c) => c!.startsWith("dbsc-device="));
       expect(a.sid).toBeTruthy();
-      expect(a.sid).toBe(b.sid);
+      expect(deviceCookie).toBeTruthy();
       expect(await ctx.storage.getSession(a.sid)).toBeTruthy();
+
+      // Browser B — a separate browser, no device cookie → different derived id.
+      const b = await (await fetch(`${ctx.url}/login`, { method: "POST" })).json();
+      expect(b.sid).not.toBe(a.sid);
+
+      // Browser A again — carries its device cookie → same derived id.
+      const a2 = await (
+        await fetch(`${ctx.url}/login`, { method: "POST", headers: { Cookie: deviceCookie! } })
+      ).json();
+      expect(a2.sid).toBe(a.sid);
     } finally {
       await ctx.close();
     }

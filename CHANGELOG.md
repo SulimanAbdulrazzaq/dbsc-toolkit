@@ -2,6 +2,24 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.6.1] — 2026-05-22
+
+A post-release audit caught one real bug and a few rough edges. All fixed here.
+
+### Fixed
+
+- **JWT multi-device binding no longer collapses.** `deriveSessionId({ userId })` is deterministic, so the same user logging in from two browsers derived the *same* sessionId and bound against the *same* row. The second browser's registration hit `SESSION_ALREADY_REGISTERED`, never bound, and then its refreshes failed the signature check — firing **false `session_stolen` alerts** and breaking the binding. Now the kit's `bind()` on the no-sessionId (JWT) path manages a per-device cookie (`__Host-dbsc-device`) itself and feeds it as the `deviceHint`, so each browser derives its own id and binds independently. `dbsc.bind(res, { userId })` is now correct for multi-device users with no extra code. (Next.js: pass `req` in the bind options so the cookie can be read/set — see the docs.) A JWT app upgrading from 2.6.0 gets the new cookie on the next login; existing JWT bindings re-bind once.
+
+- **`parseCookieHeader` builds a null-prototype map.** A `__proto__` / `constructor` cookie name can no longer be a prototype-pollution vector. Defensive — no known exploit path existed.
+
+- **`base64urlBits` RSA bit-length formula corrected.** The old expression simplified to a no-op; the RSA-2048 minimum-key check still held in practice, but the math is now right.
+
+### Docs
+
+- The Fastify `requireProof()` POST path needs a buffer content-type parser so `req.body` arrives as raw bytes for body-signing — now documented (api-reference, usage, per-request-signing) with a worked example. GET routes are unaffected.
+- `createDbsc().install()` sets Express `trust proxy: true`; documented that an app **not** behind a proxy should pass `trustProxy: false`, otherwise `X-Forwarded-For` is client-spoofable and the IP-keyed rate limiter can be bypassed.
+- Doc drift swept: stale `~2.4.0` version pin, a dead `pollDbscReady` reference, and the "where the library sits" diagram in HOW-IT-WORKS updated to `createDbsc` / `dbsc.bind` / `requireProof()`.
+
 ## [2.6.0] — 2026-05-22
 
 This release is about getting out of your way. Integrating used to mean ~25-50 lines — `trust proxy`, `cookieParser`, `express.json`, a static mount, the middleware, `bindSession`, then a hand-written ~13-line tier-check middleware per protected route, re-passing `storage` to every helper. Two additive features collapse that to a configured kit plus a one-call route guard. No breaking changes — every existing export (`dbsc()`, `bindSession`, `requireBoundProof`) still works.

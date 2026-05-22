@@ -127,7 +127,7 @@ app.post("/logout", async (req, res) => {
 
 `install()` handles `trust proxy`, cookie parsing, the bound-route JSON parser, and the `/dbsc-client` static mount — you don't wire those. You still need `express.json()` for your *own* routes' bodies. `sessionId` is whatever id your session store already issues; DBSC binds to it — no second id-space.
 
-**No server-side session id** (NextAuth JWT mode, iron-session, Lucia stateless)? Call `dbsc.bind(res, { userId })` with no id — the kit derives a stable one. Per-system recipes: [docs/integration-recipes.md](./docs/integration-recipes.md).
+**No server-side session id** (NextAuth JWT mode, iron-session, Lucia stateless)? Call `dbsc.bind(res, { userId })` with no id — the kit derives a stable one and manages a per-device cookie so each browser of the same user binds independently. Per-system recipes: [docs/integration-recipes.md](./docs/integration-recipes.md).
 
 **The full step-by-step** — every option and its default, the `autoBind` transparent-rollout variant, the per-route policy table, the migration timeline — is in [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md).
 

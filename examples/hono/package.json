@@ -1,6 +1,6 @@
 {
   "name": "dbsc-hono-demo",
-  "version": "2.6.0",
+  "version": "2.6.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
-    "dbsc-toolkit": "^2.5.0",
+    "dbsc-toolkit": "^2.6.1",
     "hono": "^4.0.0"
   }
 }

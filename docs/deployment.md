@@ -38,6 +38,8 @@ await dbsc.install(fastify);
 
 Hono and Next.js derive origin from the request URL directly (`url.origin`, `req.nextUrl.origin`), so they don't need an opt-in flag. The runtime gives them the correct scheme.
 
+**If your Express app is NOT behind a proxy**, pass `createDbsc({ trustProxy: false })`. With `trust proxy` on but no real proxy, any client can spoof `X-Forwarded-For`, making `req.ip` — and the IP-keyed registration rate limiter — attacker-controlled.
+
 If `/dbsc/refresh` never fires in your logs after a working `/dbsc/registration`, this is the first thing to check. Symptom looks identical to several other failure modes; trust-proxy is the cheapest fix to verify.
 
 ## Cold-start hosts (Render free tier, Fly free tier)

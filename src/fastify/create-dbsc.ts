@@ -1,7 +1,29 @@
 import type { FastifyInstance, FastifyReply, preHandlerAsyncHookHandler } from "fastify";
+import { randomBytes } from "node:crypto";
 import { deriveSessionId, type RequireProofOptions } from "../core/index.js";
 import { dbsc, bindSession, type DbscFastifyOptions } from "./index.js";
 import { requireProof } from "./require-proof.js";
+
+const DEVICE_COOKIE_TTL_SEC = 365 * 24 * 60 * 60;
+
+/**
+ * Returns a stable per-device value for the JWT `bind()` path: reads the
+ * `__Host-dbsc-device` cookie, or mints + sets one if absent.
+ */
+function resolveDeviceHint(reply: FastifyReply, secure: boolean): string {
+  const name = secure ? "__Host-dbsc-device" : "dbsc-device";
+  const existing = reply.request.cookies?.[name];
+  if (existing) return existing;
+  const value = randomBytes(16).toString("hex");
+  reply.setCookie(name, value, {
+    httpOnly: true,
+    secure,
+    sameSite: "lax",
+    path: "/",
+    maxAge: DEVICE_COOKIE_TTL_SEC,
+  });
+  return value;
+}
 
 export interface CreateDbscOptions extends DbscFastifyOptions {
   /** Default session TTL (ms) for `bind()`. */
@@ -10,7 +32,10 @@ export interface CreateDbscOptions extends DbscFastifyOptions {
 
 export interface BindOptions {
   userId: string;
-  /** Distinct value per device for separate bindings. */
+  /**
+   * Manual per-device value. Optional — when omitted on the no-sessionId
+   * (JWT) path, the kit manages a `__Host-dbsc-device` cookie itself.
+   */
   deviceHint?: string;
   /** Namespace to scope derived ids. */
   namespace?: string;
@@ -36,14 +61,17 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
 
   async function bind(reply: FastifyReply, a: string | BindOptions, b?: BindOptions): Promise<string> {
     const bindOpts = typeof a === "string" ? (b as BindOptions) : a;
-    const sessionId =
-      typeof a === "string"
-        ? a
-        : await deriveSessionId({
-            userId: bindOpts.userId,
-            ...(bindOpts.deviceHint !== undefined && { deviceHint: bindOpts.deviceHint }),
-            ...(bindOpts.namespace !== undefined && { namespace: bindOpts.namespace }),
-          });
+    let sessionId: string;
+    if (typeof a === "string") {
+      sessionId = a;
+    } else {
+      const deviceHint = bindOpts.deviceHint ?? resolveDeviceHint(reply, secure);
+      sessionId = await deriveSessionId({
+        userId: bindOpts.userId,
+        deviceHint,
+        ...(bindOpts.namespace !== undefined && { namespace: bindOpts.namespace }),
+      });
+    }
     await bindSession(reply, sessionId, opts.storage, {
       userId: bindOpts.userId,
       secure,

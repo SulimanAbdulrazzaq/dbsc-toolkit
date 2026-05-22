@@ -118,7 +118,9 @@ interface DeriveSessionIdInput {
 function deriveSessionId(input: DeriveSessionIdInput): Promise<string>;
 ```
 
-Produces a stable, deterministic, opaque `sessionId` for `bindSession()` when the caller has no server-side session row to take an id from — JWT-mode NextAuth, iron-session, Lucia stateless, raw JWT cookies. Same input always returns the same id. SHA-256 of `${namespace}.${userId}.${deviceHint ?? ""}`, base64url-encoded. See [integration-recipes.md](./integration-recipes.md).
+Produces a stable, deterministic, opaque `sessionId` for `bindSession()` when the caller has no server-side session row to take an id from — JWT-mode NextAuth, iron-session, Lucia stateless, raw JWT cookies. Same input always returns the same id. SHA-256 of `${namespace}.${userId}.${deviceHint ?? ""}`, base64url-encoded.
+
+**`deviceHint` matters for multi-device users.** Without it, the same `userId` always derives the same id — so a user on two browsers collides on one binding, and the second browser fails to register. Pass a per-device value as `deviceHint`. You normally don't call `deriveSessionId` directly: the `createDbsc` kit's `bind(res, { userId })` does it for you and **auto-manages a `__Host-dbsc-device` cookie** as the `deviceHint`, so each browser binds independently with no extra code. See [integration-recipes.md](./integration-recipes.md).
 
 ### Route protection
 
@@ -377,7 +379,11 @@ interface DbscKit {
 function createDbsc(opts: CreateDbscOptions): DbscKit;
 ```
 
-A single configured kit. Storage, `secure`, TTLs, the rate limiter and telemetry are set once in `createDbsc`; `install()`, `bind()` and `requireProof()` read that config. `install(app)` mounts the protocol middleware, scoped JSON parsing for the bound routes, the `/dbsc-client` static SDK, and `trust proxy` — one line. `bind()` without a `sessionId` derives one via `deriveSessionId` (the JWT path). Returns the `sessionId` used.
+A single configured kit. Storage, `secure`, TTLs, the rate limiter and telemetry are set once in `createDbsc`; `install()`, `bind()` and `requireProof()` read that config. `install(app)` mounts the protocol middleware, scoped JSON parsing for the bound routes, the `/dbsc-client` static SDK, and `trust proxy` — one line. Returns the `sessionId` used.
+
+`bind()` without a `sessionId` (the JWT path) derives one via `deriveSessionId` **and auto-manages a `__Host-dbsc-device` cookie** as the `deviceHint`, so each browser of the same user binds independently. Pass `deviceHint` in `BindOptions` only to control device identity yourself.
+
+`install()` sets `trust proxy: true` so the registration response advertises `https` behind a proxy — required on Render/Fly/Cloudflare/nginx. An app **not** behind a proxy should pass `createDbsc({ trustProxy: false })`: otherwise `X-Forwarded-For` is client-spoofable and the IP-keyed rate limiter can be bypassed.
 
 ---
 
@@ -412,6 +418,18 @@ function bindSession(
 Register with `await fastify.register(dbsc, { storage })`. `registrationCookieTtl` is honored as of 1.4.0.
 
 `requireProof(opts?)` returns a `preHandler` — `app.post("/p", { preHandler: requireProof() }, handler)`. `createDbsc(opts)` returns a kit whose `install(fastify)` is **async** (it registers `@fastify/cookie` if missing, then the plugin); `bind(reply, …)` and `requireProof` match the core shapes. Fastify's kit does not mount a static client SDK — serve `dist/client/` yourself.
+
+**Fastify POST routes:** `requireProof()` signs the request body, and Fastify's default JSON parser yields a parsed object, not the raw bytes the proof needs. A guarded **POST** route must register a buffer content-type parser so `req.body` arrives as a `Buffer`:
+
+```ts
+app.addContentTypeParser("application/octet-stream", { parseAs: "buffer" }, (_req, body, done) =>
+  done(null, body),
+);
+app.post("/payment", { preHandler: requireProof() }, paymentHandler);
+// the client posts with Content-Type: application/octet-stream + wrapFetch({ signBody: true })
+```
+
+GET routes have no body and need no parser.
 
 ---
 
@@ -509,6 +527,8 @@ function createDbsc(opts: DbscNextOptions & { sessionTtl?: number }): {
 ```
 
 Next.js has no shared request context, so `requireProof` takes the session (from `getDbscSession`) and storage explicitly, and returns `{ ok }` / `{ ok: false, response }` like `requireBoundProof`. The `createDbsc` kit has no `install()` — export `kit.middleware()` from `middleware.ts`, call `kit.getSession` / `kit.requireProof` inside route handlers (storage is baked in).
+
+On the no-sessionId JWT path, pass the request in `BindOptions` so the kit can manage the per-device cookie: `kit.bind(res, { userId, req })`. Without `req` (and without `deviceHint`) the derived id is `userId`-only — which collides for a user with two browsers. `BindOptions` here is `{ userId, deviceHint?, namespace?, req?: NextRequest }`.
 
 ---
 

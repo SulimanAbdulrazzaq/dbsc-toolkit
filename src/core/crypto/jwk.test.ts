@@ -38,6 +38,13 @@ describe("validateJwk", () => {
       DbscVerificationError,
     );
   });
+
+  it("rejects an RSA key below 2048 bits", () => {
+    // 171 base64url chars ≈ 128 bytes ≈ a 1024-bit modulus.
+    expect(() => validateJwk({ kty: "RSA", n: "A".repeat(171), e: "AQAB" })).toThrow(
+      /too short/,
+    );
+  });
 });
 
 describe("detectAlgorithm", () => {

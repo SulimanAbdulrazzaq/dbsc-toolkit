@@ -107,7 +107,7 @@ T+10min..T+20min   Normal browsing again. Same cycle repeats every 10 minutes
                    until the user logs out or the session expires.
 ```
 
-One gotcha that catches almost every first-time integrator: **registration is asynchronous**. The login response returns instantly, but the browser's `POST /dbsc/registration` runs in the background — TPM key generation plus a network round-trip — and lands anywhere from 300 ms to a couple of seconds later. If your page immediately calls a route that gates on `tier === "dbsc"`, the check may run *before* the bound cookie is set and report `tier: "none"` on a fully supported browser. Two clean fixes: a tiny status indicator that polls `/me` for a few seconds after login until tier flips off `"none"`, or a one-shot auto-retry on the first tier-gated request after login. The live demo uses both; see `pollDbscReady` in `examples/express/src/server.js`. Anything past the first second is unaffected.
+One gotcha that catches almost every first-time integrator: **registration is asynchronous**. The login response returns instantly, but the browser's `POST /dbsc/registration` runs in the background — TPM key generation plus a network round-trip — and lands anywhere from 300 ms to a couple of seconds later. If your page immediately calls a guarded route, the check may run *before* the bound cookie is set and report `tier: "none"` on a fully supported browser. Two clean fixes: a status indicator that `await`s the bound-SDK's `initBoundDbsc()` outcome promise before enabling high-value buttons, or a one-shot auto-retry on the first guarded request after login. The live demo wires the outcome-promise approach in `examples/express/src/server.js`. Anything past the first second is unaffected.
 
 A couple more subtleties worth burning into memory:
 
@@ -127,7 +127,7 @@ You touch three places. That's it.
 │  Your existing app                                          │
 │                                                             │
 │  ┌─────────────────────────┐                                │
-│  │ Your auth (login route) │  ── (1) bindSession() here ──┐ │
+│  │ Your auth (login route) │  ── (1) dbsc.bind() here ────┐ │
 │  └─────────────────────────┘                              │ │
 │              │                                            │ │
 │              ▼                                            │ │
@@ -138,7 +138,7 @@ You touch three places. That's it.
 │  └─────────────────────────┘                              │ │
 │                                                           ▼ │
 │  ┌─────────────────────────────────────────────────────────┐│
-│  │ dbsc-toolkit middleware (mounted once globally)         ││
+│  │ dbsc middleware — mounted by (2) dbsc.install(app)      ││
 │  │ ─ Handles POST /dbsc/registration                       ││
 │  │ ─ Handles POST /dbsc/refresh                            ││
 │  │ ─ Reads __Host-dbsc-session cookie                      ││
@@ -148,22 +148,22 @@ You touch three places. That's it.
 │              │                                              │
 │              ▼                                              │
 │  ┌─────────────────────────┐                                │
-│  │ Your route handlers     │  ── (3) tier check here ──── ┐ │
+│  │ Your route handlers     │  ── (3) requireProof() here ─┐ │
 │  └─────────────────────────┘                              │ │
 └───────────────────────────────────────────────────────────│─┘
                                                             │
                                                             ▼
-                                                  if (tier !== "dbsc")
-                                                    return 403
+                                              requireProof() — refuses
+                                              an unbound / unproven request
 ```
 
 **Touch point (2)** is the setup — `const dbsc = createDbsc({ storage })` then `dbsc.install(app)`. `install()` mounts the protocol middleware, the bound-route JSON parser, the `/dbsc-client` SDK, and `trust proxy` in one call (Express). It runs on app startup and is never thought about again. The raw `dbsc()` middleware is still exported if you want to mount it by hand.
 
 **Touch point (1)** is `bindSession()` — one line at the end of your existing login route. It writes a session row, issues a challenge, sets the registration header, and sets the two short-lived cookies the browser needs. That used to be ~25 lines hand-rolled before 1.4.0; now it's one function call. The call belongs after the credential check — login, or a signup route that immediately authenticates the user. A bare signup with no session established is not the right place; there is nothing to bind yet.
 
-With a `createDbsc()` kit this is `dbsc.bind(res, sessionId, { userId })` — `bindSession` with storage and paths pre-filled. With a cookie-session store (`express-session`, Lucia in DB mode) you pass the id you already have — `req.session.id`. With a JWT / stateless session (NextAuth in JWT mode, iron-session, Lucia stateless) there is no server-side id; call `dbsc.bind(res, { userId })` with no id and the kit derives a stable one for you (via `deriveSessionId`). Per-system recipes: [docs/integration-recipes.md](./docs/integration-recipes.md).
+With a `createDbsc()` kit this is `dbsc.bind(res, sessionId, { userId })` — `bindSession` with storage and paths pre-filled. With a cookie-session store (`express-session`, Lucia in DB mode) you pass the id you already have — `req.session.id`. With a JWT / stateless session (NextAuth in JWT mode, iron-session, Lucia stateless) there is no server-side id; call `dbsc.bind(res, { userId })` with no id — the kit derives a stable one (via `deriveSessionId`) and manages a `__Host-dbsc-device` cookie so the same user on two browsers binds independently on each. Per-system recipes: [docs/integration-recipes.md](./docs/integration-recipes.md).
 
-**Touch point (3)** is the tier check on sensitive routes. The library exposes `tier` — you write `if (tier !== "dbsc") return 403`. This is where the security actually lives. If you skip the check, a stolen cookie still works against your server because the cookie alone reaches your handler, the session exists in storage, and your handler proceeds. The whole point of DBSC is the demotion: when a cookie is replayed from a device without the matching hardware key, refresh fails, tier drops to `"none"`, and your gate refuses. **No gate, no defense.**
+**Touch point (3)** is `requireProof()` on sensitive routes — one call, no arguments, works on every browser. This is where the security actually lives. If you skip the guard, a stolen cookie still works against your server because the cookie alone reaches your handler, the session exists in storage, and your handler proceeds. The whole point of DBSC is the demotion: when a cookie is replayed from a device without the matching hardware key, refresh fails, the tier drops to `"none"`, and `requireProof()` refuses. **No guard, no defense.**
 
 The middleware does not interpose itself on your existing authentication. Your session cookie keeps working exactly as it did. DBSC adds a *second* cookie alongside it and a *second* check on top of your existing one. Both cookies travel together; the tier check determines what the second one buys you.
 
@@ -314,7 +314,7 @@ Honest table of what you're getting and where the rough edges are.
 
 1. **Use Redis or Postgres storage**, not memory. Memory storage on a server that ever restarts produces a broken loop where browsers hold cookies that no longer match any stored key.
 2. **Treat it as defense-in-depth**, never the only auth layer. Your existing session cookie, password, MFA, rate limiting — all still required. This library raises the floor on session-replay attacks; it doesn't replace anything else.
-3. **Pin a version.** Pin `dbsc-toolkit@~2.4.0` (patch updates only) and read the changelog before bumping. 2.4.0 tightened a few proof-header semantics and changed native refresh to 403-on-verify-failure — see CHANGELOG for the full list. v2.0 dropped the HMAC and WebAuthn tiers; if you're still on v1, see the 2.0.0 migration entry first.
+3. **Pin a version.** Pin `dbsc-toolkit@~2.6.0` (patch updates only) and read the changelog before bumping. 2.6.0 added the `createDbsc()` kit and the `requireProof()` guard; 2.6.1 fixed JWT multi-device binding — see CHANGELOG for the full list. v2.0 dropped the HMAC and WebAuthn tiers; if you're still on v1, see the 2.0.0 migration entry first.
 
 The realistic adoption pattern: ship it as the second layer behind your existing auth. The bound polyfill means you don't have to lock non-Chromium users out. Add `requireProof()` to every authenticated route — it works on every browser. Only a route whose threat model specifically includes on-device infostealer malware additionally requires `tier === "dbsc"`, knowingly excluding Firefox/Safari. See [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md).
 

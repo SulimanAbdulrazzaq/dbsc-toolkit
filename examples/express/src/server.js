@@ -1,17 +1,6 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// dbsc-toolkit demo — sectioned showcase
-//
-// This demo exercises every public surface of the library so you can verify
-// it end-to-end in a real browser:
-//
-//   Section 1 — Cookie-session login   (express-session → dbsc.bind(res, sid, …))
-//   Section 2 — JWT-mode login         (signed cookie  → dbsc.bind(res, { userId }))
-//   Section 3 — requireProof() routes  (GET + POST, plus a "stolen cookie" probe)
-//   Section 4 — createDbsc options     (storage / TTL / refreshGraceMs / rateLimiter)
-//
-// The SSE log pane + request logging exist only to make the demo observable;
-// a real app needs none of it.
-// ─────────────────────────────────────────────────────────────────────────────
+// dbsc-toolkit demo. Four sections — cookie-session login, JWT-mode login,
+// requireProof() routes, and a createDbsc options panel — so the library can be
+// verified end-to-end in a real browser. The SSE log pane is demo-only.
 
 import express from "express";
 import session from "express-session";
@@ -25,10 +14,7 @@ import { RedisStorage } from "dbsc-toolkit/storage/redis";
 
 const app = express();
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Diagnostic log stream (demo UI only — not part of the auth story)
-// ─────────────────────────────────────────────────────────────────────────────
-
+// Diagnostic SSE log stream — demo UI only.
 const LOG_BUFFER_MAX = 200;
 const logBuffer = [];
 const sseClients = new Set();
@@ -57,10 +43,7 @@ app.get("/debug-logs/stream", (req, res) => {
   req.on("close", () => { clearInterval(ping); sseClients.delete(res); });
 });
 
-// ═════════════════════════════════════════════════════════════════════════════
 // PART 1 — a normal app: user store, bcrypt, express-session, JWT helper.
-// Nothing DBSC-specific here.
-// ═════════════════════════════════════════════════════════════════════════════
 
 // In-memory user store. Real apps use Postgres / Mongo / etc.
 const users = new Map();   // username -> { id, username, passwordHash }
@@ -115,7 +98,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// ─── signup (shared by both login modes) ───
+// signup (shared by both login modes)
 app.post("/signup", async (req, res) => {
   const { username, password } = req.body ?? {};
   if (!username || !password) return res.status(400).json({ error: "username and password required" });
@@ -138,9 +121,7 @@ async function checkPassword(body) {
   return { user };
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
 // PART 2 — what DBSC adds: createDbsc({ …options }) + install() + bind + guard.
-// ═════════════════════════════════════════════════════════════════════════════
 
 // SECTION 4 — a real rate limiter for the DBSC protocol routes. The limits are
 // demo-low so the "Trip the rate limiter" button can actually reach a 429;
@@ -191,7 +172,7 @@ dbscKit.install(app);
 
 emitLog({ t: "boot", storage: process.env.REDIS_URL ? "redis" : "memory", options: KIT_OPTIONS });
 
-// ─── SECTION 1 — cookie-session login ───
+// SECTION 1 — cookie-session login
 // express-session gives a stable req.session.id — pass it straight to bind().
 app.post("/login", async (req, res) => {
   const r = await checkPassword(req.body);
@@ -207,7 +188,7 @@ app.post("/login", async (req, res) => {
   res.json({ ok: true, mode: "cookie", username: r.user.username });
 });
 
-// ─── SECTION 2 — JWT-mode login ───
+// SECTION 2 — JWT-mode login
 // No server session row. dbsc.bind() is called WITHOUT a sessionId — the kit
 // derives a stable one from userId (deriveSessionId). Same userId on a later
 // login derives the same id, so the binding is found on refresh.
@@ -227,7 +208,7 @@ app.post("/login-jwt", async (req, res) => {
   res.json({ ok: true, mode: "jwt", username: r.user.username, derivedSessionId: derivedId });
 });
 
-// ─── logout — tears down whichever mode is active ───
+// logout — tears down whichever mode is active
 app.post("/logout", async (req, res) => {
   await res.locals.dbsc.revoke();                       // DBSC binding + cookie
   if (req.session?.userId) {
@@ -238,7 +219,7 @@ app.post("/logout", async (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── /clear-cookies — diagnostic: wipe everything so nothing respawns ───
+// /clear-cookies — diagnostic: wipe everything so nothing respawns
 app.post("/clear-cookies", async (req, res) => {
   const names = Object.keys(req.cookies ?? {});
   try { await res.locals.dbsc.revoke(); } catch { /* */ }
@@ -248,7 +229,7 @@ app.post("/clear-cookies", async (req, res) => {
   res.json({ ok: true, cleared: names });
 });
 
-// ─── dual-mode "who is this request" — reads cookie-session OR the JWT cookie ───
+// dual-mode "who is this request" — reads cookie-session OR the JWT cookie
 function currentUser(req) {
   if (req.session?.userId) {
     return { id: req.session.userId, username: req.session.username, mode: "cookie" };
@@ -265,7 +246,7 @@ function requireLogin(req, res, next) {
   next();
 }
 
-// ─── /me — "am I logged in" (does NOT require DBSC) — works in both modes ───
+// /me — "am I logged in" (does NOT require DBSC) — works in both modes
 app.get("/me", (req, res) => {
   const u = currentUser(req);
   if (!u) return res.status(401).json({ error: "not logged in", reason: "no app session" });
@@ -280,7 +261,7 @@ app.get("/me", (req, res) => {
   });
 });
 
-// ─── SECTION 3 — requireProof() routes ───
+// SECTION 3 — requireProof() routes
 // requireProof() requires a bound device + a per-request proof. One guard,
 // works on every browser. requireLogin (the app's own check) is chained first.
 
@@ -306,7 +287,7 @@ app.post("/payment", requireLogin, express.raw({ type: "*/*" }), requireProof(),
   });
 });
 
-// ─── SECTION 4 — /config: echoes the live createDbsc options for the UI ───
+// SECTION 4 — /config: echoes the live createDbsc options for the UI
 app.get("/config", (_req, res) => {
   res.json({
     storage: process.env.REDIS_URL ? "redis" : "memory",
@@ -315,9 +296,7 @@ app.get("/config", (_req, res) => {
   });
 });
 
-// ═════════════════════════════════════════════════════════════════════════════
-// HTML UI — four sections
-// ═════════════════════════════════════════════════════════════════════════════
+// HTML UI — four sections.
 
 app.get("/", (_req, res) => {
   const usingRedis = !!process.env.REDIS_URL;
@@ -432,7 +411,7 @@ async function rawReq(method, path, body, headers) {
   }
 }
 
-// ─── DBSC binding status banner ───
+// DBSC binding status banner
 function setStatus(state, text) {
   const el = document.getElementById('dbsc-status');
   el.className = state; el.textContent = text;

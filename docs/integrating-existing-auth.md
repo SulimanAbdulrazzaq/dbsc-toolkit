@@ -76,7 +76,7 @@ app.post("/login", async (req, res) => {
 
 `dbsc.bind` writes the DBSC session row, issues a challenge, sets the registration header, and sets the short-lived cookies the browser needs. Chrome triggers `/dbsc/registration` on its own within ~1s.
 
-**No server-side session id?** JWT-mode NextAuth, iron-session, Lucia-stateless apps have no `sid`. Call `dbsc.bind(res, { userId: user.id })` with **no** id and the kit derives a stable one for you. Per-system recipes: [integration-recipes.md](./integration-recipes.md).
+**No server-side session id?** JWT-mode NextAuth, iron-session, Lucia-stateless apps have no `sid`. Call `dbsc.bind(res, { userId: user.id })` with **no** id — the kit derives a stable one and manages a `__Host-dbsc-device` cookie so each browser of the same user binds independently. (Next.js: pass `req` too — `dbsc.bind(res, { userId, req })`.) Per-system recipes: [integration-recipes.md](./integration-recipes.md).
 
 **OAuth / SSO login** (Google, GitHub): same `dbsc.bind(...)` call, placed in the callback after you resolve the external profile to a user, before the redirect.
 
@@ -137,7 +137,7 @@ One script tag. Chromium needs nothing — it speaks DBSC natively from the head
 | `secure` | `true` | `__Host-` cookies + Secure flag. Leave it. Only set `false` for localhost-over-HTTP testing. |
 | `boundCookieTtl` | `600000` (10 min) | How long a bound cookie lives before the browser refreshes it. Shorter = smaller stolen-cookie window, more refresh traffic. Omit it → 10 min, fine for most apps. |
 | `refreshGraceMs` | `30000` (30 s) | Grace window after a cookie's freshness lapses — see [below](#what-refreshgracems-is). Omit it → 30 s, which is correct; you rarely touch this. |
-| `trustProxy` | `true` | `install()` sets Express `trust proxy`. Needed behind Render/Fly/Cloudflare/nginx so the registration response advertises `https`. Omit it → set for you. Pass `false` only if you manage `trust proxy` yourself. |
+| `trustProxy` | `true` | `install()` sets Express `trust proxy`. Needed behind Render/Fly/Cloudflare/nginx so the registration response advertises `https`. **If your app is NOT behind a proxy, pass `trustProxy: false`** — otherwise `X-Forwarded-For` is client-spoofable, making `req.ip` (and the IP-keyed rate limiter) attacker-controlled. |
 | `clientPath` | `"/dbsc-client"` | Where `install()` serves the browser SDK. Omit it → served at `/dbsc-client`. Pass `false` to not serve it (e.g. you bundle the SDK yourself). |
 | `sessionTtl` | `86400000` (24 h) | Lifetime of the DBSC session row. Omit it → 24 h. |
 | `rateLimiter` | `NoopRateLimiter` (no limiting) | `/dbsc/registration` and `/dbsc/refresh` are unauthenticated by design. Without a real limiter they are unthrottled attack surface — **wire one for production.** |

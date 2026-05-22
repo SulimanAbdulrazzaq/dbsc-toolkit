@@ -35,4 +35,11 @@ describe("parseCookieHeader", () => {
   it("ignores malformed segments", () => {
     expect(parseCookieHeader("a=1; broken; =2; b=3")).toEqual({ a: "1", b: "3" });
   });
+
+  it("does not pollute Object.prototype via a __proto__ cookie", () => {
+    const out = parseCookieHeader("__proto__=polluted; a=1");
+    expect((({}) as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.getPrototypeOf(out)).toBeNull();
+    expect(out.a).toBe("1");
+  });
 });

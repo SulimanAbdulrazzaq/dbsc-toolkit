@@ -52,6 +52,8 @@ export function detectAlgorithm(jwk: JsonWebKey): "ES256" | "RS256" {
   );
 }
 
+/** Bit length of the bytes a base64url string decodes to. JWK `n` is unpadded. */
 function base64urlBits(b64: string): number {
-  return (b64.length * 6) / 8 * 8;
+  const len = b64.replace(/=+$/, "").length;
+  return Math.floor((len * 3) / 4) * 8;
 }

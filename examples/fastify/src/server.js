@@ -36,13 +36,24 @@ app.get("/me", async (req) => ({
   skipped: req.dbsc.skipped,
 }));
 
-// Protected route. requireProof(): tier=dbsc passes through (Chromium
-// browser-level enforcement); tier=bound requires a fresh X-Dbsc-Bound-Proof
-// header. Works on every browser. Storage comes from the kit — nothing re-passed.
+// GET guarded route. requireProof(): tier=dbsc passes through, tier=bound needs
+// a signed X-Dbsc-Bound-Proof header. No body, so no parser needed.
 app.get(
   "/profile",
   { preHandler: dbscKit.requireProof() },
   async (req) => ({ ok: true, sessionId: req.dbsc.sessionId, tier: req.dbsc.tier }),
+);
+
+// POST guarded route. requireProof() signs the request body; Fastify's default
+// parser yields a parsed object, not bytes — so register a buffer parser and
+// have the client POST with Content-Type: application/octet-stream.
+app.addContentTypeParser("application/octet-stream", { parseAs: "buffer" }, (_req, body, done) =>
+  done(null, body),
+);
+app.post(
+  "/payment",
+  { preHandler: dbscKit.requireProof() },
+  async (req) => ({ ok: true, tier: req.dbsc.tier }),
 );
 
 const port = Number(process.env.PORT ?? 3000);

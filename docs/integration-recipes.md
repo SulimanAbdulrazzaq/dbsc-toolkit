@@ -84,6 +84,12 @@ export function middleware(req) {
 
 `deriveSessionId` is deterministic — calling it with the same `userId` always returns the same id, so the binding created on the first request is the one looked up on every refresh. No state to manage.
 
+> **Multi-device caveat for `autoBind`.** `deriveSessionId({ userId })` with no `deviceHint` returns the *same* id for that user on every browser — so a user logged in on two browsers collides on one binding and the second browser can't register. The `createDbsc().bind()` path (used in the other recipes below) manages a `__Host-dbsc-device` cookie for you and avoids this. `autoBind` does not — it only returns an id. For multi-device correctness in the `autoBind` recipe, read a stable per-device cookie off `req` and pass it as `deviceHint`:
+> ```ts
+> const deviceId = req.cookies.get("app-device")?.value;   // a cookie your app sets
+> const sessionId = await deriveSessionId({ userId: token.sub, deviceHint: deviceId });
+> ```
+
 Reading the tier inside a route handler:
 
 ```ts
@@ -120,7 +126,7 @@ app.post("/api/login", async (req, res) => {
 });
 ```
 
-`dbsc.bind(res, { userId })` derives the id internally (via `deriveSessionId`), so the binding made at login is the one looked up on every later request.
+`dbsc.bind(res, { userId })` derives the id internally and **auto-manages a `__Host-dbsc-device` cookie** as the per-device input — so a user logging in from two browsers gets a separate binding on each, with no extra code. (On Next.js, also pass `req`: `dbsc.bind(res, { userId, req })`.)
 
 ---
 
@@ -165,18 +171,22 @@ With MFA: bind only after **every** factor has passed. Binding ties the device t
 
 ---
 
-## Per-device bindings (the "active sessions" page)
+## Per-device bindings
 
-By default `deriveSessionId({ userId })` returns one id per user — fine for most apps. If you want a separate binding per device (so a "log out my other devices" page can revoke them individually), pass a `deviceHint`:
+`dbsc.bind(res, { userId })` already gives each browser its own binding — it manages a
+`__Host-dbsc-device` cookie under the hood, so a user on two browsers has two independent
+`BoundKey` rows out of the box (this is what makes the JWT path multi-device-safe).
+
+Pass `deviceHint` only when you want to **control** the per-device value yourself — e.g.
+to tie the binding to a device id your app already issues, so a "log out my other
+devices" page can map and revoke them:
 
 ```ts
-const sessionId = await deriveSessionId({
+await dbsc.bind(res, {
   userId: user.id,
-  deviceHint: req.cookies.deviceId ?? crypto.randomUUID(),  // persist this in a cookie
+  deviceHint: yourAppsStableDeviceId,   // your own value — overrides the auto cookie
 });
 ```
-
-Each device then has its own `BoundKey` row and revokes independently.
 
 ---
 

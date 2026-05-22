@@ -3,7 +3,9 @@
  * middlewares read DBSC cookies without depending on `cookie-parser`.
  */
 export function parseCookieHeader(header?: string | null): Record<string, string> {
-  const out: Record<string, string> = {};
+  // Null-prototype map: a `__proto__` / `constructor` cookie name is then a
+  // plain own property, never a prototype-pollution vector.
+  const out: Record<string, string> = Object.create(null);
   if (!header) return out;
   for (const part of header.split(";")) {
     const eq = part.indexOf("=");
