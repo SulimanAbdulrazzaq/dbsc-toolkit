@@ -250,10 +250,9 @@ Deep dive: [telemetry.md](./telemetry.md).
 
 ## The post-login race
 
-`/login` returns 200, the SPA redirects, the user clicks a tier-gated route — and `tier` is still `"none"` because registration takes 300 ms–2 s to land. Two clean fixes:
+`/login` returns 200, the SPA redirects, the user clicks a guarded route — and `tier` is still `"none"` because binding hasn't completed. On Chromium it's ~300 ms–2 s; on Firefox / Safari the polyfill probes for native DBSC first, so it's **3–8 s**.
 
-- **Server side:** the freshness check now has a 30 s grace window (`refreshGraceMs`), and a brief tier=`none` right after login is the registration not having completed — poll `/me` for ~2 s, or
-- **Client side:** await the SDK outcome before enabling high-value buttons:
+**Do not poll `/me` to wait it out** — the delay is variable (especially on the bound tier and on cold-start hosts), so any fixed poll window is a guess. `await` the SDK's outcome promise instead — it resolves exactly when binding finishes, whichever tier won:
 
 ```ts
 import { initBoundDbsc } from "dbsc-toolkit/client";

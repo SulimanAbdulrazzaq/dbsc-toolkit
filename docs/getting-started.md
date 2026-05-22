@@ -8,7 +8,18 @@ When a user logs in, the browser (Chrome, Edge, Brave, Opera, Arc — any Chromi
 
 The library handles every server-side piece of that flow. You wire one middleware call and start a session after your existing login logic.
 
-One thing to plan for from day one: registration happens *after* the login response returns. Chrome posts to `/dbsc/registration` on its own, but the TPM handshake plus a network round-trip typically takes 300 ms to a couple of seconds. If your client checks `tier === "dbsc"` the same instant login resolves, the check may run before registration lands and report `tier: "none"` even on a supported browser. Either show a brief "binding…" indicator that polls `/me` until tier leaves `"none"`, or auto-retry the first tier-gated request once after a short delay. The live demo wires both patterns in [examples/express/src/server.js](../examples/express/src/server.js).
+One thing to plan for from day one: binding completes *after* the login response returns. On Chromium, the browser posts `/dbsc/registration` itself (~300 ms–2 s). On Firefox / Safari the polyfill first probes for native DBSC for a few seconds, *then* registers — so the gap is longer, 3–8 s. Either way, if your client checks the session the instant login resolves it sees `tier: "none"` even on a supported browser.
+
+Do not poll `/me` to wait it out — the wait is variable and you'd be guessing. Instead `await` the bound SDK's outcome promise, which resolves exactly when binding finishes:
+
+```js
+const outcome = await initBoundDbsc();
+if (outcome.phase !== "unbound" && outcome.phase !== "error") {
+  // bound (native or polyfill) — safe to call guarded routes
+}
+```
+
+The live demo wires this in [examples/express/src/server.js](../examples/express/src/server.js).
 
 ## Install
 
