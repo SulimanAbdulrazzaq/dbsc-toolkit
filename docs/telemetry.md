@@ -4,10 +4,10 @@ The library emits typed events for every protocol-significant action. There is n
 
 ## Wiring up
 
-Pass `onEvent` in adapter options:
+Pass `onEvent` in the `createDbsc` config (or directly to `dbsc()` if you mount the raw middleware):
 
 ```ts
-app.use(dbsc({
+const dbsc = createDbsc({
   storage,
   onEvent: (event) => {
     logger.info({ dbsc: event });
@@ -19,7 +19,8 @@ app.use(dbsc({
       });
     }
   },
-}));
+});
+dbsc.install(app);
 ```
 
 Every event carries the same base fields:
@@ -144,7 +145,7 @@ const refreshHistogram = meter.createHistogram("dbsc.refresh.duration_ms");
 const failureCounter = meter.createCounter("dbsc.verification_failure.count");
 const stolenCounter = meter.createCounter("dbsc.session_stolen.count");
 
-app.use(dbsc({
+const dbsc = createDbsc({
   storage,
   onEvent: (event) => {
     const attrs = { tier: event.tier };
@@ -165,7 +166,8 @@ app.use(dbsc({
         break;
     }
   },
-}));
+});
+dbsc.install(app);
 ```
 
 ## Suggested counters and histograms

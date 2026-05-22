@@ -20,13 +20,20 @@ Any platform that terminates HTTPS at an edge proxy (Render, Fly, Railway, Herok
 Fix per framework:
 
 ```ts
-// Express
+// Express — createDbsc().install() sets `trust proxy` for you (pass
+// trustProxy: false to opt out). If you mount the raw dbsc() middleware
+// instead, set it yourself:
+const dbsc = createDbsc({ storage });
+dbsc.install(app);                 // handles trust proxy
+
+// ...or, mounting by hand:
 app.set("trust proxy", true);
 app.use(dbsc({ storage }));
 
 // Fastify
 const fastify = Fastify({ trustProxy: true });
-await fastify.register(dbsc, { storage });
+const dbsc = createDbsc({ storage });
+await dbsc.install(fastify);
 ```
 
 Hono and Next.js derive origin from the request URL directly (`url.origin`, `req.nextUrl.origin`), so they don't need an opt-in flag. The runtime gives them the correct scheme.
@@ -55,7 +62,7 @@ The live demo runs here. Steps:
 4. Start command: `node src/server.js`.
 5. Render gives you `*.onrender.com` with HTTPS at the edge.
 
-`app.set("trust proxy", true)` is required — see the section above.
+`trust proxy` is required — `createDbsc().install()` sets it for you; see the section above.
 
 For Redis/Postgres storage, add a Render Key-Value (Redis) or Postgres add-on and read `REDIS_URL` or `DATABASE_URL` from the env:
 
@@ -268,4 +275,4 @@ A drop in `tier === "dbsc"` count week-over-week often indicates a Chrome rollou
 
 If a DBSC issue surfaces in production, you can disable the protocol while keeping the library in place by setting `fallback: "none"` and noticing all sessions drop to `tier: "none"`. Your application's existing cookie auth continues to work — DBSC simply adds nothing until you re-enable.
 
-For a faster rollback, comment out the `app.use(dbsc(...))` line and redeploy. The auto-refresh requests from Chrome will return 404, sessions stop refreshing, and after one TTL cycle Chrome reverts to plain cookies.
+For a faster rollback, comment out the `dbsc.install(app)` line (or `app.use(dbsc(...))` if you mount by hand) and redeploy. The auto-refresh requests from Chrome will return 404, sessions stop refreshing, and after one TTL cycle Chrome reverts to plain cookies.

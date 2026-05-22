@@ -6,35 +6,27 @@ Each framework adapter is a thin wrapper that translates the framework's request
 
 ```ts
 import express from "express";
-import cookieParser from "cookie-parser";
 import { randomUUID } from "node:crypto";
-import { dbsc, bindSession } from "dbsc-toolkit/express";
+import { createDbsc, requireProof } from "dbsc-toolkit/express";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
 const app = express();
-const storage = new MemoryStorage();
+app.use(express.json());          // for your own routes' bodies
 
-app.use(cookieParser());
-app.use("/dbsc/registration", express.text({ type: "*/*" }));
-app.use("/dbsc/refresh", express.text({ type: "*/*" }));
-app.use(express.json());
-app.use(dbsc({ storage }));
+const dbsc = createDbsc({ storage: new MemoryStorage() });
+dbsc.install(app);                // protocol routes + bound-route JSON + SDK + trust proxy
 
 app.post("/login", async (req, res) => {
-  const sessionId = randomUUID();
-  await bindSession(res, sessionId, storage, { userId: req.body.username });
+  await dbsc.bind(res, randomUUID(), { userId: req.body.username });
   res.json({ ok: true });
 });
 
-app.get("/protected", (_req, res) => {
-  if (res.locals.dbsc.tier !== "dbsc") {
-    return res.status(403).json({ error: "hardware-bound session required" });
-  }
+app.get("/protected", requireProof(), (_req, res) => {
   res.json({ ok: true });
 });
 ```
 
-The `text` body parsers on the protocol routes are required — Chrome sends the JWS as a raw string under various content types. The middleware reads it from the `Secure-Session-Response` header, but Express needs `text` parsing in case the request body is also touched.
+`install()` mounts the `/dbsc/*` and `/dbsc-bound/*` routes, scoped JSON parsing for the bound routes, the `/dbsc-client` SDK, and `trust proxy`. The middleware parses the `Cookie` header itself — no `cookie-parser`. The native protocol routes read the JWS from the `Secure-Session-Response` header, not the body, so no text body parser is needed.
 
 `res.locals.dbsc` exposes:
 
@@ -47,40 +39,36 @@ The `text` body parsers on the protocol routes are required — Chrome sends the
 }
 ```
 
-To gate a route on the hardware-bound tier, do an explicit check (no helper method — keeps the surface small):
+To gate a route, use `requireProof()` — one call, no arguments, works on every browser:
 
 ```ts
-app.post("/payment", (req, res, next) => {
-  if (res.locals.dbsc.tier !== "dbsc") {
-    return res.status(401).json({ error: "re-authenticate" });
-  }
-  next();
-}, paymentHandler);
+app.post("/comment", requireProof(), commentHandler);
+app.post("/payment", express.raw({ type: "*/*" }), requireProof(), paymentHandler);
 ```
+
+`requireProof` is also `dbsc.requireProof()` on the kit. It signs the request body, so a POST guarded route mounts `express.raw()` in front. A plain `if (res.locals.dbsc.tier === "none") return res.status(403)…` still works if you prefer it.
 
 ## Fastify
 
 ```ts
 import Fastify from "fastify";
-import fastifyCookie from "@fastify/cookie";
-import { dbsc } from "dbsc-toolkit/fastify";
+import { createDbsc } from "dbsc-toolkit/fastify";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
 const app = Fastify();
-await app.register(fastifyCookie);
-await app.register(dbsc, { storage: new MemoryStorage() });
+const dbsc = createDbsc({ storage: new MemoryStorage() });
+await dbsc.install(app);   // registers @fastify/cookie (if missing) + the plugin
 
-app.get("/protected", async (req, reply) => {
-  if (req.dbsc.tier !== "dbsc") {
-    return reply.status(403).send({ error: "hardware-bound session required" });
-  }
-  return { ok: true };
-});
+app.get(
+  "/protected",
+  { preHandler: dbsc.requireProof() },
+  async () => ({ ok: true }),
+);
 
 await app.listen({ port: 3000 });
 ```
 
-Fastify decorates `req.dbsc` automatically through the plugin's `onRequest` hook.
+Fastify decorates `req.dbsc` automatically through the plugin's `onRequest` hook. `createDbsc().install()` is async — it `await`s the `@fastify/cookie` registration. `requireProof()` returns a `preHandler`.
 
 ## Hono
 
@@ -88,18 +76,14 @@ Works on Node.js, Bun, Deno, and Cloudflare Workers.
 
 ```ts
 import { Hono } from "hono";
-import { dbsc } from "dbsc-toolkit/hono";
+import { createDbsc } from "dbsc-toolkit/hono";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
 const app = new Hono();
-app.use("*", dbsc({ storage: new MemoryStorage() }));
+const dbsc = createDbsc({ storage: new MemoryStorage() });
+dbsc.install(app);
 
-app.get("/protected", (c) => {
-  if (c.get("dbsc").tier !== "dbsc") {
-    return c.json({ error: "hardware-bound session required" }, 403);
-  }
-  return c.json({ ok: true });
-});
+app.get("/protected", dbsc.requireProof(), (c) => c.json({ ok: true }));
 
 export default app;
 ```
@@ -112,35 +96,42 @@ The 1.3.x split keys (`c.get("dbscSessionId")`, `c.get("dbscTier")`, `c.get("dbs
 
 Two pieces. The middleware mounts protocol routes globally; `getDbscSession` reads tier inside individual handlers.
 
+`lib/dbsc.ts` — build the kit once and share it:
+
+```ts
+import { createDbsc } from "dbsc-toolkit/nextjs";
+import { MemoryStorage } from "dbsc-toolkit/storage/memory";
+
+export const dbsc = createDbsc({ storage: new MemoryStorage() });
+```
+
 `middleware.ts`:
 
 ```ts
-import { createDbscMiddleware } from "dbsc-toolkit/nextjs";
-import { MemoryStorage } from "dbsc-toolkit/storage/memory";
+import { dbsc } from "@/lib/dbsc";
 
-const storage = new MemoryStorage();
-export default createDbscMiddleware({ storage });
+export default dbsc.middleware();
 
 export const config = {
-  matcher: ["/dbsc/:path*"],
+  matcher: ["/dbsc/:path*", "/dbsc-bound/:path*"],
 };
 ```
 
-`app/api/me/route.ts`:
+`app/api/protected/route.ts`:
 
 ```ts
-import { getDbscSession } from "dbsc-toolkit/nextjs";
-import { storage } from "@/lib/dbsc";
-import { NextRequest, NextResponse } from "next/server";
+import { dbsc } from "@/lib/dbsc";
+import { NextRequest } from "next/server";
 
 export async function GET(req: NextRequest) {
-  const { sessionId, tier } = await getDbscSession(req, storage);
-  if (!sessionId) return NextResponse.json({ error: "not authenticated" }, { status: 401 });
-  return NextResponse.json({ sessionId, tier });
+  const session = await dbsc.getSession(req);
+  const gate = await dbsc.requireProof(req, session);
+  if (!gate.ok) return gate.response;
+  return Response.json({ sessionId: session.sessionId, tier: session.tier });
 }
 ```
 
-In production keep one shared `storage` instance — exporting from `lib/dbsc.ts` is the simplest pattern. Memory storage will not work across serverless cold starts; use Redis or Postgres.
+The kit's `getSession` / `requireProof` carry storage from the config — nothing re-passed. Next.js has no shared request context, so `requireProof` takes the session object explicitly. Memory storage will not survive serverless cold starts; use Redis or Postgres.
 
 ---
 

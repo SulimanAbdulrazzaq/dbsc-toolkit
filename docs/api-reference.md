@@ -120,6 +120,28 @@ function deriveSessionId(input: DeriveSessionIdInput): Promise<string>;
 
 Produces a stable, deterministic, opaque `sessionId` for `bindSession()` when the caller has no server-side session row to take an id from — JWT-mode NextAuth, iron-session, Lucia stateless, raw JWT cookies. Same input always returns the same id. SHA-256 of `${namespace}.${userId}.${deviceHint ?? ""}`, base64url-encoded. See [integration-recipes.md](./integration-recipes.md).
 
+### Route protection
+
+```ts
+interface RequireProofOptions {
+  allowDbscWithoutProof?: boolean;  // default true — the hardware-backed dbsc tier skips the proof
+  timestampWindowMs?: number;       // accepted proof timestamp window, ms
+  storage?: StorageAdapter;         // override; default = the adapter's storage
+}
+
+function noBindingReason(skipped?: SkippedEntry[]): string;
+```
+
+`RequireProofOptions` is the (entirely optional) option shape of every adapter's `requireProof()`. `noBindingReason` produces the quota-aware human reason used in a `tier: "none"` rejection — exported for custom adapters.
+
+### Cookie parsing
+
+```ts
+function parseCookieHeader(header?: string | null): Record<string, string>;
+```
+
+Parses a `Cookie` request header into a name→value map. The Express middleware uses this so it no longer needs `cookie-parser`. Useful when writing your own adapter.
+
 ### Telemetry events
 
 ```ts
@@ -323,6 +345,40 @@ After mount, every request has `res.locals.dbsc` populated. Call `bindSession` o
 
 `requireBoundProof()` gates sensitive routes on a fresh proof signed by the bound key — pair it with `wrapFetch()` on the client. Native DBSC users pass through by default. The same `RequireBoundProofOptions` shape is used by every adapter; the wrapper just changes return type to match each framework's middleware idiom (Fastify returns a `preHandler`, Hono a `MiddlewareHandler`, Next.js a handler-callable that returns `{ ok }` or a short-circuit response).
 
+### `requireProof` (Express)
+
+```ts
+function requireProof(opts?: RequireProofOptions): RequestHandler;
+```
+
+The route guard. One call, no arguments — `requireProof()` requires the request to come from a bound device and prove it per-request. **Works on every browser**: Chromium's hardware-backed `dbsc` tier passes through, the software `bound` tier (Firefox / Safari / older Chromium) must carry a signed, body-hashed proof. There is no "tier level" argument — a `dbsc`-only gate would lock out non-Chromium browsers, and a `bound`-only check (no proof) is not actually secure.
+
+Internally it reuses `requireBoundProof` with `signBody: true` and reads storage from the request context the `dbsc()` middleware populates (pass `{ storage }` only to override). A failed check returns 403 with `{ error, currentTier, reason, skipped }`. Because the `bound` tier signs the body, a **POST** guarded route needs `express.raw({ type: "*/*" })` in front (`requireProof` is a pure guard, it does not inject body parsers) and the client must use `wrapFetch({ signBody: true })`. GET routes have no body and need no parser.
+
+### `createDbsc` (Express)
+
+```ts
+interface CreateDbscOptions extends DbscExpressOptions {
+  clientPath?: string | false;   // static SDK mount; default "/dbsc-client", false to skip
+  sessionTtl?: number;           // default session TTL (ms) for bind()
+  trustProxy?: boolean;          // default true — install() sets `trust proxy`
+}
+
+interface BindOptions { userId: string; deviceHint?: string; namespace?: string }
+
+interface DbscKit {
+  install(app: Express): Express;
+  middleware(): RequestHandler;
+  bind(res: Response, sessionId: string, opts: BindOptions): Promise<string>;
+  bind(res: Response, opts: BindOptions): Promise<string>;   // derives the id
+  requireProof(opts?: RequireProofOptions): RequestHandler;
+}
+
+function createDbsc(opts: CreateDbscOptions): DbscKit;
+```
+
+A single configured kit. Storage, `secure`, TTLs, the rate limiter and telemetry are set once in `createDbsc`; `install()`, `bind()` and `requireProof()` read that config. `install(app)` mounts the protocol middleware, scoped JSON parsing for the bound routes, the `/dbsc-client` static SDK, and `trust proxy` — one line. `bind()` without a `sessionId` derives one via `deriveSessionId` (the JWT path). Returns the `sessionId` used.
+
 ---
 
 ## `dbsc-toolkit/fastify`
@@ -354,6 +410,8 @@ function bindSession(
 ```
 
 Register with `await fastify.register(dbsc, { storage })`. `registrationCookieTtl` is honored as of 1.4.0.
+
+`requireProof(opts?)` returns a `preHandler` — `app.post("/p", { preHandler: requireProof() }, handler)`. `createDbsc(opts)` returns a kit whose `install(fastify)` is **async** (it registers `@fastify/cookie` if missing, then the plugin); `bind(reply, …)` and `requireProof` match the core shapes. Fastify's kit does not mount a static client SDK — serve `dist/client/` yourself.
 
 ---
 
@@ -395,6 +453,8 @@ function bindSession(
 
 Read everything as `c.get("dbsc")` — a single object matching the Express/Fastify shape. The legacy keys (`dbscSessionId`, `dbscTier`, `dbscSkipped`) that existed in 1.x were removed in 2.0.0; use the unified object only.
 
+`requireProof(opts?)` returns a `MiddlewareHandler` — `app.post("/p", requireProof(), handler)`. `createDbsc(opts)` returns a kit whose `install(app)` mounts the dbsc middleware; `bind(c, …)` and `requireProof` match the core shapes. No static client SDK is mounted — serve `dist/client/` with your runtime's static handler.
+
 ---
 
 ## `dbsc-toolkit/nextjs`
@@ -428,6 +488,27 @@ function bindSession(
 ```
 
 Export `createDbscMiddleware` from `middleware.ts` for the App Router. Use `getDbscSession` inside route handlers. Pass `res` if you want `revoke()` to clear the cookie for you; otherwise it only deletes the server-side session and you clear cookies yourself.
+
+```ts
+type RequireProofResult = { ok: true } | { ok: false; response: NextResponse };
+interface RequireProofSession { sessionId: string | null; tier: ProtectionTier; skipped?: SkippedEntry[] }
+
+function requireProof(
+  req: NextRequest,
+  session: RequireProofSession,
+  opts?: RequireProofOptions,
+): Promise<RequireProofResult>;
+
+function createDbsc(opts: DbscNextOptions & { sessionTtl?: number }): {
+  middleware(): (req: NextRequest) => Promise<NextResponse>;
+  bind(res: NextResponse, sessionId: string, opts: BindOptions): Promise<string>;
+  bind(res: NextResponse, opts: BindOptions): Promise<string>;
+  getSession(req: NextRequest, res?: NextResponse): Promise<DbscSessionInfo>;
+  requireProof(req: NextRequest, session: RequireProofSession): Promise<RequireProofResult>;
+};
+```
+
+Next.js has no shared request context, so `requireProof` takes the session (from `getDbscSession`) and storage explicitly, and returns `{ ok }` / `{ ok: false, response }` like `requireBoundProof`. The `createDbsc` kit has no `install()` — export `kit.middleware()` from `middleware.ts`, call `kit.getSession` / `kit.requireProof` inside route handlers (storage is baked in).
 
 ---
 

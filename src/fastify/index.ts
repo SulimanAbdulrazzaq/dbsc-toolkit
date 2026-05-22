@@ -37,6 +37,13 @@ declare module "fastify" {
   }
 }
 
+/** Internal carrier so `requireProof()` can reach storage without re-passing it. */
+export interface DbscInternal {
+  storage: StorageAdapter;
+  secure: boolean;
+}
+export const DBSC_INTERNAL: unique symbol = Symbol("dbsc-toolkit.fastify.internal");
+
 const cookieNames = (secure: boolean) => ({
   bound: secure ? "__Host-dbsc-session" : "dbsc-session",
   reg: secure ? "__Host-dbsc-reg" : "dbsc-reg",
@@ -151,6 +158,10 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
         reply.clearCookie(COOKIES.bound, cookieOpts);
       },
     };
+    (req as unknown as Record<PropertyKey, unknown>)[DBSC_INTERNAL] = {
+      storage,
+      secure,
+    } satisfies DbscInternal;
 
     if (sessionId) {
       const session = await storage.getSession(sessionId);
@@ -471,3 +482,6 @@ export const dbsc = fp(dbscPlugin, { name: "@dbsc-toolkit/server-fastify" });
 
 export { requireBoundProof } from "./proof.js";
 export type { RequireBoundProofOptions } from "./proof.js";
+export { requireProof } from "./require-proof.js";
+export { createDbsc } from "./create-dbsc.js";
+export type { CreateDbscOptions, DbscKit, BindOptions } from "./create-dbsc.js";

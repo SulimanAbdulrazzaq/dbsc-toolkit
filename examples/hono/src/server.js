@@ -11,19 +11,21 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { randomBytes } from "node:crypto";
 
-import { dbsc, bindSession, requireBoundProof } from "dbsc-toolkit/hono";
+import { createDbsc } from "dbsc-toolkit/hono";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
 const storage = new MemoryStorage();
 const app = new Hono();
 
-app.use("*", dbsc({ storage, secure: false }));
+// createDbsc().install() mounts the dbsc middleware — storage / secure set once.
+const dbscKit = createDbsc({ storage, secure: false });
+dbscKit.install(app);
 
 app.post("/login", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const userId = body.userId ?? "anonymous";
   const sid = randomBytes(16).toString("hex");
-  await bindSession(c, sid, storage, { userId, secure: false });
+  await dbscKit.bind(c, sid, { userId });
   return c.json({ ok: true, sessionId: sid });
 });
 
@@ -32,7 +34,9 @@ app.get("/me", (c) => {
   return c.json({ sessionId: s.sessionId, tier: s.tier, skipped: s.skipped });
 });
 
-app.get("/profile", requireBoundProof({ storage }), (c) => {
+// requireProof(): tier=dbsc passes through, tier=bound needs a fresh
+// X-Dbsc-Bound-Proof header. Works on every browser. Storage comes from the kit.
+app.get("/profile", dbscKit.requireProof(), (c) => {
   const s = c.get("dbsc");
   return c.json({ ok: true, sessionId: s.sessionId, tier: s.tier });
 });

@@ -29,6 +29,8 @@ It does not protect against:
 
 The `bound` tier defeats remote cookie theft (XSS, network capture, log leaks, paste-into-other-browser) but does not defeat infostealer malware reading the browser profile directory. The IndexedDB-stored key is `extractable: false` (JS cannot export it) but the encrypted key blob still lives on disk. For routes that must defeat that threat, gate on `tier === "dbsc"` specifically. Native DBSC keeps the private key inside TPM / Secure Enclave / Android Keystore.
 
+The 2.6.0 ergonomics work (`createDbsc`, `requireProof`, the middleware parsing the `Cookie` header itself instead of via `cookie-parser`) does not change this threat model. `install()` setting `trust proxy` and `requireProof` being a thin facade over the existing `tier` check and `requireBoundProof` are convenience over the same primitives — the cookie prefix, the wire protocol, and the per-tier guarantees are unchanged.
+
 See [docs/security/threat-model.md](./docs/security/threat-model.md) for the STRIDE analysis and [docs/bound-polyfill.md](./docs/bound-polyfill.md) for the per-attack threat table.
 
 ## Dependency policy

@@ -16,6 +16,7 @@ import {
   LEGACY_CHALLENGE_HEADER,
   NoopRateLimiter,
   emit,
+  parseCookieHeader,
   DbscProtocolError,
   DbscVerificationError,
   ErrorCodes,
@@ -29,6 +30,16 @@ import {
 
 export { requireBoundProof } from "./proof.js";
 export type { RequireBoundProofOptions } from "./proof.js";
+export { requireProof } from "./require-proof.js";
+export { createDbsc } from "./create-dbsc.js";
+export type { CreateDbscOptions, DbscKit, BindOptions } from "./create-dbsc.js";
+
+/** Internal carrier so `requireProof()` can reach storage without re-passing it. */
+export interface DbscInternal {
+  storage: StorageAdapter;
+  secure: boolean;
+}
+export const DBSC_INTERNAL: unique symbol = Symbol("dbsc-toolkit.express.internal");
 
 const cookieNames = (secure: boolean) => ({
   bound: secure ? "__Host-dbsc-session" : "dbsc-session",
@@ -551,6 +562,10 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
   }
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.cookies) {
+      req.cookies = parseCookieHeader(req.headers.cookie);
+    }
+
     if (req.method === "POST" && req.path === registrationPath) {
       await handleRegistrationRoute(req, res);
       return;
@@ -595,6 +610,10 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
         ]);
       },
     };
+    (res.locals as Record<PropertyKey, unknown>)[DBSC_INTERNAL] = {
+      storage,
+      secure,
+    } satisfies DbscInternal;
 
     if (sessionId) {
       const session = await storage.getSession(sessionId);

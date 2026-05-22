@@ -157,11 +157,11 @@ You touch three places. That's it.
                                                     return 403
 ```
 
-**Touch point (2)** is the middleware mount — one line, runs on app startup, never thought about again.
+**Touch point (2)** is the setup — `const dbsc = createDbsc({ storage })` then `dbsc.install(app)`. `install()` mounts the protocol middleware, the bound-route JSON parser, the `/dbsc-client` SDK, and `trust proxy` in one call (Express). It runs on app startup and is never thought about again. The raw `dbsc()` middleware is still exported if you want to mount it by hand.
 
 **Touch point (1)** is `bindSession()` — one line at the end of your existing login route. It writes a session row, issues a challenge, sets the registration header, and sets the two short-lived cookies the browser needs. That used to be ~25 lines hand-rolled before 1.4.0; now it's one function call. The call belongs after the credential check — login, or a signup route that immediately authenticates the user. A bare signup with no session established is not the right place; there is nothing to bind yet.
 
-`bindSession()` takes a `sessionId` string. With a cookie-session store (`express-session`, Lucia in DB mode) you pass the id you already have — `req.session.id`. With a JWT / stateless session (NextAuth in JWT mode, iron-session, Lucia stateless) there is no server-side id; call `deriveSessionId({ userId })` to get a stable one. Per-system recipes: [docs/integration-recipes.md](./docs/integration-recipes.md).
+With a `createDbsc()` kit this is `dbsc.bind(res, sessionId, { userId })` — `bindSession` with storage and paths pre-filled. With a cookie-session store (`express-session`, Lucia in DB mode) you pass the id you already have — `req.session.id`. With a JWT / stateless session (NextAuth in JWT mode, iron-session, Lucia stateless) there is no server-side id; call `dbsc.bind(res, { userId })` with no id and the kit derives a stable one for you (via `deriveSessionId`). Per-system recipes: [docs/integration-recipes.md](./docs/integration-recipes.md).
 
 **Touch point (3)** is the tier check on sensitive routes. The library exposes `tier` — you write `if (tier !== "dbsc") return 403`. This is where the security actually lives. If you skip the check, a stolen cookie still works against your server because the cookie alone reaches your handler, the session exists in storage, and your handler proceeds. The whole point of DBSC is the demotion: when a cookie is replayed from a device without the matching hardware key, refresh fails, tier drops to `"none"`, and your gate refuses. **No gate, no defense.**
 
@@ -186,17 +186,15 @@ A few practical patterns:
 **The misconception to kill.** Mounting `app.use(dbsc(...))` by itself does *not* protect anything. The library negotiates the binding and tells you the tier. **You** decide what to do with it. A new adopter who mounts the middleware and forgets the per-route check gets exactly the same security as before — none from DBSC, whatever they had from their existing auth.
 
 ```ts
-// This is what enforcement actually looks like:
-function requireDbsc(req, res, next) {
-  if (res.locals.dbsc.tier !== "dbsc") {
-    return res.status(401).json({ error: "hardware-bound session required" });
-  }
-  next();
-}
+// This is what enforcement actually looks like — one guard per route:
+import express from "express";
+import { requireProof } from "dbsc-toolkit/express";
 
-app.post("/payment", requireDbsc, paymentHandler);
-app.post("/settings/email", requireDbsc, emailHandler);
+app.post("/payment", express.raw({ type: "*/*" }), requireProof(), paymentHandler);
+app.post("/settings/email", express.raw({ type: "*/*" }), requireProof(), emailHandler);
 ```
+
+`requireProof()` requires the request to come from a bound device and prove it per-request. It works on every browser — Chromium's `dbsc` tier passes through, Firefox/Safari's `bound` tier supplies a signed proof — so no route is ever locked to Chromium-only. It is available both as a standalone import and as `kit.requireProof` on a `createDbsc()` kit. The hand-written `if (tier === "none") return 403` is still valid for the simplest cases — `requireProof()` is the secure default.
 
 A note on the gap that remains for the bound tier: a passively-stolen cookie used by another browser still works on tier-only routes (`tier !== "none"`) for as long as the legitimate user's polyfill keeps refreshing — neither protocol signs every request, only refreshes. Native DBSC closes this in practice because Chromium tracks the cookie-to-key association browser-side; the bound polyfill, living in JavaScript, has no equivalent. For specific sensitive routes (payment, admin, password change) on Firefox / Safari, v2.1.0 ships `requireBoundProof()` and `wrapFetch()` — opt-in per-request signing that makes the cookie alone insufficient. v2.3.0 closes the body-substitution gap on top: pass `signBody: true` to both helpers and the proof header carries `bh=sha256(body)` signed into the message — an active MITM that captures a valid signature can no longer modify the request body within the timestamp window. See [docs/per-request-signing.md](./docs/per-request-signing.md).
 
@@ -252,7 +250,7 @@ If you *don't* load the client SDK, you get the original behavior: `tier === "db
 
 The other three (`registration`, `refresh`, `tier_change`) are useful for metrics dashboards but not alert-worthy.
 
-**Reverse proxy.** If you're behind any HTTPS-terminating proxy (Render, Fly, Railway, Heroku, Cloudflare, nginx), call `app.set("trust proxy", true)` in Express *before* mounting the DBSC middleware. Without it, `req.protocol` returns `"http"` even when the user connected via `https://`, the registration response advertises the wrong origin in `scope.origin`, and the browser silently terminates the session. Fastify needs `Fastify({ trustProxy: true })`. Hono and Next.js derive origin from the runtime's request URL and don't need a flag.
+**Reverse proxy.** If you're behind any HTTPS-terminating proxy (Render, Fly, Railway, Heroku, Cloudflare, nginx), Express needs `trust proxy` set. `createDbsc().install(app)` does this for you (pass `trustProxy: false` to opt out); if you mount the raw `dbsc()` middleware by hand, call `app.set("trust proxy", true)` yourself *before* it. Without it, `req.protocol` returns `"http"` even when the user connected via `https://`, the registration response advertises the wrong origin in `scope.origin`, and the browser silently terminates the session. Fastify needs `Fastify({ trustProxy: true })`. Hono and Next.js derive origin from the runtime's request URL and don't need a flag.
 
 **Rate limiting.** A `RateLimiter` interface is exposed; the default `NoopRateLimiter` does nothing. Wire a real one in production — registration and refresh routes are unauthenticated by design (the cookie hasn't been bound yet on registration; on refresh the cookie has just expired). Without rate limiting these are attack surface.
 

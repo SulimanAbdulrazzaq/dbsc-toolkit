@@ -1,6 +1,6 @@
 {
   "name": "dbsc-express-demo",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,11 +8,9 @@
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "cookie-parser": "^1.4.6",
-    "dbsc-toolkit": "^2.5.0",
+    "dbsc-toolkit": "^2.6.0",
     "express": "^5.2.1",
     "express-session": "^1.18.0",
     "ioredis": "^5.4.1"
   }
 }
-

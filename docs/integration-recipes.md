@@ -22,24 +22,27 @@ The one concept every recipe shares: **DBSC binds to a `sessionId` string.** Wit
 You already have a stable id. Bind to it at the end of `/login`.
 
 ```ts
-import { dbsc, bindSession } from "dbsc-toolkit/express";
+import { createDbsc, requireProof } from "dbsc-toolkit/express";
 import { RedisStorage } from "dbsc-toolkit/storage/redis";
 import Redis from "ioredis";
 
-const dbscStorage = new RedisStorage(new Redis(process.env.REDIS_URL));
-
-app.set("trust proxy", true);          // behind any HTTPS-terminating proxy
-app.use(cookieParser());
-app.use(express.json());
+app.use(express.json());               // for your own routes' bodies
 app.use(yourExistingSession());        // unchanged
-app.use(dbsc({ storage: dbscStorage }));
+
+// Configure once, install once. install() handles trust proxy + cookie
+// parsing + the protocol routes + the /dbsc-client SDK.
+const dbsc = createDbsc({ storage: new RedisStorage(new Redis(process.env.REDIS_URL)) });
+dbsc.install(app);
 
 app.post("/login", async (req, res) => {
   const user = await yourPasswordCheck(req.body);   // unchanged
   req.session.userId = user.id;                     // unchanged
-  await bindSession(res, req.session.id, dbscStorage, { userId: user.id });
+  await dbsc.bind(res, req.session.id, { userId: user.id });
   res.json({ ok: true });
 });
+
+// Guard sensitive routes with requireProof() — one call each, every browser.
+app.post("/settings/email", express.raw({ type: "*/*" }), requireProof(), emailHandler);
 ```
 
 `req.session.id` is stable for the life of the session — `express-session` does not rotate it, even with `rolling: true` (rolling resets the cookie's `Max-Age`, not the id). Bind to it directly.
@@ -55,14 +58,14 @@ NextAuth (Auth.js) in the default JWT strategy has no server-side session row �
 ```ts
 // middleware.ts
 import { getToken } from "next-auth/jwt";
-import { createDbscMiddleware } from "dbsc-toolkit/nextjs";
+import { createDbsc } from "dbsc-toolkit/nextjs";
 import { deriveSessionId } from "dbsc-toolkit";
 import { RedisStorage } from "dbsc-toolkit/storage/redis";
 import Redis from "ioredis";
 
 const storage = new RedisStorage(new Redis(process.env.REDIS_URL!));
 
-const dbscMiddleware = createDbscMiddleware({
+const dbsc = createDbsc({
   storage,
   // autoBind runs on every request that has no bound cookie yet. Return the
   // id+userId to bind; return null to skip. NextAuth login flow untouched.
@@ -75,7 +78,7 @@ const dbscMiddleware = createDbscMiddleware({
 });
 
 export function middleware(req) {
-  return dbscMiddleware(req);
+  return dbsc.middleware()(req);
 }
 ```
 
@@ -84,11 +87,11 @@ export function middleware(req) {
 Reading the tier inside a route handler:
 
 ```ts
-import { getDbscSession } from "dbsc-toolkit/nextjs";
-
+// Inside a route handler — the kit's getSession + requireProof:
 export async function POST(req: NextRequest) {
-  const session = await getDbscSession(req, storage);
-  if (session.tier === "none") return NextResponse.json({ error: "not bound" }, { status: 403 });
+  const session = await dbsc.getSession(req);
+  const gate = await dbsc.requireProof(req, session);
+  if (!gate.ok) return gate.response;
   // …
 }
 ```
@@ -103,8 +106,7 @@ Deep dive: [adapters.md](./adapters.md) (Next.js section), [api-reference.md](./
 
 ```ts
 import { getIronSession } from "iron-session";
-import { bindSession } from "dbsc-toolkit/express";   // or your adapter
-import { deriveSessionId } from "dbsc-toolkit";
+// `dbsc` is the createDbsc(...) kit you built at boot.
 
 app.post("/api/login", async (req, res) => {
   const session = await getIronSession(req, res, ironOptions);
@@ -112,32 +114,31 @@ app.post("/api/login", async (req, res) => {
   session.userId = user.id;
   await session.save();                                // unchanged
 
-  const sessionId = await deriveSessionId({ userId: user.id });
-  await bindSession(res, sessionId, dbscStorage, { userId: user.id });
+  // No sessionId argument — the kit derives a stable one from userId.
+  await dbsc.bind(res, { userId: user.id });
   res.json({ ok: true });
 });
 ```
 
-On every later request, recompute the same id from `session.userId` and the middleware will match it.
+`dbsc.bind(res, { userId })` derives the id internally (via `deriveSessionId`), so the binding made at login is the one looked up on every later request.
 
 ---
 
 ## Lucia
 
-Lucia in **database session mode** gives you a real `session.id` — use it directly, exactly like express-session:
+Lucia in **database session mode** gives you a real `session.id` — pass it directly, exactly like express-session:
 
 ```ts
 const { session, user } = await lucia.validateSession(sessionCookieValue);
 if (session && user) {
-  await bindSession(res, session.id, dbscStorage, { userId: user.id });
+  await dbsc.bind(res, session.id, { userId: user.id });
 }
 ```
 
-Lucia in a **stateless / JWT-style** setup has no stable `session.id` — derive one:
+Lucia in a **stateless / JWT-style** setup has no stable `session.id` — let the kit derive one:
 
 ```ts
-const sessionId = await deriveSessionId({ userId: user.id });
-await bindSession(res, sessionId, dbscStorage, { userId: user.id });
+await dbsc.bind(res, { userId: user.id });
 ```
 
 ---
@@ -152,8 +153,9 @@ app.get("/auth/google/callback", async (req, res) => {
   const user = await findOrCreateUser(profile);        // unchanged
   req.session.userId = user.id;                        // unchanged
 
-  // sessionId source depends on your session system — see the recipes above.
-  await bindSession(res, req.session.id, dbscStorage, { userId: user.id });
+  // Cookie-session apps pass req.session.id; JWT apps omit it and the kit
+  // derives one — see the recipes above.
+  await dbsc.bind(res, req.session.id, { userId: user.id });
 
   res.redirect("/");
 });
@@ -191,16 +193,17 @@ A `cookieScope: "site"` option that switches to `__Secure-` cookies with a `Doma
 `/dbsc/registration` and `/dbsc/refresh` are unauthenticated by design (the cookie is not bound yet on registration; it has just expired on refresh). The default `NoopRateLimiter` does nothing — wire a real one in production.
 
 ```ts
-import { dbsc } from "dbsc-toolkit/express";
+import { createDbsc } from "dbsc-toolkit/express";
 
-app.use(dbsc({
+const dbsc = createDbsc({
   storage,
   rateLimiter: {
     checkRegistration: (ip) => redisRateLimiter.check(`dbsc:reg:${ip}`, 10, 60),
     checkRefresh: (ip, sid) => redisRateLimiter.check(`dbsc:ref:${sid}`, 30, 60),
     recordFailure: (ip) => redisRateLimiter.incr(`dbsc:fail:${ip}`),
   },
-}));
+});
+dbsc.install(app);
 ```
 
 `checkRegistration` / `checkRefresh` return `true` to allow. `recordFailure` is fire-and-forget. A simple sliding-window backed by Redis sorted sets is plenty — registration is rare per IP, refresh is once per `boundCookieTtl` per session.
@@ -212,7 +215,7 @@ app.use(dbsc({
 `onEvent` receives every protocol event. The two worth paging on are `session_stolen` (a refresh failed against a session that still has a bound key — a credible replay attempt) and a sustained spike of `verification_failure` on one `sessionId`.
 
 ```ts
-app.use(dbsc({
+const dbsc = createDbsc({
   storage,
   onEvent: (event) => {
     metrics.increment(`dbsc.${event.type}`);
@@ -225,7 +228,8 @@ app.use(dbsc({
       sentry.captureMessage("dbsc verification_failure", { extra: event });
     }
   },
-}));
+});
+dbsc.install(app);
 ```
 
 When `session_stolen` fires, the DBSC tier is already demoted to `"none"` — but the *app* session cookie is still live. Invalidating it in your own store is what actually logs the attacker out. Wire that.

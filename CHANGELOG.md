@@ -2,6 +2,34 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.6.0] — 2026-05-22
+
+This release is about getting out of your way. Integrating used to mean ~25-50 lines — `trust proxy`, `cookieParser`, `express.json`, a static mount, the middleware, `bindSession`, then a hand-written ~13-line tier-check middleware per protected route, re-passing `storage` to every helper. Two additive features collapse that to a configured kit plus a one-call route guard. No breaking changes — every existing export (`dbsc()`, `bindSession`, `requireBoundProof`) still works.
+
+### Added
+
+- **`createDbsc(config)`** — a single configured kit, exported from every adapter (`dbsc-toolkit/express`, `/fastify`, `/hono`, `/nextjs`). You set storage, `secure`, TTLs, the rate limiter and telemetry **once**; the kit's methods close over that config so nothing is re-passed:
+  - `kit.install(app)` — on Express, mounts the whole DBSC surface in one line: the protocol middleware, scoped JSON parsing for the bound routes, the `/dbsc-client` static SDK, and `trust proxy`. Fastify's `install()` registers `@fastify/cookie` (if missing) plus the plugin; Hono's mounts the middleware. Next.js has no app object, so its kit exposes `middleware()` instead.
+  - `kit.bind(res, sessionId, { userId })` — `bindSession` with config pre-filled. Omit the `sessionId` (`kit.bind(res, { userId })`) and the kit derives one with `deriveSessionId` — the JWT path, no helper to import.
+  - `kit.requireProof()` — the guard below, pre-bound to the kit's storage.
+
+- **`requireProof()`** — the route guard, exported standalone from each adapter and available as `kit.requireProof`. One call, no arguments: it requires the request to come from a bound device and prove it per-request. It **works on every browser** — Chromium's hardware-backed `dbsc` tier passes through (the browser enforces the binding), the software `bound` tier (Firefox / Safari / older Chromium) must carry a signed, body-hashed proof.
+  - There is deliberately no "tier level" argument. A `dbsc`-only gate would lock out every Firefox/Safari user; a `bound`-only gate (tier check without a proof) is not actually secure because a stolen cookie rides along between refreshes. `requireProof()` is the one honest answer — and it never sniffs the User-Agent; it reads the *tier*, which is the already-resolved outcome of what the browser cryptographically did.
+  - Because the `bound` tier signs the request body, a **POST** guarded route must deliver raw bytes (`express.raw({ type: "*/*" })`) and the client must call `wrapFetch({ signBody: true })`. GET routes have no body and need no parser.
+  - A rejection returns 403 with a quota-aware `reason`. Used standalone, the proof path reads storage from the request context the middleware populates — no re-passing (Next.js, which has no shared request context, keeps storage in the call). Optional `requireProof({ allowDbscWithoutProof, timestampWindowMs, storage })` covers the edge cases.
+
+- **`parseCookieHeader`, `noBindingReason`** — new core exports backing the above; useful if you write your own adapter.
+
+### Changed
+
+- **The Express middleware no longer needs `cookie-parser`.** It parses the `Cookie` header itself. Existing `cookie-parser`-based setups keep working; new ones can drop the dependency. This is what lets `install()` be a genuine one-liner.
+
+### Notes
+
+- All four example apps were rebuilt on `createDbsc().install()`. The Express demo's setup shrank by ~15 lines and dropped its `cookie-parser` import.
+- `requireBoundProof`, `bindSession`, the raw `dbsc()` middleware, and manual `tier` checks are unchanged — `createDbsc` and `requireProof` are facades over them, not replacements. `requireProof()` is `requireBoundProof` with `signBody: true` and storage auto-picked from the request context.
+- ~26 new tests. Suite is now 160, was 134.
+
 ## [2.5.0] — 2026-05-22
 
 This release makes JWT-based session systems first-class and closes the post-refresh tier flicker. It's additive — existing callers see no change.

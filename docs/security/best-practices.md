@@ -73,7 +73,7 @@ class RedisRateLimiter implements RateLimiter {
   }
 }
 
-app.use(dbsc({ storage, rateLimiter: new RedisRateLimiter(redis) }));
+createDbsc({ storage, rateLimiter: new RedisRateLimiter(redis) }).install(app);
 ```
 
 ## Bound cookie TTL
@@ -94,7 +94,7 @@ Suggested values by application sensitivity:
 Set in adapter options:
 
 ```ts
-app.use(dbsc({ storage, boundCookieTtl: 5 * 60 * 1000 }));
+createDbsc({ storage, boundCookieTtl: 5 * 60 * 1000 }).install(app);
 ```
 
 ## Enforcing the tier — the part that actually defends
@@ -119,19 +119,16 @@ The window in step (1) is the cost of cookie theft under DBSC. Compared to "inde
 
 ### Policy patterns
 
-Per-route gate:
+Per-route gate — `requireProof()` requires a bound device + a per-request proof, and refuses anything else with a 403. It works on every browser:
 
 ```ts
-function requireDbsc(req, res, next) {
-  if (res.locals.dbsc.tier !== "dbsc") {
-    return res.status(401).json({ error: "hardware-bound session required" });
-  }
-  next();
-}
+import express from "express";
+import { requireProof } from "dbsc-toolkit/express";
 
-app.post("/payment", requireDbsc, handlePayment);
-app.post("/account/email", requireDbsc, handleEmailChange);
-app.delete("/account", requireDbsc, handleAccountDelete);
+// POST guarded routes need raw body bytes — requireProof signs the body.
+app.post("/payment", express.raw({ type: "*/*" }), requireProof(), handlePayment);
+app.post("/account/email", express.raw({ type: "*/*" }), requireProof(), handleEmailChange);
+app.delete("/account", requireProof(), handleAccountDelete);
 ```
 
 Read access at any tier, write access at DBSC only:
@@ -143,7 +140,7 @@ app.get("/messages", (req, res) => {
   res.json(getMessages(req.user));
 });
 
-app.post("/messages", requireDbsc, sendMessage);
+app.post("/messages", express.raw({ type: "*/*" }), requireProof(), sendMessage);
 ```
 
 Tier-aware response (different defaults per tier):
@@ -252,8 +249,8 @@ Important to communicate to your team and users:
 - [ ] Bound cookie TTL appropriate for sensitivity (default 10 min may be too long for payments)
 - [ ] Storage backups configured
 - [ ] If using the bound polyfill: `initBoundDbsc()` script tag included on every authenticated page
-- [ ] On Firefox / Safari, the routes you'd want to gate on `tier === "dbsc"` if you could should instead use `requireBoundProof()` so stolen cookies cannot ride along during the freshness window. See [per-request-signing.md](../per-request-signing.md) for the threat boundary and when to use it
-- [ ] For payment / fund-transfer routes specifically, pass `signBody: true` to both `requireBoundProof()` and `wrapFetch()` (v2.3.0+). Without body signing, an MITM can capture a valid signature and change the amount or recipient within the timestamp window; with it, the proof carries `bh=sha256(body)` and the server rejects any substitution
+- [ ] Sensitive routes use `requireProof()` — it requires a per-request proof so a stolen cookie cannot ride along during the freshness window, and it works on Firefox / Safari (no route gets locked to Chromium-only). See [per-request-signing.md](../per-request-signing.md) for the threat boundary
+- [ ] For payment / fund-transfer routes, `requireProof()` on a POST signs the request body (mount `express.raw()` in front) and the client calls `wrapFetch({ signBody: true })`. Without body signing, an MITM can capture a valid signature and change the amount or recipient within the timestamp window; with it, the proof carries `bh=sha256(body)` and the server rejects any substitution
 - [ ] Call `clearBoundKey()` from `dbsc-toolkit/client` after the logout request completes — drops the IndexedDB record explicitly instead of waiting for the SDK to detect the mismatch on next login
 - [ ] User notification flow for `session_stolen`
 - [ ] Tier requirements documented per route (which routes require `tier === "dbsc"` vs `tier !== "none"`)

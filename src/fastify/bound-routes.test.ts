@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import fastifyCookie from "@fastify/cookie";
 import { createHash } from "node:crypto";
-import { dbsc, bindSession, requireBoundProof } from "./index.js";
+import { dbsc, bindSession, requireBoundProof, requireProof, createDbsc } from "./index.js";
 import { MemoryStorage } from "../core/testing/memory-storage-stub.js";
 
 async function startServer(register: (app: FastifyInstance, storage: MemoryStorage) => void) {
@@ -269,6 +269,80 @@ describe("Fastify requireBoundProof preHandler", () => {
       expect(body.code).toBe("SIGNATURE_INVALID");
     } finally {
       await ctx.close();
+    }
+  });
+});
+
+describe("Fastify requireProof", () => {
+  it("rejects tier=none", async () => {
+    const ctx = await startServer((app) => {
+      app.get("/g", { preHandler: requireProof() }, async () => ({ ok: true }));
+    });
+    try {
+      const res = await fetch(`${ctx.url}/g`);
+      expect(res.status).toBe(403);
+      expect((await res.json()).currentTier).toBe("none");
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("rejects a bound session that sends no proof", async () => {
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, reply) => {
+        await bindSession(reply, "ft-rp-1", storage, { userId: "u1", secure: false });
+        return { ok: true };
+      });
+      app.get("/g", { preHandler: requireProof() }, async () => ({ ok: true }));
+    });
+    try {
+      const { jar } = await registerBoundSession(ctx);
+      const res = await fetch(`${ctx.url}/g`, { headers: { Cookie: cookieHeader(jar) } });
+      expect(res.status).toBe(403);
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("passes a bound session with a valid proof — storage from the plugin", async () => {
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, reply) => {
+        await bindSession(reply, "ft-rp-2", storage, { userId: "u1", secure: false });
+        return { ok: true };
+      });
+      app.get("/g", { preHandler: requireProof() }, async () => ({ ok: true }));
+    });
+    try {
+      const { jar, privateKey, sessionId } = await registerBoundSession(ctx);
+      // requireProof signs the body — a GET has none, so the hash is of empty bytes.
+      const ts = Date.now();
+      const bh = b64url(new Uint8Array(createHash("sha256").update(new Uint8Array(0)).digest()));
+      const sig = await signMessage(privateKey, `${sessionId}.GET./g.${ts}.${bh}`);
+      const ok = await fetch(`${ctx.url}/g`, {
+        headers: { Cookie: cookieHeader(jar), "X-Dbsc-Bound-Proof": `ts=${ts};sig=${sig};bh=${bh}` },
+      });
+      expect(ok.status).toBe(200);
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
+describe("Fastify createDbsc", () => {
+  it("install() registers the cookie plugin + protocol routes", async () => {
+    const storage = new MemoryStorage();
+    const app = Fastify();
+    const kit = createDbsc({ storage, secure: false });
+    await kit.install(app);
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const addr = app.server.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/dbsc-bound/state`);
+      expect(res.status).toBe(200);
+      expect((await res.json()).phase).toBe("unbound");
+    } finally {
+      await app.close();
     }
   });
 });

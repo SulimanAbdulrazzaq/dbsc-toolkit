@@ -1,176 +1,217 @@
 # Integrating with an existing auth system
 
-Most production sites already have a working session story: a login route, a session table, a `sid` cookie, middleware that reads it. None of that needs to change to add DBSC. This guide shows the two patterns for layering hardware binding on top of what you already have.
+Most production sites already have a working session story: a login route, a session store, a `sid` cookie, middleware that reads it — Reddit, YouTube, ChatGPT, and friends all do. **None of that changes to add DBSC.** You add a second cookie bound to the device and one guard on sensitive routes. This page is the full step-by-step.
 
-> **Using NextAuth (JWT mode), iron-session, Lucia, or a hand-rolled JWT cookie?** Those have no server-side session id to bind to. See [integration-recipes.md](./integration-recipes.md) for the `deriveSessionId()` recipe for each — this page assumes a cookie-session store like `express-session`.
+## The mental model
 
-## The two-cookie picture
+DBSC sits *beside* your auth. You do **not** touch: login logic, password verification, your session store, your `sid` cookie, your existing middleware. After integration your responses set **two** HttpOnly cookies:
 
-After integration your responses set two HttpOnly cookies, not one:
+- Your existing session cookie (`sid`, `connect.sid`, …) — unchanged. Still drives your auth, still keyed to your user row.
+- `__Host-dbsc-session` — added by DBSC, same value as the session id you pass in. The browser refreshes it on its own with a hardware-key signature (TPM / Secure Enclave / Android Keystore).
 
-- Your existing session cookie (`sid`, `connect.sid`, whatever) — unchanged. Still drives your auth middleware, still keyed to your user row.
-- `__Host-dbsc-session` — added by DBSC. Same value as the session id you pass in. The browser refreshes it every 10 minutes with a hardware-key signature (TPM on Windows, Secure Enclave on Apple Silicon macOS, Keystore on Android).
+Both travel on every request. Your middleware keeps working; the DBSC middleware adds `res.locals.dbsc` (Express) / `req.dbsc` (Fastify) / `c.get("dbsc")` (Hono) / `getDbscSession()` (Next.js). There is no session-store migration — DBSC uses the same id you already have.
 
-Browsers send both on every request. Your existing middleware keeps working. The DBSC middleware adds `res.locals.dbsc.tier` (Express), `req.dbsc.tier` (Fastify), `c.get("dbsc").tier` (Hono), or the value of `getDbscSession(...)` (Next.js). You read that tier on routes that need it.
+---
 
-There is no migration of the session store. DBSC uses the same id you already use.
+## Step 1 — Install
 
-## Option A — Explicit call on login (recommended for new logins)
+```sh
+npm install dbsc-toolkit
+```
 
-Use this when you control the login route and want binding to start on the login response itself.
+Your framework and storage driver are optional peer deps — install what you already use (`ioredis` for Redis, `pg` for Postgres). You do **not** need `cookie-parser`.
+
+## Step 2 — Build the kit once, at boot
+
+`createDbsc(config)` is the single place every option lives. You set it once; `install()`, `bind()` and `requireProof()` all read it — nothing is re-passed.
 
 ```js
-import express from "express";
-import cookieParser from "cookie-parser";
-import { dbsc, bindSession } from "dbsc-toolkit/express";
+import { createDbsc, requireProof } from "dbsc-toolkit/express";
 import { RedisStorage } from "dbsc-toolkit/storage/redis";
 import Redis from "ioredis";
 
-const app = express();
-app.set("trust proxy", true);  // required behind any reverse proxy
-app.use(cookieParser());
-app.use(express.json());
+const dbsc = createDbsc({
+  storage: new RedisStorage(new Redis(process.env.REDIS_URL)),  // the only required option
 
-const storage = new RedisStorage(new Redis(process.env.REDIS_URL));
-app.use(dbsc({ storage }));
+  // production wiring — optional, but do it before going live:
+  rateLimiter: yourRateLimiter,    // /dbsc/* routes are unauthenticated; protect them
+  onEvent: (e) => {                // telemetry
+    metrics.increment(`dbsc.${e.type}`);
+    if (e.type === "session_stolen") {
+      pagerduty.alert(e);
+      yourSessionStore.invalidate(e.sessionId);   // kill the app session too
+    }
+  },
+});
+```
 
-// Your existing login. Unchanged except for the bindSession call.
+Every option and what happens if you omit it is in the [options table](#every-option-and-the-default-if-you-omit-it) below. The short version: **`storage` is the only thing you must pass** — every other option has a sensible default.
+
+## Step 3 — Install (one line, mounts everything)
+
+```js
+dbsc.install(app);
+```
+
+That one call mounts the protocol routes (`/dbsc/registration`, `/dbsc/refresh`, `/dbsc-bound/*`), JSON parsing for the bound routes, the `/dbsc-client` browser SDK, and `trust proxy`. Keep your own `app.use(express.json())` for your routes' bodies.
+
+(Fastify: `await dbsc.install(app)` — async, it registers `@fastify/cookie`. Hono: `dbsc.install(app)`. Next.js has no app object — export `dbsc.middleware()` from `middleware.ts` instead.)
+
+## Step 4 — One line in your existing `/login`
+
+The only change to your auth flow — after the password check, before you respond:
+
+```js
 app.post("/login", async (req, res) => {
-  const user = await verifyPasswordAgainstYourDb(req.body);
+  const user = await yourPasswordCheck(req.body);   // UNCHANGED
   if (!user) return res.status(401).end();
-
-  // Your existing session-issuance. Whatever you already do.
-  const sid = await issueYourOwnSession(user.id);
+  const sid = await issueYourOwnSession(user.id);   // UNCHANGED
   res.cookie("sid", sid, { httpOnly: true, secure: true, sameSite: "lax" });
 
-  // One new line. Chrome will trigger /dbsc/registration within ~1s.
-  await bindSession(res, sid, storage, { userId: user.id });
+  await dbsc.bind(res, sid, { userId: user.id });    // <-- the one new line
 
   res.json({ ok: true });
 });
+```
 
-// Existing protected route. One line added at the top.
-app.post("/payment", async (req, res) => {
-  if (res.locals.dbsc.tier !== "dbsc") {
-    return res.status(403).json({ error: "hardware-bound session required" });
-  }
-  // your handler
+`dbsc.bind` writes the DBSC session row, issues a challenge, sets the registration header, and sets the short-lived cookies the browser needs. Chrome triggers `/dbsc/registration` on its own within ~1s.
+
+**No server-side session id?** JWT-mode NextAuth, iron-session, Lucia-stateless apps have no `sid`. Call `dbsc.bind(res, { userId: user.id })` with **no** id and the kit derives a stable one for you. Per-system recipes: [integration-recipes.md](./integration-recipes.md).
+
+**OAuth / SSO login** (Google, GitHub): same `dbsc.bind(...)` call, placed in the callback after you resolve the external profile to a user, before the redirect.
+
+## Step 5 — Guard sensitive routes with `requireProof()`
+
+One guard. It requires the request to come from a bound device and prove it per-request, and it **works on every browser** — Chromium passes through natively, Firefox/Safari supply a signed proof. Because it signs the request body, a **POST** guarded route delivers raw bytes (`express.raw()`); GET routes need no parser.
+
+```js
+app.get("/feed", feedHandler);                                            // public — no guard
+app.get("/account/settings", requireProof(), settingsPage);               // GET guarded
+app.post("/comment",  express.raw({ type: "*/*" }), requireProof(), commentHandler);
+app.post("/payment",  express.raw({ type: "*/*" }), requireProof(), payHandler);
+```
+
+`requireProof()` checks the DBSC binding only — it does not know your app login. Chain your own auth middleware before it where a route needs both: `app.post("/payment", requireLogin, express.raw(...), requireProof(), handler)`.
+
+A rejection returns 403 with `{ error, currentTier, reason, skipped }`.
+
+## Step 6 — One line in `/logout`
+
+```js
+app.post("/logout", async (req, res) => {
+  await res.locals.dbsc.revoke();                  // <-- tear down the DBSC binding + cookie
+  await yourSessionStore.delete(req.cookies.sid);  // UNCHANGED
+  res.clearCookie("sid", { path: "/" });
+  res.json({ ok: true });
 });
 ```
 
-That's the entire integration: mount + bindSession + one tier check per sensitive route. Three changes on your side.
+`revoke()` deletes the DBSC session row and bound key and clears `__Host-dbsc-session`.
 
-## Option B — Auto-bind (recommended for transparent rollout)
+## Step 7 — Load the browser SDK (for Firefox / Safari)
 
-Use this when you don't want to touch the login route at all. The middleware looks at every request, asks your auth function "is this user logged in?", and if yes, injects the registration header on the response. Chrome triggers binding on the next page load.
+One script tag. Chromium needs nothing — it speaks DBSC natively from the headers `install()` sets.
 
-```js
-app.use(
-  dbsc({
-    storage,
-    autoBind: async (req) => {
-      // Your existing "who is this request" logic.
-      const sid = req.cookies?.sid;
-      if (!sid) return null;
-      const session = await yourSessionStore.get(sid);
-      if (!session) return null;
+```html
+<script type="module">
+  import { initBoundDbsc, wrapFetch, clearBoundKey } from "/dbsc-client/index.js";
 
-      // Return the id to bind to + the userId for the DBSC record.
-      // The id can be the same sid your app already uses.
-      return { sessionId: sid, userId: session.userId };
-    },
-  }),
-);
+  initBoundDbsc();                                  // Firefox/Safari reach tier "bound"
+  const boundFetch = wrapFetch({ signBody: true }); // call requireProof() routes through this
+
+  // on logout:  await clearBoundKey();
+</script>
 ```
 
-Now every logged-in user on a Chromium 145+ browser (Chrome, Edge, Brave, Opera, etc.) gets bound the next time they load any page. Zero change to /login. Zero new endpoints. Users on other browsers (Firefox, Safari) are unaffected — they just don't receive a registration header.
+`wrapFetch` is per-call — never assign it to `globalThis.fetch`. Chromium ignores the proof header it adds, so you can use `boundFetch` for guarded routes on every browser.
 
-`autoBind` only fires when there is no bound cookie AND no registration-in-flight cookie. Once the browser has the bound cookie, the callback is skipped so you don't pay the storage hit on every request.
+---
+
+## Every option, and the default if you omit it
+
+`storage` is the only required option. Everything else has a default — a dev who sets nothing else gets a correct, production-reasonable setup.
+
+| Option | Default if omitted | What it does / what happens without it |
+|---|---|---|
+| `storage` | — (required) | Where sessions, keys and challenges live. Use Redis or Postgres in production; `MemoryStorage` is wiped on restart. |
+| `secure` | `true` | `__Host-` cookies + Secure flag. Leave it. Only set `false` for localhost-over-HTTP testing. |
+| `boundCookieTtl` | `600000` (10 min) | How long a bound cookie lives before the browser refreshes it. Shorter = smaller stolen-cookie window, more refresh traffic. Omit it → 10 min, fine for most apps. |
+| `refreshGraceMs` | `30000` (30 s) | Grace window after a cookie's freshness lapses — see [below](#what-refreshgracems-is). Omit it → 30 s, which is correct; you rarely touch this. |
+| `trustProxy` | `true` | `install()` sets Express `trust proxy`. Needed behind Render/Fly/Cloudflare/nginx so the registration response advertises `https`. Omit it → set for you. Pass `false` only if you manage `trust proxy` yourself. |
+| `clientPath` | `"/dbsc-client"` | Where `install()` serves the browser SDK. Omit it → served at `/dbsc-client`. Pass `false` to not serve it (e.g. you bundle the SDK yourself). |
+| `sessionTtl` | `86400000` (24 h) | Lifetime of the DBSC session row. Omit it → 24 h. |
+| `rateLimiter` | `NoopRateLimiter` (no limiting) | `/dbsc/registration` and `/dbsc/refresh` are unauthenticated by design. Without a real limiter they are unthrottled attack surface — **wire one for production.** |
+| `onEvent` | none (events dropped) | Telemetry callback. Without it you get no `session_stolen` / `verification_failure` alerts. Strongly recommended in production. |
+| `autoBind` | none | Transparent rollout hook — see [below](#variant-autobind). Omit it → binding happens only via your explicit `dbsc.bind()` call in `/login`. |
+| `registrationPath` / `refreshPath` / `bound*Path` | the `/dbsc/*` and `/dbsc-bound/*` defaults | Only change these if those paths collide with your own routes. |
+
+`requireProof()` itself takes no required arguments. Optional `requireProof({ allowDbscWithoutProof, timestampWindowMs, storage })` covers edge cases; `requireProof()` is the normal call.
+
+### What `refreshGraceMs` is
+
+A bound cookie expires after `boundCookieTtl`. When it does, the browser posts `/dbsc/refresh` on its **next** request — but that round-trip takes a moment. In the gap between "cookie expired" and "refresh landed", a freshness check would see no fresh binding and report `tier: "none"`.
+
+That matters for SPAs that poll a `/me` endpoint and **auto-logout when `tier === "none"`** — without grace, they would false-alarm a logout once every `boundCookieTtl` cycle, even though the session is perfectly healthy.
+
+`refreshGraceMs` (default 30 s) holds the previous tier for 30 s past expiry — long enough for the in-flight refresh to land. The freshness check is `lastRefreshAt + boundCookieTtl + refreshGraceMs > now`. **If you omit it you get 30 s, which is the right value** — you only touch it to set `0` on a route that must demote the instant the cookie lapses.
+
+---
+
+## Variant — `autoBind` (transparent rollout, no login change)
+
+If you don't want to touch `/login` at all, pass an `autoBind` callback. The middleware calls it on every request with no bound cookie yet; return `{ sessionId, userId }` to bind, `null` to skip.
+
+```js
+const dbsc = createDbsc({
+  storage,
+  autoBind: async (req) => {
+    const sid = req.cookies?.sid;
+    if (!sid) return null;
+    const session = await yourSessionStore.get(sid);
+    return session ? { sessionId: sid, userId: session.userId } : null;
+  },
+});
+dbsc.install(app);
+```
+
+Now every logged-in user gets bound on their next page load — zero change to `/login`, zero new endpoints. `autoBind` only fires while there is no bound cookie and no registration in flight, so you don't pay the storage hit on every request.
+
+---
 
 ## Per-route policy
 
-The tier check is where the security actually lives. Pattern from a Reddit-style app:
+The model is binary: a route is either public, or it requires `requireProof()`. Pattern from a Reddit-style app:
 
-| Route | Required tier | Reasoning |
-|-------|---------------|-----------|
-| `GET /feed` | none | Read-only, public-ish. Don't lock anyone out. |
-| `GET /comments/:id` | none | Same. |
-| `POST /comment` | bound or dbsc (`!== "none"`) | Some binding, not strict. |
-| `POST /upvote` | bound or dbsc (`!== "none"`) | Cheap action, abuse-prone but not catastrophic. |
-| `POST /post` | bound or dbsc (`!== "none"`) | Same. |
-| `POST /settings/email` | dbsc | Account takeover vector. TPM-backed only — defeats infostealer malware. |
-| `POST /settings/password` | dbsc | Same. |
-| `POST /payment` | dbsc | Same. |
-| `POST /admin/*` | dbsc | Same. |
+| Route | Guard | Reasoning |
+|-------|-------|-----------|
+| `GET /feed`, `GET /comments/:id` | none | Read-only, public-ish. Don't lock anyone out. |
+| `POST /comment`, `/upvote`, `/post` | `requireProof()` | Any authenticated write — the request must come from the bound device. |
+| `POST /settings/email`, `/settings/password` | `requireProof()` | Account-takeover vector — the per-request proof stops a stolen-cookie ride-along. |
+| `POST /payment` | `requireProof()` | Same, plus the signed body hash stops an MITM changing the amount. |
+| `POST /admin/*` | `requireProof()` | Same. |
 
-Express helper if you prefer a middleware:
+`requireProof()` works on every browser — there is no Chromium-only tier to gate on, so no route ever locks out Firefox/Safari. The reading of `res.locals.dbsc.tier` is still there if you want to *display* binding state in the UI; just don't hand-roll a gate on it — `requireProof()` is the secure default.
 
-```js
-const requireBound = (req, res, next) => {
-  if (res.locals.dbsc.tier === "none") {
-    return res.status(403).json({ error: "session not bound" });
-  }
-  next();
-};
-
-const requireDbsc = (req, res, next) => {
-  if (res.locals.dbsc.tier !== "dbsc") {
-    return res.status(403).json({ error: "hardware-bound session required" });
-  }
-  next();
-};
-
-app.post("/comment", requireBound, commentHandler);
-app.post("/settings/email", requireDbsc, emailHandler);
-```
-
-## Non-Chromium users
-
-Firefox, Safari, and older Chromium ignore the native DBSC registration header. If you load `initBoundDbsc()` from `dbsc-toolkit/client` on your page, those browsers land on `tier: "bound"` automatically — the Web Crypto polyfill kicks in ~3 seconds after login and signs refresh challenges silently from then on.
-
-Decide your policy:
-
-- **Default:** load the bound polyfill, gate sensitive routes on `tier !== "none"`. Every modern browser ends up bound; routes that demand TPM-level isolation stay gated on `tier === "dbsc"`.
-- **Permissive without polyfill:** don't load the client SDK. Non-Chromium users stay at `tier: "none"` indefinitely. Only sensible if you've decided not to ship browser-side JavaScript for binding.
-- **Strict:** require `dbsc` everywhere, regardless of polyfill. Excludes any browser without native DBSC support. Only viable for internal tools.
-
-You can't detect "this browser supports DBSC" from the server cleanly. The tier on first request reflects what binding actually happened — `none` means either "no DBSC support" or "DBSC not bound yet." Both look the same and that's fine: you just gate on the tier you got.
+---
 
 ## Migration timeline
 
 Real rollout for an app with existing users:
 
-1. **Day 0:** Deploy DBSC middleware + `bindSession()` on login. Existing sessions are tier=`none`. New logins after deploy are tier=`dbsc` within ~1s.
-2. **Day 1–7:** Watch your telemetry. `registration` events should match login volume on Chrome. `verification_failure` should be near zero. `session_stolen` should be zero.
-3. **Day 7:** Add auto-bind so existing pre-deploy sessions upgrade on their next page load. Most active users are bound by end of week.
-4. **Day 30:** Flip sensitive routes (payment, settings, admin) from `tier !== "none"` to `tier === "dbsc"`. Anyone still on `none` after a month is either on Firefox/Safari or hasn't logged in recently; they re-login and the next login binds them.
+1. **Day 0:** Deploy `createDbsc` + `install` + `dbsc.bind()` in `/login`. Existing sessions are `tier: "none"`; new logins bind within ~1 s.
+2. **Day 1–7:** Watch telemetry. `registration` events should match login volume on Chrome; `verification_failure` near zero; `session_stolen` zero.
+3. **Day 7:** Add `autoBind` so pre-deploy sessions upgrade on their next page load. Most active users are bound by end of week.
+4. **Day 30:** Add `requireProof()` to sensitive routes. Anyone still on `tier: "none"` hasn't logged in recently; their next login binds them. No browser is excluded — `requireProof()` works on Firefox/Safari too.
 
-You never have to choose between "everyone bound" and "everyone unbound." Mixed tiers are the steady state. Your route policies sort users into what they can do at each tier.
+Mixed tiers are the steady state. You never have to choose between "everyone bound" and "everyone unbound".
 
-## Logout
-
-Tear down both layers:
-
-```js
-app.post("/logout", async (req, res) => {
-  // DBSC side
-  await res.locals.dbsc.revoke();
-
-  // Your side
-  await yourSessionStore.delete(req.cookies.sid);
-  res.clearCookie("sid", { path: "/" });
-
-  res.json({ ok: true });
-});
-```
-
-`revoke()` deletes the DBSC session row and the bound key, then clears `__Host-dbsc-session`. After this, the stolen-cookie scenario you were defending against becomes "the cookie maps to a deleted session id" — your existing auth middleware rejects it.
+---
 
 ## What this does NOT protect against
 
-- **An attacker who controls the user's device.** Native DBSC binds the key to the TPM, so on-device malware still cannot extract the key — but it can sign refreshes from within the user's browser process. The bound polyfill is more exposed: its key blob sits on disk in the browser profile and is readable by infostealer malware. For routes that must defeat this class of threat, gate strictly on `tier === "dbsc"`.
-- **Server-side session theft.** If your session store is breached, the attacker has every session row. DBSC's key is server-side too. This is a database-security problem, not a session-binding problem.
-- **CSRF.** DBSC is about exfiltrated cookies, not about cross-site form posts. Keep your CSRF tokens.
-- **TLS interception.** DBSC assumes the TLS layer is intact. If you're MITM'd, the attacker sees the registration JWS too. Use HSTS.
+- **An attacker who controls the user's device.** Native DBSC binds the key to the TPM, so on-device malware cannot extract it — but it can sign refreshes from inside the user's browser process. The bound polyfill is more exposed: its key blob sits on disk in the browser profile, readable by infostealer malware. DBSC is defense-in-depth, not a device-compromise defense.
+- **Server-side session theft.** If your session store is breached the attacker has every row. That's a database-security problem.
+- **CSRF.** DBSC is about exfiltrated cookies, not cross-site form posts. Keep your CSRF tokens.
+- **TLS interception.** DBSC assumes TLS is intact. Use HSTS.
 
-DBSC defends one thing well: a cookie copied off a user's machine becomes useless within one refresh cycle. That is the threat model. Everything else in your stack still matters.
+DBSC defends one thing well: a cookie copied off a user's machine becomes useless within one refresh cycle. Everything else in your stack still matters.

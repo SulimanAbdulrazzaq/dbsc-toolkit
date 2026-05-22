@@ -10,22 +10,23 @@
 // non-Chromium browsers, load /dbsc-client/index.js from a frontend.
 
 import Fastify from "fastify";
-import fastifyCookie from "@fastify/cookie";
 import { randomBytes } from "node:crypto";
 
-import { dbsc, bindSession, requireBoundProof } from "dbsc-toolkit/fastify";
+import { createDbsc } from "dbsc-toolkit/fastify";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
 const storage = new MemoryStorage();
 const app = Fastify({ logger: true, trustProxy: true });
 
-await app.register(fastifyCookie);
-await app.register(dbsc, { storage, secure: false });
+// createDbsc().install() registers @fastify/cookie (if needed) and the dbsc
+// plugin in one call — storage / secure set once.
+const dbscKit = createDbsc({ storage, secure: false });
+await dbscKit.install(app);
 
 app.post("/login", async (req, reply) => {
   const { userId = "anonymous" } = (req.body || {});
   const sid = randomBytes(16).toString("hex");
-  await bindSession(reply, sid, storage, { userId, secure: false });
+  await dbscKit.bind(reply, sid, { userId });
   return { ok: true, sessionId: sid };
 });
 
@@ -35,11 +36,12 @@ app.get("/me", async (req) => ({
   skipped: req.dbsc.skipped,
 }));
 
-// Strict route. tier=dbsc passes through (Chromium browser-level enforcement);
-// tier=bound requires a fresh X-Dbsc-Bound-Proof header.
+// Protected route. requireProof(): tier=dbsc passes through (Chromium
+// browser-level enforcement); tier=bound requires a fresh X-Dbsc-Bound-Proof
+// header. Works on every browser. Storage comes from the kit — nothing re-passed.
 app.get(
   "/profile",
-  { preHandler: requireBoundProof({ storage }) },
+  { preHandler: dbscKit.requireProof() },
   async (req) => ({ ok: true, sessionId: req.dbsc.sessionId, tier: req.dbsc.tier }),
 );
 

@@ -8,6 +8,7 @@ export type {
   StorageAdapter,
   RateLimiter,
   DbscOptions,
+  DbscKitExtras,
   AutoBindResult,
   AnyTelemetryEvent,
   TelemetryEvent,
@@ -55,3 +56,8 @@ export { emit } from "./telemetry/hooks.js";
 
 export { deriveSessionId } from "./derive-session-id.js";
 export type { DeriveSessionIdInput } from "./derive-session-id.js";
+
+export { noBindingReason } from "./protect-policy.js";
+export type { RequireProofOptions } from "./protect-policy.js";
+
+export { parseCookieHeader } from "./protocol/cookies.js";

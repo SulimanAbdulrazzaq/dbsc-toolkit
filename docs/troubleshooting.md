@@ -36,7 +36,9 @@ Wait for the bound cookie to expire (default 10 min, or test with shorter `bound
 
 ### Common causes
 
-**Reverse proxy + missing trust-proxy** (most common cause). If you deploy on Render, Fly, Railway, Heroku, Cloudflare, or any setup that terminates HTTPS at an edge, Express's `req.protocol` returns `"http"` even though the client connected over HTTPS. The library uses `req.protocol` to build `scope.origin` in the registration response, so Chrome receives `scope.origin: "http://..."` and rejects the session per spec § 8.9 step 9 (origin must be same-site with destination). No error surfaces. Fix:
+**Reverse proxy + missing trust-proxy.** If you deploy on Render, Fly, Railway, Heroku, Cloudflare, or any setup that terminates HTTPS at an edge, Express's `req.protocol` returns `"http"` even though the client connected over HTTPS. The library uses `req.protocol` to build `scope.origin` in the registration response, so Chrome receives `scope.origin: "http://..."` and rejects the session per spec § 8.9 step 9 (origin must be same-site with destination). No error surfaces.
+
+`createDbsc().install(app)` sets `trust proxy` for you (pass `trustProxy: false` to opt out), so this class of bug is mostly gone for kit-based setups. If you mount the raw `dbsc()` middleware by hand, set it yourself:
 
 ```ts
 app.set("trust proxy", true);          // Express

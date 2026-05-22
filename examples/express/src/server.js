@@ -19,25 +19,16 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import express from "express";
-import cookieParser from "cookie-parser";
 import session from "express-session";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import Redis from "ioredis";
 
-import { dbsc, bindSession, requireBoundProof } from "dbsc-toolkit/express";
+import { createDbsc, requireProof } from "dbsc-toolkit/express";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 import { RedisStorage } from "dbsc-toolkit/storage/redis";
 
-const require = createRequire(import.meta.url);
-const dbscToolkitPkgPath = require.resolve("dbsc-toolkit/package.json");
-const dbscToolkitClientDir = join(dirname(dbscToolkitPkgPath), "dist", "client");
-
 const app = express();
-app.set("trust proxy", true);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Diagnostic log stream (for the demo UI only, not part of the auth story)
@@ -90,13 +81,7 @@ app.get("/debug-logs/stream", (req, res) => {
 // Shape: { username -> { id, username, passwordHash } }
 const users = new Map();
 
-app.use(cookieParser());
 app.use(express.json());
-
-// Serve the dbsc-toolkit browser SDK at /dbsc-client/ so the HTML can import
-// it as a regular ES module. Pulled from node_modules so it always matches
-// the installed library version.
-app.use("/dbsc-client", express.static(dbscToolkitClientDir));
 
 // Standard server-side session cookie. Cookie name: "connect.sid".
 // This is the user's identity cookie — exactly like Reddit, Discourse,
@@ -117,16 +102,14 @@ app.use(
   }),
 );
 
-// Body parsers for DBSC's two automatic routes. Required because Chrome posts
-// the JWS as a raw text body under various content types.
-app.use("/dbsc/registration", express.text({ type: "*/*", limit: "100kb" }));
-app.use("/dbsc/refresh", express.text({ type: "*/*", limit: "100kb" }));
-
 // Request/response logger (diagnostic — not part of the auth story).
 app.use((req, res, next) => {
   if (req.path === "/debug-logs/stream") return next();
   const start = Date.now();
-  const cookies = Object.keys(req.cookies ?? {});
+  const cookies = (req.headers.cookie ?? "")
+    .split(";")
+    .map((c) => c.split("=")[0].trim())
+    .filter(Boolean);
   const interestingCookies = cookies.filter((n) => n.includes("dbsc") || n === "demo.sid");
   const hdr = req.headers;
   const interesting = {
@@ -183,9 +166,11 @@ async function destroyAppSession(req, res) {
 // PART 2 — "what DBSC adds on top"
 //
 // Three additions:
-//   (1) mount the dbsc middleware (one line)
-//   (2) call bindSession() at the end of /login (one line)
-//   (3) gate sensitive routes on tier === "dbsc" (one if-statement)
+//   (1) createDbsc(config) + dbsc.install(app) — one configured object, one
+//       install call. Mounts the protocol routes, the bound-route JSON parser,
+//       and the /dbsc-client SDK. No cookie-parser, no manual static mount.
+//   (2) dbsc.bind() at the end of /login (one line)
+//   (3) requireProof() on sensitive routes (one call per route)
 //
 // Everything else stays the same. Your password check, your session cookie,
 // your user store — all unchanged.
@@ -197,16 +182,18 @@ const dbscStorage = process.env.REDIS_URL
 
 emitLog({ t: "boot", storage: process.env.REDIS_URL ? "redis" : "memory" });
 
-// Addition (1) — mount the middleware.
-// This makes POST /dbsc/registration + POST /dbsc/refresh exist automatically,
-// and decorates every request with res.locals.dbsc = { sessionId, tier, ... }.
-app.use(
-  dbsc({
-    storage: dbscStorage,
-    boundCookieTtl: 60 * 1000,  // 60s so demo viewers see refresh fire quickly
-    onEvent: (event) => emitLog({ t: "dbsc-event", ...event }),
-  }),
-);
+// Addition (1) — the configured kit. storage / TTL / telemetry set once here.
+const dbscKit = createDbsc({
+  storage: dbscStorage,
+  boundCookieTtl: 60 * 1000,  // 60s so demo viewers see refresh fire quickly
+  onEvent: (event) => emitLog({ t: "dbsc-event", ...event }),
+});
+
+// install() mounts everything: the dbsc middleware (which makes
+// POST /dbsc/registration + /dbsc/refresh + /dbsc-bound/* exist and decorates
+// every request with res.locals.dbsc), scoped JSON parsing for the bound
+// routes, the /dbsc-client static SDK, and `trust proxy`.
+dbscKit.install(app);
 
 // ─── login ───
 // Exactly what a normal Express+bcrypt+session login looks like, PLUS the one
@@ -232,8 +219,9 @@ app.post("/login", async (req, res) => {
 
   // Addition (2) — one line. Tells the browser to start the DBSC binding.
   // Uses the same session id as express-session, so DBSC and your app stay
-  // in sync without a second id-space to manage.
-  await bindSession(res, req.session.id, dbscStorage, { userId: user.id });
+  // in sync without a second id-space to manage. (JWT apps with no server
+  // session id would call db.bind(res, { userId }) and let it derive one.)
+  await dbscKit.bind(res, req.session.id, { userId: user.id });
 
   emitLog({ t: "login", username, userId: user.id, appSessionId: req.session.id });
   res.json({ ok: true, username: user.username });
@@ -291,46 +279,40 @@ app.get("/me", (req, res) => {
   });
 });
 
-// Addition (3) — gate for high-value routes.
-// Reusable middleware. Refuse unless DBSC binding is active and fresh.
-function requireDbsc(req, res, next) {
+// Addition (3) — gate sensitive routes with requireProof().
+//
+// requireProof() is a DBSC-only guard: it requires a bound device + a
+// per-request signed proof (body-hashed on POST). It does NOT know about your
+// app's login — that stays your job. requireLogin below is the app-session
+// check; chain it before requireProof on routes that need both.
+function requireLogin(req, res, next) {
   if (!req.session.userId) {
     return res.status(401).json({ error: "not logged in" });
-  }
-  if (res.locals.dbsc.tier !== "dbsc") {
-    const quotaHit = res.locals.dbsc.skipped.some((s) => s.reason === "quota_exceeded");
-    return res.status(403).json({
-      error: "hardware-bound session required for this route",
-      currentTier: res.locals.dbsc.tier,
-      reason: quotaHit
-        ? "Chrome's DBSC quota is exhausted for this origin (typical during dev login/logout loops). Clear site data or use Incognito to reset."
-        : "your browser has not completed DBSC registration. Use Chromium 145+ (Chrome / Edge / Brave / Opera). Firefox and Safari cannot reach tier=dbsc.",
-      skipped: res.locals.dbsc.skipped,
-    });
   }
   next();
 }
 
-// ─── /profile — the protected route ───
-// Only accessible when DBSC tier is "dbsc". This is the pattern you'd use for
-// payment routes, account-settings routes, admin pages, etc.
-app.get("/profile", requireDbsc, (req, res) => {
+// ─── /profile — the protected route (GET) ───
+// requireProof() replaces the ~13-line hand-written guard. It works on every
+// browser: Chromium's hardware-backed `dbsc` tier passes through, Firefox /
+// Safari's `bound` tier must carry a signed proof. A stolen cookie replayed
+// from another device sees tier=none (or fails the proof) and gets a 403.
+app.get("/profile", requireLogin, requireProof(), (req, res) => {
   res.json({
     username: req.session.username,
     email: `${req.session.username}@example.com`,
     plan: "demo",
-    securityLevel: "hardware-bound (DBSC)",
-    note: "This route is only reachable when tier === 'dbsc'. A stolen cookie replayed from a different device would see tier='none' and a 403 here.",
+    securityLevel: `device-bound (tier: ${res.locals.dbsc.tier})`,
+    note: "Reached only from the bound device. A stolen cookie replayed elsewhere is rejected here.",
   });
 });
 
-// ─── /profile-strict — requires a per-request signed proof ───
-// New in v2.1.0. On tier=dbsc this passes through (Chromium enforces session
-// validity browser-side). On tier=bound the route demands a fresh
-// X-Dbsc-Bound-Proof header signed by the IndexedDB key. A stolen cookie
-// pasted into a second Firefox profile cannot produce that proof, so it's
-// rejected immediately — even within the freshness window.
-app.get("/profile-strict", requireDbscSession, requireBoundProof({ storage: dbscStorage }), (req, res) => {
+// ─── /profile-strict — same guard, demonstrates the proof on a GET ───
+// requireProof() on a GET: the bound tier still presents a signed proof (with
+// an empty body hash). A stolen cookie pasted into a second Firefox profile
+// cannot produce that proof, so it is rejected even within the freshness
+// window. Storage comes from the kit; nothing is re-passed.
+app.get("/profile-strict", requireLogin, requireProof(), (req, res) => {
   res.json({
     username: req.session.username,
     plan: "demo",
@@ -339,21 +321,17 @@ app.get("/profile-strict", requireDbscSession, requireBoundProof({ storage: dbsc
   });
 });
 
-function requireDbscSession(req, res, next) {
-  if (!req.session.userId) return res.status(401).json({ error: "not logged in" });
-  next();
-}
-
-// ─── /payment — strict + body signing (v2.3.0) ───
-// Demonstrates `signBody: true`. The proof header carries bh=sha256(body)
-// signed into the message, so an MITM cannot capture a valid signature and
-// then substitute the body (e.g. change the amount). Uses express.raw so the
-// middleware sees the exact bytes the client hashed.
+// ─── /payment — requireProof() on a POST route ───
+// On a POST, requireProof() signs the request body: the proof header carries
+// bh=sha256(body) signed into the message, so an MITM cannot capture a valid
+// signature and then substitute the body (e.g. change the amount). A POST
+// guarded route mounts express.raw so the guard sees the exact bytes the
+// client hashed — requireProof stays a pure guard, it does not inject parsers.
 app.post(
   "/payment",
-  requireDbscSession,
+  requireLogin,
   express.raw({ type: "*/*" }),
-  requireBoundProof({ storage: dbscStorage, signBody: true }),
+  requireProof(),
   (req, res) => {
     let payload = {};
     try { payload = JSON.parse(req.body.toString("utf8")); } catch { /* ignore */ }
@@ -366,27 +344,15 @@ app.post(
   },
 );
 
-// ─── /profile-soft — any non-none tier ───
-// Demonstrates a route that accepts either DBSC native or the bound polyfill.
-// Both deliver cryptographic refresh signing — the only difference is whether
-// the key lives in TPM/Secure Enclave (dbsc) or the browser keystore (bound).
-app.get("/profile-soft", (req, res) => {
-  if (!req.session.userId) return res.status(401).json({ error: "not logged in" });
-  const tier = res.locals.dbsc.tier;
-
-  if (tier === "none") {
-    return res.status(403).json({
-      error: "any non-none tier required",
-      currentTier: "none",
-      reason: "no binding active. Wait a few seconds after login for the bound polyfill to activate, or use a Chromium 145+ browser for native DBSC.",
-    });
-  }
-
+// ─── /profile-soft — same guard again ───
+// There is only one guard: requireProof(). It works on every browser, so a
+// route is never accidentally locked to Chromium-only.
+app.get("/profile-soft", requireLogin, requireProof(), (req, res) => {
   res.json({
     username: req.session.username,
     plan: "demo",
-    securityLevel: tier,
-    note: `Reached via tier=${tier}. /profile (stricter) requires tier=dbsc.`,
+    securityLevel: res.locals.dbsc.tier,
+    note: `Reached via tier=${res.locals.dbsc.tier}. /profile (stricter) requires tier=dbsc.`,
   });
 });
 
@@ -806,9 +772,10 @@ document.getElementById('clear-btn').onclick = async () => {
   // browser. 8s is the conservative number that always lets Chrome win here.
   const boundInit = (opts = {}) => initBoundDbsc({ nativeProbeWindowMs: 8000, ...opts });
   window.initBoundDbsc = boundInit;
-  // Per-call wrapper. NOT assigned to globalThis.fetch — analytics, React Query,
-  // and other third-party SDKs keep using the native fetch unaffected.
-  window.dbscBoundFetch = wrapFetch();
+  // Per-call wrapper for requireProof() routes. signBody:true because
+  // requireProof signs the request body — on a GET that is just sha256("").
+  // NOT assigned to globalThis.fetch — third-party SDKs keep native fetch.
+  window.dbscBoundFetch = wrapFetch({ signBody: true });
   // On page load, feed the outcome into the same status banner the login
   // handler uses. Covers the case where the user reloads on an active session.
   const initialPromise = boundInit();

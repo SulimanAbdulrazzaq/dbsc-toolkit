@@ -31,6 +31,10 @@ export type {
   RequireBoundProofContext,
   RequireBoundProofResult,
 } from "./proof.js";
+export { requireProof } from "./require-proof.js";
+export type { RequireProofSession, RequireProofResult } from "./require-proof.js";
+export { createDbsc } from "./create-dbsc.js";
+export type { CreateDbscOptions, DbscKit, BindOptions } from "./create-dbsc.js";
 
 const cookieNames = (secure: boolean) => ({
   bound: secure ? "__Host-dbsc-session" : "dbsc-session",

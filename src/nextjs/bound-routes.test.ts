@@ -1,7 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { NextRequest, NextResponse } from "next/server.js";
 import { createHash } from "node:crypto";
-import { createDbscMiddleware, bindSession, getDbscSession, requireBoundProof } from "./index.js";
+import {
+  createDbscMiddleware,
+  bindSession,
+  getDbscSession,
+  requireBoundProof,
+  requireProof,
+  createDbsc,
+} from "./index.js";
 import { MemoryStorage } from "../core/testing/memory-storage-stub.js";
 
 function b64url(b: Uint8Array): string {
@@ -208,5 +215,37 @@ describe("Next.js requireBoundProof", () => {
     if (!gate.ok) {
       expect(gate.response.status).toBe(403);
     }
+  });
+});
+
+describe("Next.js requireProof", () => {
+  it("rejects tier=none", async () => {
+    const storage = new MemoryStorage();
+    const req = reqWith({ url: "http://x/g" });
+    const session = await getDbscSession(req, storage, { secure: false });
+    const gate = await requireProof(req, session, { storage });
+    expect(gate.ok).toBe(false);
+    if (!gate.ok) expect(gate.response.status).toBe(403);
+  });
+
+  it("rejects a bound session that sends no proof", async () => {
+    const storage = new MemoryStorage();
+    const { jar } = await bootstrapBoundSession(storage, "next-rp-1");
+    const req = reqWith({ url: "http://x/g", cookies: jar });
+    const session = await getDbscSession(req, storage, { secure: false });
+    expect(session.tier).toBe("bound");
+    const gate = await requireProof(req, session, { storage });
+    expect(gate.ok).toBe(false);
+  });
+
+  it("createDbsc kit threads storage into requireProof", async () => {
+    const storage = new MemoryStorage();
+    const kit = createDbsc({ storage, secure: false });
+    const { jar } = await bootstrapBoundSession(storage, "next-rp-2");
+    const req = reqWith({ url: "http://x/g", cookies: jar });
+    const session = await kit.getSession(req);
+    const gate = await kit.requireProof(req, session);
+    // tier=bound + no proof header -> rejected, but storage came from the kit.
+    expect(gate.ok).toBe(false);
   });
 });

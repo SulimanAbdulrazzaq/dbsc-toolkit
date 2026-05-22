@@ -26,6 +26,16 @@ import {
 
 export { requireBoundProof } from "./proof.js";
 export type { RequireBoundProofOptions } from "./proof.js";
+export { requireProof } from "./require-proof.js";
+export { createDbsc } from "./create-dbsc.js";
+export type { CreateDbscOptions, DbscKit, BindOptions } from "./create-dbsc.js";
+
+/** Internal carrier so `requireProof()` can reach storage without re-passing it. */
+export interface DbscInternal {
+  storage: StorageAdapter;
+  secure: boolean;
+}
+export const DBSC_INTERNAL: unique symbol = Symbol("dbsc-toolkit.hono.internal");
 
 const cookieNames = (secure: boolean) => ({
   bound: secure ? "__Host-dbsc-session" : "dbsc-session",
@@ -475,6 +485,10 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
       },
     };
 
+    (dbscSession as unknown as Record<PropertyKey, unknown>)[DBSC_INTERNAL] = {
+      storage,
+      secure,
+    } satisfies DbscInternal;
     c.set("dbsc", dbscSession);
 
     await next();

@@ -4,7 +4,7 @@ import cookieParser from "cookie-parser";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createHash } from "node:crypto";
-import { dbsc, bindSession, requireBoundProof } from "./index.js";
+import { dbsc, bindSession, requireBoundProof, requireProof, createDbsc } from "./index.js";
 import { MemoryStorage } from "../core/testing/memory-storage-stub.js";
 
 async function startServer(register: (app: express.Application, storage: MemoryStorage) => void) {
@@ -449,6 +449,143 @@ describe("refreshGraceMs", () => {
         headers: { Cookie: "dbsc-session=grace-2" },
       });
       expect((await res.json()).tier).toBe("none");
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
+describe("requireProof", () => {
+  it("rejects tier=none with 403", async () => {
+    const ctx = await startServer((app) => {
+      app.get("/g", requireProof(), (_req, res) => res.json({ ok: true }));
+    });
+    try {
+      const res = await fetch(`${ctx.url}/g`);
+      expect(res.status).toBe(403);
+      expect((await res.json()).currentTier).toBe("none");
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("rejects a bound session that sends no proof header", async () => {
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, res) => {
+        await bindSession(res, "rp-noproof-1", storage, { userId: "u1", secure: false });
+        res.json({ ok: true });
+      });
+      app.get("/g", requireProof(), (_req, res) => res.json({ ok: true }));
+    });
+    try {
+      const { jar } = await registerBoundSession(ctx);
+      const res = await fetch(`${ctx.url}/g`, { headers: { Cookie: cookieHeader(jar) } });
+      expect(res.status).toBe(403);
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("passes a bound session with a valid proof — storage from the middleware, no re-passing", async () => {
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, res) => {
+        await bindSession(res, "rp-proof-1", storage, { userId: "u1", secure: false });
+        res.json({ ok: true });
+      });
+      app.get("/g", requireProof(), (_req, res) => res.json({ ok: true }));
+    });
+    try {
+      const { jar, privateKey, sessionId } = await registerBoundSession(ctx);
+      // requireProof signs the body — a GET has none, so the hash is of empty bytes.
+      const ts = Date.now();
+      const bh = b64url(new Uint8Array(createHash("sha256").update(new Uint8Array(0)).digest()));
+      const sig = await signMessage(privateKey, `${sessionId}.GET./g.${ts}.${bh}`);
+      const res = await fetch(`${ctx.url}/g`, {
+        headers: { Cookie: cookieHeader(jar), "X-Dbsc-Bound-Proof": `ts=${ts};sig=${sig};bh=${bh}` },
+      });
+      expect(res.status).toBe(200);
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("on a POST enforces body signing", async () => {
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, res) => {
+        await bindSession(res, "rp-pay-1", storage, { userId: "u1", secure: false });
+        res.json({ ok: true });
+      });
+      app.post(
+        "/pay",
+        express.raw({ type: "*/*" }),
+        requireProof(),
+        (_req, res) => res.json({ ok: true }),
+      );
+    });
+    try {
+      const { jar, privateKey, sessionId } = await registerBoundSession(ctx);
+      const payload = '{"amount":1}';
+      const bytes = new TextEncoder().encode(payload);
+      const ts = Date.now();
+      const bh = b64url(new Uint8Array(createHash("sha256").update(bytes).digest()));
+      const sig = await signMessage(privateKey, `${sessionId}.POST./pay.${ts}.${bh}`);
+      const res = await fetch(`${ctx.url}/pay`, {
+        method: "POST",
+        headers: {
+          Cookie: cookieHeader(jar),
+          "X-Dbsc-Bound-Proof": `ts=${ts};sig=${sig};bh=${bh}`,
+          "Content-Type": "application/octet-stream",
+        },
+        body: payload,
+      });
+      expect(res.status).toBe(200);
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
+describe("createDbsc", () => {
+  async function startKitServer(register: (app: express.Application, kit: ReturnType<typeof createDbsc>) => void) {
+    const storage = new MemoryStorage();
+    const app = express();
+    const kit = createDbsc({ storage, secure: false, clientPath: false });
+    kit.install(app);
+    register(app, kit);
+    const server = createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+    return {
+      storage,
+      url: `http://127.0.0.1:${port}`,
+      close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    };
+  }
+
+  it("install() mounts the protocol routes", async () => {
+    const ctx = await startKitServer(() => {});
+    try {
+      const res = await fetch(`${ctx.url}/dbsc-bound/state`);
+      expect(res.status).toBe(200);
+      expect((await res.json()).phase).toBe("unbound");
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("bind() without a sessionId derives a stable id from userId", async () => {
+    const ctx = await startKitServer((app, kit) => {
+      app.post("/login", async (_req, res) => {
+        const sid = await kit.bind(res, { userId: "user-42" });
+        res.json({ sid });
+      });
+    });
+    try {
+      const a = await (await fetch(`${ctx.url}/login`, { method: "POST" })).json();
+      const b = await (await fetch(`${ctx.url}/login`, { method: "POST" })).json();
+      expect(a.sid).toBeTruthy();
+      expect(a.sid).toBe(b.sid);
+      expect(await ctx.storage.getSession(a.sid)).toBeTruthy();
     } finally {
       await ctx.close();
     }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Hono } from "hono";
 import { createHash } from "node:crypto";
-import { dbsc, bindSession, requireBoundProof } from "./index.js";
+import { dbsc, bindSession, requireBoundProof, requireProof, createDbsc } from "./index.js";
 import { MemoryStorage } from "../core/testing/memory-storage-stub.js";
 
 function buildApp(register?: (app: Hono, storage: MemoryStorage) => void) {
@@ -208,5 +208,62 @@ describe("Hono requireBoundProof", () => {
     expect(res.status).toBe(403);
     const body = await res.json() as any;
     expect(body.code).toBe("SIGNATURE_INVALID");
+  });
+});
+
+describe("Hono requireProof", () => {
+  it("rejects tier=none", async () => {
+    const { app } = buildApp((a) => {
+      a.get("/g", requireProof(), (c) => c.json({ ok: true }));
+    });
+    const res = await app.fetch(new Request("http://x/g"));
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as any).currentTier).toBe("none");
+  });
+
+  it("rejects a bound session that sends no proof", async () => {
+    const { app } = buildApp((a, s) => {
+      a.post("/login", async (c) => {
+        await bindSession(c, "hono-rp-1", s, { userId: "u1", secure: false });
+        return c.json({ ok: true });
+      });
+      a.get("/g", requireProof(), (c) => c.json({ ok: true }));
+    });
+    const { jar } = await registerBoundSession(app, "hono-rp-1");
+    const res = await app.fetch(new Request("http://x/g", { headers: { Cookie: cookieHeader(jar) } }));
+    expect(res.status).toBe(403);
+  });
+
+  it("passes a bound session with a valid proof — storage from the middleware", async () => {
+    const { app } = buildApp((a, s) => {
+      a.post("/login", async (c) => {
+        await bindSession(c, "hono-rp-2", s, { userId: "u1", secure: false });
+        return c.json({ ok: true });
+      });
+      a.get("/g", requireProof(), (c) => c.json({ ok: true }));
+    });
+    const { jar, privateKey } = await registerBoundSession(app, "hono-rp-2");
+
+    // requireProof signs the body — a GET has none, so the hash is of empty bytes.
+    const ts = Date.now();
+    const bh = b64url(new Uint8Array(createHash("sha256").update(new Uint8Array(0)).digest()));
+    const sig = await signMessage(privateKey, `hono-rp-2.GET./g.${ts}.${bh}`);
+    const ok = await app.fetch(
+      new Request("http://x/g", {
+        headers: { Cookie: cookieHeader(jar), "X-Dbsc-Bound-Proof": `ts=${ts};sig=${sig};bh=${bh}` },
+      }),
+    );
+    expect(ok.status).toBe(200);
+  });
+});
+
+describe("Hono createDbsc", () => {
+  it("install() mounts the protocol routes", async () => {
+    const storage = new MemoryStorage();
+    const app = new Hono();
+    createDbsc({ storage, secure: false }).install(app);
+    const res = await app.fetch(new Request("http://x/dbsc-bound/state"));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as any).phase).toBe("unbound");
   });
 });

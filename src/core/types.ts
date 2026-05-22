@@ -143,3 +143,19 @@ export interface AutoBindResult {
   sessionId: string;
   userId: string;
 }
+
+/**
+ * Extra options accepted by every adapter's `createDbsc()` on top of that
+ * adapter's middleware options. The kit returned by `createDbsc()` carries
+ * these so `install()`, `bind()`, and `requireProof()` need no re-passing.
+ */
+export interface DbscKitExtras {
+  /** Use `__Host-` cookies + the Secure flag. Default true. */
+  secure?: boolean;
+  /** Mount path for the static client SDK. Default "/dbsc-client". `false` skips it. */
+  clientPath?: string | false;
+  /** Default session TTL (ms) for `bind()`. */
+  sessionTtl?: number;
+  /** Let `install()` set `trust proxy`. Default true. Set false to leave it alone. */
+  trustProxy?: boolean;
+}

@@ -48,30 +48,22 @@ npm install express cookie-parser pg         # Express + Postgres
 
 ## Quick start
 
-Copy-paste runnable. The whole picture is ~25 lines — `trust proxy`, `cookieParser`, `express.json` and the static-file mount for the polyfill all matter, and missing any of them is the #1 reason "tier is always `none`" tickets get opened.
+Copy-paste runnable. `createDbsc()` takes your config once; `install()` mounts everything — the protocol routes, the bound-route JSON parser, the `/dbsc-client` SDK, and `trust proxy`. No `cookie-parser`, no manual static mount.
 
 ```ts
 import express from "express";
-import cookieParser from "cookie-parser";
 import { randomUUID } from "node:crypto";
-import { dbsc, bindSession } from "dbsc-toolkit/express";
+import { createDbsc } from "dbsc-toolkit/express";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
 const app = express();
+app.use(express.json());               // for your own routes' JSON bodies
 
-app.set("trust proxy", true);          // required behind Render / Fly / Cloudflare / nginx
-app.use(cookieParser());               // required: bindSession sets HttpOnly cookies
-app.use(express.json());               // required: bound polyfill POSTs JSON
-app.use(
-  "/dbsc-client",                      // serves the browser SDK for Firefox / Safari
-  express.static(new URL("../node_modules/dbsc-toolkit/dist/client/", import.meta.url).pathname),
-);
-
-const storage = new MemoryStorage();   // swap for RedisStorage / PostgresStorage in production
-app.use(dbsc({ storage }));            // mounts /dbsc/registration, /dbsc/refresh, /dbsc-bound/*
+const dbsc = createDbsc({ storage: new MemoryStorage() });  // swap for Redis/Postgres in prod
+dbsc.install(app);                      // mounts /dbsc/*, /dbsc-bound/*, the SDK, trust proxy
 
 app.post("/login", async (req, res) => {
-  await bindSession(res, randomUUID(), storage, { userId: req.body.username });
+  await dbsc.bind(res, randomUUID(), { userId: req.body.username });
   res.json({ ok: true });
 });
 
@@ -92,46 +84,67 @@ Without the script tag those browsers stay on `tier: "none"`. Native Chromium 14
 
 ### Common failure modes
 
-- **`tier` always reads `"none"` on Chromium 145+?** Forgot `trust proxy`, on plain HTTP, or middleware order is wrong (cookieParser must run before `dbsc`).
+- **`tier` always reads `"none"` on Chromium 145+?** Running on plain HTTP (DBSC needs HTTPS), or `dbsc.install(app)` was never called. `install()` already sets `trust proxy` and parses cookies, so the old "middleware order" class of bug is gone.
 - **Chrome loops registration?** Storage was wiped — switch off `MemoryStorage` to Redis or Postgres before deploying anywhere that ever restarts.
 - **Tier flips back to `"none"` right after login?** The race between `/login` returning and the browser running `POST /dbsc/registration`. Poll `/me` for ~1 s after login or await the bound-SDK outcome promise. The demo wires both — see [examples/express/src/server.js](./examples/express/src/server.js).
-- **Firefox / Safari still on `"none"`?** Forgot the `<script type="module">` tag above, or the static-file mount is wrong.
+- **Firefox / Safari still on `"none"`?** Forgot the `<script type="module">` tag above. `install()` serves the SDK at `/dbsc-client` for you; you still load it on the page.
 
 Full walk-through: [docs/getting-started.md](./docs/getting-started.md).
 
 ## Adding to an existing app
 
-You don't rewrite login, you don't migrate the session store. DBSC sits alongside your existing session cookie and binds to the same session id. For a typical Express app, the new lines you write are:
+You don't rewrite login, you don't migrate the session store. DBSC sits alongside your existing session cookie and binds to the same session id. The whole integration for an Express app:
 
-1. `import { dbsc, bindSession, requireBoundProof } from "dbsc-toolkit/express";`
-2. `import { RedisStorage } from "dbsc-toolkit/storage/redis";`
-3. `const dbscStorage = new RedisStorage(new Redis(process.env.REDIS_URL));`
-4. `app.use(dbsc({ storage: dbscStorage }));`
-5. End of `/login`: `await bindSession(res, sessionId, dbscStorage, { userId: user.id });`
-6. Start of `/logout`: `await res.locals.dbsc.revoke();`
+```ts
+import { createDbsc, requireProof } from "dbsc-toolkit/express";
+import { RedisStorage } from "dbsc-toolkit/storage/redis";
+import Redis from "ioredis";
 
-If your app isn't already set up for HTTPS-terminating proxies, `cookieParser`, or JSON bodies, you also need the four lines in the quick-start block above (`trust proxy`, `cookieParser()`, `express.json()`, and the `/dbsc-client/*` static mount for the polyfill). Most existing apps already have the first three.
+// 1. configure the kit once — storage is the only required option
+const dbsc = createDbsc({ storage: new RedisStorage(new Redis(process.env.REDIS_URL)) });
 
-`sessionId` on line 5 is whatever id your existing session store issues. DBSC binds to that same id; you don't manage a second id-space.
+// 2. install once — mounts the protocol routes, trust proxy, the SDK
+dbsc.install(app);
 
-Using **NextAuth (JWT mode), iron-session, Lucia, or a hand-rolled JWT cookie**? Those have no server-side session id — call `deriveSessionId({ userId })` to get a stable one to pass to `bindSession()`. Copy-paste recipes for every common session system: [docs/integration-recipes.md](./docs/integration-recipes.md).
+// 3. one line in your existing /login, after the password check
+app.post("/login", async (req, res) => {
+  const user = await yourPasswordCheck(req.body);           // unchanged
+  const sid  = await issueYourOwnSession(user.id);          // unchanged
+  await dbsc.bind(res, sid, { userId: user.id });           // <- the new line
+  res.json({ ok: true });
+});
 
-## Choose your protection level per route
+// 4. guard sensitive routes — one call. POST routes deliver raw bytes.
+app.post("/payment", express.raw({ type: "*/*" }), requireProof(), paymentHandler);
 
-> **First time here?** [docs/usage.md](./docs/usage.md) walks the 6-line setup and the table below in order, with concrete code for each lever. Five-minute read.
+// 5. one line in /logout
+app.post("/logout", async (req, res) => {
+  await res.locals.dbsc.revoke();                           // <- the new line
+  await yourSessionStore.delete(req.cookies.sid);           // unchanged
+  res.json({ ok: true });
+});
+```
 
-After the 6-line setup, every request through the middleware has a `tier` field on the request context. The library does not auto-protect anything — you pick the level per route. The library exposes three levers; this table tells you which one to reach for.
+`install()` handles `trust proxy`, cookie parsing, the bound-route JSON parser, and the `/dbsc-client` static mount — you don't wire those. You still need `express.json()` for your *own* routes' bodies. `sessionId` is whatever id your session store already issues; DBSC binds to it — no second id-space.
 
-| Your route does… | Use this guard | What it stops | Detailed in |
-|---|---|---|---|
-| Public / read-only (feed, search, public profile) | Nothing | n/a — no auth gate at all | n/a |
-| Authenticated action with no money / takeover risk (post, comment, upvote, edit own bio) | `if (req.dbsc.tier === "none") return 403` | Stolen cookie loses access after one refresh cycle (~60s–10min depending on `boundCookieTtl`) | [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md) (per-route policy table) |
-| Account takeover risk (password change, email change, admin actions) | `requireBoundProof({ storage })` | Stolen cookie cannot ride along even while the victim is online — Firefox / Safari now have the same guarantee Chrome gets from native DBSC | [docs/per-request-signing.md](./docs/per-request-signing.md) |
-| Moves money or numeric input that matters (payment, transfer, refund, withdraw) | `requireBoundProof({ storage, signBody: true })` on the server + `wrapFetch({ signBody: true })` on the client | All of the above PLUS an active MITM cannot substitute the request body (amount, recipient, etc.) within the timestamp window | [docs/per-request-signing.md#body-signing-setup-v230](./docs/per-request-signing.md) |
+**No server-side session id** (NextAuth JWT mode, iron-session, Lucia stateless)? Call `dbsc.bind(res, { userId })` with no id — the kit derives a stable one. Per-system recipes: [docs/integration-recipes.md](./docs/integration-recipes.md).
 
-**Each row is opt-in and additive.** A route can sit at row 2 today and graduate to row 3 next quarter when you ship payments — no migration, no wire-format change, no version bump. The defaults (no guard) give DBSC's binding semantics without enforcement; pick the row your threat model needs.
+**The full step-by-step** — every option and its default, the `autoBind` transparent-rollout variant, the per-route policy table, the migration timeline — is in [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md).
 
-The full threat boundary for each level, the per-framework wiring (Fastify / Hono / Next.js), and the migration timeline for an existing app are in [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md) and [docs/per-request-signing.md](./docs/per-request-signing.md).
+## Protect your routes
+
+> **First time here?** [docs/usage.md](./docs/usage.md) walks the setup and the guard in order, with concrete code. Five-minute read.
+
+After `createDbsc().install()`, every request through the middleware has a `tier` field on the request context. The library does not auto-protect anything — you add **one guard, `requireProof()`**, to each route that matters.
+
+| Your route does… | Use this guard | What it stops |
+|---|---|---|
+| Public / read-only (feed, search, public profile) | Nothing | n/a — no auth gate at all |
+| Anything authenticated (post, comment, upvote, settings, payment, admin) | `requireProof()` (server) + `wrapFetch({ signBody: true })` (client, for Firefox/Safari) | A stolen cookie cannot be replayed from another device, cannot ride along during the freshness window, and an MITM cannot substitute a POST body |
+
+There is deliberately **no tier-level argument**. A `dbsc`-only gate would lock out every Firefox/Safari user; a `bound`-only check (tier without a per-request proof) is not actually secure. `requireProof()` is the one honest answer — it requires a bound device + a per-request proof and works on every browser (Chromium passes through natively, Firefox/Safari supply the signed proof). It signs the request body, so a POST guarded route mounts `express.raw()` in front.
+
+The full threat boundary, the per-framework wiring (Fastify / Hono / Next.js), and the migration timeline for an existing app are in [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md) and [docs/per-request-signing.md](./docs/per-request-signing.md).
 
 ## Subpath imports
 

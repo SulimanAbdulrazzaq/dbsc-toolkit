@@ -13,7 +13,7 @@ One thing to plan for from day one: registration happens *after* the login respo
 ## Install
 
 ```sh
-npm install dbsc-toolkit express cookie-parser
+npm install dbsc-toolkit express
 ```
 
 `dbsc-toolkit` declares `express`, `fastify`, `hono`, `next`, `ioredis`, and `pg` as optional peer dependencies. You install only what you actually use. If you also want Redis or Postgres storage, install those alongside:
@@ -29,23 +29,20 @@ Save as `server.js`:
 
 ```js
 import express from "express";
-import cookieParser from "cookie-parser";
 import { randomUUID } from "node:crypto";
-import { dbsc, bindSession } from "dbsc-toolkit/express";
+import { createDbsc } from "dbsc-toolkit/express";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
 const app = express();
-app.set("trust proxy", true);   // required behind Render, Fly, Cloudflare, nginx, etc.
-const storage = new MemoryStorage();
+app.use(express.json());          // for your own routes' bodies
 
-app.use(cookieParser());
-app.use(express.json());
-
-app.use(dbsc({ storage }));
+// Configure once. install() mounts the protocol routes, the bound-route JSON
+// parser, the /dbsc-client SDK, and `trust proxy` — one call.
+const dbsc = createDbsc({ storage: new MemoryStorage() });
+dbsc.install(app);
 
 app.post("/login", async (req, res) => {
-  const sessionId = randomUUID();
-  await bindSession(res, sessionId, storage, { userId: req.body.username });
+  await dbsc.bind(res, randomUUID(), { userId: req.body.username });
   res.json({ ok: true });
 });
 
@@ -58,7 +55,7 @@ app.get("/me", (_req, res) => {
 app.listen(3000);
 ```
 
-`bindSession()` does five things for you: writes the session row, issues a challenge, builds the registration header, sets both header names (legacy + new), and sets the two short-lived cookies Chrome needs to complete registration. That used to be ~25 lines hand-rolled before 1.4.0.
+`dbsc.bind()` does five things for you: writes the session row, issues a challenge, builds the registration header, sets both header names (legacy + new), and sets the two short-lived cookies Chrome needs to complete registration. `install()` mounts the protocol routes and sets `trust proxy` so you never wire those by hand.
 
 ## HTTPS is non-negotiable
 
@@ -83,7 +80,7 @@ If any step fails, see [troubleshooting](./troubleshooting.md).
 
 ## What just happened
 
-You did not write the `/dbsc/registration` or `/dbsc/refresh` route handlers. The middleware mounted them automatically when you called `app.use(dbsc(...))`. The browser found the `Secure-Session-Registration` header on `/login`, generated a hardware-backed keypair, and POSTed proof to the path you specified. The middleware verified the JWS, stored the public key under the session ID, set the bound cookie, and returned the session config that tells the browser how to refresh.
+You did not write the `/dbsc/registration` or `/dbsc/refresh` route handlers. The middleware mounted them automatically when you called `dbsc.install(app)`. The browser found the `Secure-Session-Registration` header on `/login`, generated a hardware-backed keypair, and POSTed proof to the path you specified. The middleware verified the JWS, stored the public key under the session ID, set the bound cookie, and returned the session config that tells the browser how to refresh.
 
 From this point forward your application code never has to think about DBSC. The middleware handles every auto-refresh in the background.
 
@@ -92,6 +89,6 @@ From this point forward your application code never has to think about DBSC. The
 - Bolting DBSC onto an existing app with its own session cookie? See [integrating with existing auth](./integrating-existing-auth.md).
 - Switch to a real storage adapter — see [storage](./storage.md).
 - Read [protocol](./protocol.md) to understand exactly what Chrome and the server exchange.
-- Use `tier` to gate sensitive operations — gate on `tier !== "none"` for routes that need any binding, on `tier === "dbsc"` for routes that need TPM-backed binding specifically. See [bound-polyfill.md](./bound-polyfill.md) for the per-tier threat boundary.
+- Gate sensitive operations with `requireProof()` — one no-argument guard that requires a bound device + a per-request proof, works on every browser. See [usage.md](./usage.md) and [per-request-signing.md](./per-request-signing.md) for the threat boundary.
 - Wire telemetry — see [telemetry](./telemetry.md).
 - Going to production — see [deployment](./deployment.md) and [security best practices](./security/best-practices.md).

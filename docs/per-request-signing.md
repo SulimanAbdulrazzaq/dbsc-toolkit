@@ -4,6 +4,8 @@ The `bound` tier ([docs/bound-polyfill.md](./bound-polyfill.md)) signs the *refr
 
 This page describes the opt-in feature that closes that gap for the bound tier on the specific routes you choose to protect.
 
+> **Shorthand:** `requireProof()` is `requireBoundProof` with `signBody: true` and storage taken from the middleware context so you don't re-pass it — it is the guard you reach for on real routes. The `requireBoundProof` documented here is the lower-level primitive: use it directly when you need a proof check *without* body signing, or the raw `RequireBoundProofOptions`. Everything below applies to both.
+
 ## When to use this — and when not to
 
 **Use it on sensitive routes only.** Payments, admin actions, password change, email change, two-factor enrolment. The routes where a stolen-cookie ride-along during the freshness window would matter.
