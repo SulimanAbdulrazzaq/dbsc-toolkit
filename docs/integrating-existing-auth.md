@@ -27,19 +27,27 @@ Your framework and storage driver are optional peer deps — install what you al
 
 ```js
 import { createDbsc, requireProof } from "dbsc-toolkit/express";
-import { RedisStorage } from "dbsc-toolkit/storage/redis";
+import { RedisStorage, RedisReplayCache } from "dbsc-toolkit/storage/redis";
 import Redis from "ioredis";
 
+const redis = new Redis(process.env.REDIS_URL);
+
 const dbsc = createDbsc({
-  storage: new RedisStorage(new Redis(process.env.REDIS_URL)),  // the only required option
+  storage: new RedisStorage(redis),  // the only required option
 
   // production wiring — optional, but do it before going live:
   rateLimiter: yourRateLimiter,    // /dbsc/* routes are unauthenticated; protect them
+  replayCache: new RedisReplayCache(redis),  // v2.8+: defeats captured-proof replay
   onEvent: (e) => {                // telemetry
     metrics.increment(`dbsc.${e.type}`);
     if (e.type === "session_stolen") {
       pagerduty.alert(e);
       yourSessionStore.invalidate(e.sessionId);   // kill the app session too
+    }
+    if (e.type === "polyfill_missing") {
+      // v2.8+: a Chromium session never registered its polyfill key —
+      // requireProof() will 403 every guarded request until they refresh.
+      metrics.increment("dbsc.polyfill_missing");
     }
   },
 });
@@ -108,22 +116,37 @@ app.post("/logout", async (req, res) => {
 
 `revoke()` deletes the DBSC session row and bound key and clears `__Host-dbsc-session`.
 
-## Step 7 — Load the browser SDK (for Firefox / Safari)
+## Step 7 — Load the browser SDK
 
-One script tag. Chromium needs nothing — it speaks DBSC natively from the headers `install()` sets.
+One script tag. As of v2.7, the SDK is required on every browser including Chromium — `initBoundDbsc()` registers a polyfill key in IndexedDB alongside Chrome's TPM key, and `requireProof()` verifies the polyfill-key signature on every guarded request. Without the SDK, Chromium reads `tier: "dbsc"` but every `requireProof()` route 403s with `KEY_NOT_FOUND_BOUND` (and the server emits a `polyfill_missing` telemetry event after 60 s — wire it to your alerting).
 
 ```html
 <script type="module">
   import { initBoundDbsc, wrapFetch, clearBoundKey } from "/dbsc-client/index.js";
 
-  initBoundDbsc();                                  // Firefox/Safari reach tier "bound"
-  const boundFetch = wrapFetch({ signBody: true }); // call requireProof() routes through this
+  initBoundDbsc();                  // every browser — registers the polyfill key
+  const boundFetch = wrapFetch();   // call requireProof() routes through this
+                                    // signBody: true is the default since v2.8
 
   // on logout:  await clearBoundKey();
 </script>
 ```
 
-`wrapFetch` is per-call — never assign it to `globalThis.fetch`. Chromium ignores the proof header it adds, so you can use `boundFetch` for guarded routes on every browser.
+`wrapFetch` is per-call — do not assign it to `globalThis.fetch` by hand (it would sign every request including third-party fetches and leak the session key). The same proof header is verified on every tier, so use `boundFetch` for guarded routes on every browser.
+
+**For apps with many guarded routes**, v2.8 ships `installFetchInterceptor({ pathPrefixes })` — install once at boot and bare `fetch("/api/secure/...")` is signed automatically; everything outside the prefixes goes through the original fetch untouched.
+
+```html
+<script type="module">
+  import { initBoundDbsc, installFetchInterceptor } from "/dbsc-client/index.js";
+
+  initBoundDbsc();
+  installFetchInterceptor({ pathPrefixes: ["/api/secure/", "/dbsc-guarded/"] });
+  // From here on, ordinary `fetch("/api/secure/payment", ...)` carries the proof.
+</script>
+```
+
+Validation rejects the obvious footguns at install time: empty prefixes, bare `"/"`, absolute URL prefixes, prefixes missing the leading `/`. See [per-request-signing.md](./per-request-signing.md#bulk-install-with-installfetchinterceptor-v28).
 
 ---
 
@@ -141,7 +164,8 @@ One script tag. Chromium needs nothing — it speaks DBSC natively from the head
 | `clientPath` | `"/dbsc-client"` | Where `install()` serves the browser SDK. Omit it → served at `/dbsc-client`. Pass `false` to not serve it (e.g. you bundle the SDK yourself). |
 | `sessionTtl` | `86400000` (24 h) | Lifetime of the DBSC session row. Omit it → 24 h. |
 | `rateLimiter` | `NoopRateLimiter` (no limiting) | `/dbsc/registration` and `/dbsc/refresh` are unauthenticated by design. Without a real limiter they are unthrottled attack surface — **wire one for production.** |
-| `onEvent` | none (events dropped) | Telemetry callback. Without it you get no `session_stolen` / `verification_failure` alerts. Strongly recommended in production. |
+| `replayCache` (v2.8+) | `NoopReplayCache` (no replay check) | Optional same-second replay defense. Without it, an MITM that captures one valid signed proof off the wire can replay it for up to the timestamp window. With `new RedisReplayCache(redis)` the second arrival 403s as `PROOF_REPLAY`. Default is fine for passive-cookie-theft threat models; turn it on for active MITM, log-spillage exposure, or regulatory replay rejection. See [per-request-signing.md](./per-request-signing.md#closing-the-replay-window-v28). |
+| `onEvent` | none (events dropped) | Telemetry callback. Without it you get no `session_stolen` / `verification_failure` / `polyfill_missing` alerts. Strongly recommended in production. |
 | `autoBind` | none | Transparent rollout hook — see [below](#variant-autobind). Omit it → binding happens only via your explicit `dbsc.bind()` call in `/login`. |
 | `registrationPath` / `refreshPath` / `bound*Path` | the `/dbsc/*` and `/dbsc-bound/*` defaults | Only change these if those paths collide with your own routes. |
 

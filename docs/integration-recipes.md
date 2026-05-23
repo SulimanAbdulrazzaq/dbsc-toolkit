@@ -220,9 +220,35 @@ dbsc.install(app);
 
 ---
 
+## Replay cache (v2.8+)
+
+`requireProof()` defends against captured-proof replay with a ±5-minute timestamp window: a proof captured off the wire stays usable for 5 minutes against the same path. v2.8 ships a pluggable `ProofReplayCache` that records each successful verification and 403s any second arrival of the same `(sessionId, ts, sig-prefix)` with `code: "PROOF_REPLAY"`.
+
+The default is `NoopReplayCache` — no replay check, v2.6/2.7 behavior. Turn it on when your threat model includes active MITM or proof exposure (decrypted TLS in transit, log spillage, compromised proxies).
+
+```ts
+import { createDbsc } from "dbsc-toolkit/express";
+import { RedisStorage, RedisReplayCache } from "dbsc-toolkit/storage/redis";
+import Redis from "ioredis";
+
+const redis = new Redis(process.env.REDIS_URL);
+
+const dbsc = createDbsc({
+  storage: new RedisStorage(redis),
+  replayCache: new RedisReplayCache(redis),    // share the client, separate key prefix
+});
+dbsc.install(app);
+```
+
+`RedisReplayCache` uses `SET NX EX` so the check-and-record is one atomic round-trip, safe across replicas. `MemoryReplayCache` from `dbsc-toolkit/storage/memory` is the dev / single-process equivalent. There's no Postgres replay-cache adapter yet — Postgres-only apps pair with Redis just for the replay cache, or accept the default no-op.
+
+The key is only recorded **after** the cryptographic gate, so a garbage replay attempt cannot poison the cache. The TTL is `2 * timestampWindowMs` (default 10 min) — a proof at the future edge of the window remains rejected until the past edge closes.
+
+---
+
 ## Telemetry and alerting
 
-`onEvent` receives every protocol event. The two worth paging on are `session_stolen` (a refresh failed against a session that still has a bound key — a credible replay attempt) and a sustained spike of `verification_failure` on one `sessionId`.
+`onEvent` receives every protocol event. The two worth paging on are `session_stolen` (a refresh failed against a session that still has a bound key — a credible replay attempt) and a sustained spike of `verification_failure` on one `sessionId`. v2.8 added `polyfill_missing` — wire it as a dashboard counter, not a pager (it fires for normal SDK-not-loaded states, not attacks).
 
 ```ts
 const dbsc = createDbsc({
@@ -236,6 +262,13 @@ const dbsc = createDbsc({
     }
     if (event.type === "verification_failure") {
       sentry.captureMessage("dbsc verification_failure", { extra: event });
+    }
+    if (event.type === "polyfill_missing") {
+      // v2.8+: Chromium session went past the 60s grace without registering
+      // its polyfill key. tier reads "dbsc" but requireProof() 403s every
+      // guarded route. Usually means the client SDK is not loaded — alert
+      // as a counter, not a pager. Spikes mean a frontend regression.
+      metrics.increment("dbsc.polyfill_missing");
     }
   },
 });
@@ -270,7 +303,7 @@ if (outcome.phase === "native-dbsc" || outcome.phase === "polyfill-bound") {
 - **Native mobile apps.** DBSC is a browser feature — there is no DBSC outside a web context. Use passkeys / WebAuthn, or platform attestation (Play Integrity, App Attest).
 - **Server-to-server APIs.** DBSC binds a *browser session* to a device. For service-to-service auth use mTLS or signed tokens.
 - **API keys / PATs.** DBSC binds sessions, not long-lived credentials. Rotate and scope keys the normal way.
-- **Universally, on every route.** Per-request signing (`requireBoundProof`) costs ~1 ms of crypto per call on each side. Gate it on the routes that matter — payment, password change, admin — not the feed. See [per-request-signing.md](./per-request-signing.md).
+- **Universally, on every route.** `requireProof()` costs ~1 ms of crypto per call on each side. Gate it on the routes that matter — payment, password change, admin, settings — not the public feed. See [per-request-signing.md](./per-request-signing.md).
 
 ---
 
