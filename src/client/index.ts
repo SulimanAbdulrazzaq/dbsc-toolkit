@@ -37,7 +37,11 @@ export interface InitBoundDbscOptions {
  * Structured outcome of an `initBoundDbsc()` call. Every exit path resolves to
  * one of these so consumers can render a deterministic status without polling.
  *
- * - `native-dbsc`: Chromium 145+ registered natively. TPM-backed.
+ * - `native-dbsc`: Chromium 145+ registered natively. TPM-backed. v2.7+ also
+ *   ensures a polyfill key exists so `requireProof()` works per-request; if
+ *   that co-registration fails the outcome still resolves as `native-dbsc`
+ *   but carries `skipReason: "polyfill-co-registration-failed"` — the session
+ *   is still logged in but guarded routes will 403 until the next attempt.
  * - `polyfill-bound`: the Web Crypto polyfill registered. `skipReason` is set
  *   when Chrome explicitly refused native registration (e.g. `quota_exceeded`).
  * - `unbound`: no session is present on the server. User is logged out, or the
@@ -46,7 +50,7 @@ export interface InitBoundDbscOptions {
  *   message; consult the console for the underlying object.
  */
 export type BoundDbscOutcome =
-  | { phase: "native-dbsc"; tier: "dbsc" }
+  | { phase: "native-dbsc"; tier: "dbsc"; skipReason?: string | undefined }
   | { phase: "polyfill-bound"; tier: "bound"; skipReason?: string | undefined }
   | { phase: "unbound" }
   | { phase: "error"; error: string };
@@ -72,7 +76,23 @@ interface StateBound {
   nativeSkipped?: string[];
 }
 
-type StateResponse = StateUnbound | StateNeedsRegistration | StateBound;
+// v2.7+: native DBSC registered but the polyfill key is still missing.
+// Triggers a polyfill-only registration to give requireProof() a per-request
+// signature on Chromium.
+interface StateNeedsBoundRegistration {
+  phase: "needs-bound-registration";
+  sessionId: string;
+  tier: "dbsc";
+  challenge: string;
+  refreshIntervalMs: number;
+  nativeSkipped?: string[];
+}
+
+type StateResponse =
+  | StateUnbound
+  | StateNeedsRegistration
+  | StateBound
+  | StateNeedsBoundRegistration;
 
 interface ResolvedOptions {
   statePath: string;
@@ -131,6 +151,15 @@ export async function initBoundDbsc(options: InitBoundDbscOptions = {}): Promise
           scheduleRefresh(cfg, state.refreshIntervalMs);
           return outcomeFromSkip("polyfill-bound", fresh.nativeSkipped);
         }
+        if (fresh.phase === "needs-bound-registration") {
+          // Native is bound; the server asks us to co-register a polyfill key.
+          try {
+            await runRegistration(fresh.sessionId, fresh.challenge, cfg);
+          } catch {
+            return { phase: "native-dbsc", tier: "dbsc", skipReason: "polyfill-co-registration-failed" };
+          }
+          return { phase: "native-dbsc", tier: "dbsc" };
+        }
         if (fresh.phase === "bound" && fresh.tier === "dbsc") {
           return { phase: "native-dbsc", tier: "dbsc" };
         }
@@ -138,6 +167,18 @@ export async function initBoundDbsc(options: InitBoundDbscOptions = {}): Promise
       }
       scheduleRefresh(cfg, state.refreshIntervalMs);
       return { phase: "polyfill-bound", tier: "bound" };
+    }
+
+    if (state.phase === "needs-bound-registration") {
+      // Native DBSC already registered; we need to add a polyfill key so
+      // requireProof() has something to verify on every request. The
+      // outcome stays `native-dbsc` — the polyfill key is an internal detail.
+      try {
+        await runRegistration(state.sessionId, state.challenge, cfg);
+      } catch {
+        return { phase: "native-dbsc", tier: "dbsc", skipReason: "polyfill-co-registration-failed" };
+      }
+      return outcomeFromSkipNative(state.nativeSkipped);
     }
 
     // phase === "needs-registration"
@@ -162,6 +203,16 @@ export async function initBoundDbsc(options: InitBoundDbscOptions = {}): Promise
       await sleep(cfg.pollIntervalMs);
       const s = await fetchState(cfg.statePath);
       last = s;
+      if (s.phase === "needs-bound-registration") {
+        // Native DBSC completed during our probe window. Co-register the
+        // polyfill key and exit as native-dbsc.
+        try {
+          await runRegistration(s.sessionId, s.challenge, cfg);
+        } catch {
+          return { phase: "native-dbsc", tier: "dbsc", skipReason: "polyfill-co-registration-failed" };
+        }
+        return outcomeFromSkipNative(s.nativeSkipped);
+      }
       if (s.phase === "bound" && s.tier === "dbsc") {
         return { phase: "native-dbsc", tier: "dbsc" };
       }
@@ -183,6 +234,14 @@ export async function initBoundDbsc(options: InitBoundDbscOptions = {}): Promise
     }
 
     // Window elapsed without a verdict from Chrome. Run polyfill registration.
+    if (last.phase === "needs-bound-registration") {
+      try {
+        await runRegistration(last.sessionId, last.challenge, cfg);
+      } catch {
+        return { phase: "native-dbsc", tier: "dbsc", skipReason: "polyfill-co-registration-failed" };
+      }
+      return outcomeFromSkipNative(last.nativeSkipped);
+    }
     if (last.phase !== "needs-registration") {
       return { phase: "unbound" };
     }
@@ -203,6 +262,13 @@ function outcomeFromSkip(
     return { phase, tier: "bound", skipReason: skipped[0] };
   }
   return { phase, tier: "bound" };
+}
+
+function outcomeFromSkipNative(skipped: string[] | undefined): BoundDbscOutcome {
+  if (skipped && skipped.length > 0) {
+    return { phase: "native-dbsc", tier: "dbsc", skipReason: skipped[0] };
+  }
+  return { phase: "native-dbsc", tier: "dbsc" };
 }
 
 export function stopBoundDbsc(): void {

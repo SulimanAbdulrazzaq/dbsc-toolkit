@@ -27,9 +27,9 @@ export async function handleBoundRefresh(
     throw new DbscVerificationError(ErrorCodes.SIGNATURE_INVALID, "timestamp outside acceptable window");
   }
 
-  const key = await storage.getBoundKey(req.sessionId);
+  const key = await storage.getBoundKey(req.sessionId, "bound");
   if (!key) {
-    throw new DbscVerificationError(ErrorCodes.KEY_NOT_FOUND, "no bound key for session");
+    throw new DbscVerificationError(ErrorCodes.KEY_NOT_FOUND, "no polyfill bound key for session");
   }
 
   const challenge = await storage.getChallenge(req.expectedJti);
@@ -62,9 +62,13 @@ export async function handleBoundRefresh(
     throw new DbscVerificationError(ErrorCodes.CHALLENGE_CONSUMED, "challenge already consumed");
   }
 
+  // Keep native tier on Chromium sessions that hold both keys — the polyfill
+  // refresh is supplementary there, not the primary refresh path.
   const session = await storage.getSession(req.sessionId);
   if (session) {
-    await storage.setSession({ ...session, tier: "bound", lastRefreshAt: Date.now() });
+    const hasNative = await storage.getBoundKey(req.sessionId, "native");
+    const tier = hasNative ? session.tier : "bound";
+    await storage.setSession({ ...session, tier, lastRefreshAt: Date.now() });
   }
 
   return {

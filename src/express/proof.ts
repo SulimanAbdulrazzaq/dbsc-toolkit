@@ -7,7 +7,14 @@ import {
 
 export interface RequireBoundProofOptions {
   storage: StorageAdapter;
-  /** Require proof header on tier=dbsc too. Default false. */
+  /**
+   * Skip the per-request proof header on `tier: "dbsc"`. **Default `false`
+   * as of v2.7.** Older versions defaulted to `true`, which left a
+   * refresh-cycle replay window open on Chromium (a stolen cookie passed
+   * `requireProof()` until the next /dbsc/refresh failed). Setting this
+   * to `true` reinstates the legacy behavior — only safe if your Chromium
+   * client cannot ship the v2.7 polyfill co-registration.
+   */
   allowDbscWithoutProof?: boolean;
   /** Accepted timestamp window, ms. Default 5 min. */
   timestampWindowMs?: number;
@@ -17,7 +24,7 @@ export interface RequireBoundProofOptions {
 
 /** Gates a route on a fresh bound-key proof. */
 export function requireBoundProof(opts: RequireBoundProofOptions): RequestHandler {
-  const allowDbsc = opts.allowDbscWithoutProof ?? true;
+  const allowDbsc = opts.allowDbscWithoutProof ?? false;
   const signBody = opts.signBody ?? false;
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const dbsc = res.locals.dbsc;

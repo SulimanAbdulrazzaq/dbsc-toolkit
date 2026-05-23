@@ -1,7 +1,15 @@
-import type { StorageAdapter, Session, BoundKey, Challenge } from "../../core/index.js";
+import type {
+  StorageAdapter,
+  Session,
+  BoundKey,
+  BoundKeyKind,
+  Challenge,
+} from "../../core/index.js";
 
 export class MemoryStorage implements StorageAdapter {
   private sessions = new Map<string, Session>();
+  // Keyed by `${sessionId}:${kind}`. A session can hold up to two rows
+  // (one per kind) — see BoundKey.kind in core/types.ts.
   private keys = new Map<string, BoundKey>();
   private challenges = new Map<string, Challenge>();
   private revoked = new Set<string>();
@@ -22,19 +30,30 @@ export class MemoryStorage implements StorageAdapter {
 
   async deleteSession(id: string): Promise<void> {
     this.sessions.delete(id);
-    this.keys.delete(id);
+    this.keys.delete(`${id}:native`);
+    this.keys.delete(`${id}:bound`);
   }
 
-  async getBoundKey(sessionId: string): Promise<BoundKey | null> {
-    return this.keys.get(sessionId) ?? null;
+  async getBoundKey(sessionId: string, kind?: BoundKeyKind): Promise<BoundKey | null> {
+    if (kind) return this.keys.get(`${sessionId}:${kind}`) ?? null;
+    return (
+      this.keys.get(`${sessionId}:native`) ??
+      this.keys.get(`${sessionId}:bound`) ??
+      null
+    );
   }
 
   async setBoundKey(key: BoundKey): Promise<void> {
-    this.keys.set(key.sessionId, key);
+    this.keys.set(`${key.sessionId}:${key.kind}`, key);
   }
 
-  async deleteBoundKey(sessionId: string): Promise<void> {
-    this.keys.delete(sessionId);
+  async deleteBoundKey(sessionId: string, kind?: BoundKeyKind): Promise<void> {
+    if (kind) {
+      this.keys.delete(`${sessionId}:${kind}`);
+      return;
+    }
+    this.keys.delete(`${sessionId}:native`);
+    this.keys.delete(`${sessionId}:bound`);
   }
 
   async getChallenge(jti: string): Promise<Challenge | null> {
@@ -61,7 +80,8 @@ export class MemoryStorage implements StorageAdapter {
   async revokeSession(sessionId: string): Promise<void> {
     this.revoked.add(sessionId);
     this.sessions.delete(sessionId);
-    this.keys.delete(sessionId);
+    this.keys.delete(`${sessionId}:native`);
+    this.keys.delete(`${sessionId}:bound`);
   }
 
   async revokeAllForUser(userId: string): Promise<void> {
@@ -69,7 +89,8 @@ export class MemoryStorage implements StorageAdapter {
       if (sess.userId === userId) {
         this.revoked.add(id);
         this.sessions.delete(id);
-        this.keys.delete(id);
+        this.keys.delete(`${id}:native`);
+        this.keys.delete(`${id}:bound`);
       }
     }
   }

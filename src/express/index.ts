@@ -381,13 +381,29 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       res.status(200).json({ phase: "unbound", sessionId: null, ...(nativeSkipped && { nativeSkipped }) });
       return;
     }
-    const key = await storage.getBoundKey(sessionId);
-    if (!key) {
+    const nativeKey = await storage.getBoundKey(sessionId, "native");
+    const boundKey = await storage.getBoundKey(sessionId, "bound");
+    if (!nativeKey && !boundKey) {
       const challenge = await issueChallenge(sessionId, storage);
       res.status(200).json({
         phase: "needs-registration",
         sessionId,
         challenge: challenge.jti,
+        ...(nativeSkipped && { nativeSkipped }),
+      });
+      return;
+    }
+    // v2.7: a native-bound (dbsc) session also needs a polyfill key so
+    // requireProof() has something to verify on every request. Tell the
+    // client to register one — the session stays tier="dbsc" throughout.
+    if (nativeKey && !boundKey) {
+      const challenge = await issueChallenge(sessionId, storage);
+      res.status(200).json({
+        phase: "needs-bound-registration",
+        sessionId,
+        tier: session.tier,
+        challenge: challenge.jti,
+        refreshIntervalMs: boundCookieTtl,
         ...(nativeSkipped && { nativeSkipped }),
       });
       return;

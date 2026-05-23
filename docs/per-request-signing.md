@@ -61,12 +61,12 @@ import { dbsc, bindSession, requireBoundProof } from "dbsc-toolkit/express";
 
 app.use(dbsc({ storage }));
 
-// Strict route — bound users must send a signed proof, dbsc users pass through.
+// Strict route — every tier must send a signed proof header. v2.7+ default.
 app.post("/payment", requireBoundProof({ storage }), paymentHandler);
 app.post("/settings/email", requireBoundProof({ storage }), emailHandler);
 ```
 
-Pass `allowDbscWithoutProof: false` to require the proof header on `tier: "dbsc"` as well — useful if you want the same wire-level evidence on both tiers, at the cost of doubling the cryptographic round-trips for Chromium users.
+As of v2.7 the default for `allowDbscWithoutProof` is `false`: Chromium sessions must carry the proof header on guarded routes, exactly like every other browser. The v2.7 client SDK co-registers a polyfill ECDSA key on Chromium alongside the TPM key, and `wrapFetch` signs every guarded request with the polyfill key — the TPM key continues to drive `/dbsc/refresh` in the background. The legacy v2.6 default of `true` left a refresh-cycle replay window open on Chromium (a stolen cookie passed `requireProof()` until the next refresh failed signature verification); pass `allowDbscWithoutProof: true` to reinstate that behavior if your Chromium clients cannot ship the v2.7 SDK.
 
 ### Server, Fastify / Hono / Next.js
 

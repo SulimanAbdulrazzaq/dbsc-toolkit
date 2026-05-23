@@ -15,15 +15,17 @@ Method: STRIDE. Scope: DBSC Toolkit server-side library.
 **S1: Cookie theft + replay**
 An attacker steals a bound cookie value (XSS, malicious extension, DevTools access on the victim's machine, MITM on a misconfigured proxy) and pastes it onto a different device.
 
-Mitigation: enforced in two layers.
+Mitigation, three layers as of v2.7:
 
-1. **Per-request freshness check.** Adapters compare `session.lastRefreshAt + boundCookieTtl` against the current time. If the bound cookie's window has elapsed since the last successful refresh, the request sees `tier: "none"` even if the stored tier is still `"dbsc"`. An attacker with a cookie value but no hardware key cannot refresh, so their reads degrade automatically after one TTL.
+1. **Per-request `requireProof()` gate.** Every guarded route demands an `X-Dbsc-Bound-Proof` header signed by the session's polyfill key. The key lives in IndexedDB on the victim's browser with `extractable: false`; even with full XSS the attacker cannot exfiltrate it. A stolen cookie alone fails immediately with 403 on the first guarded request — no waiting for a refresh cycle. **This is the layer that closed the same-cycle replay window that v2.6 left open.** Chromium sessions register a polyfill key alongside the TPM key at first init, so this layer is enforced on every tier.
 
-2. **Tier demotion on failed refresh.** When the attacker's browser auto-refreshes (Chrome does this whenever the bound cookie is gone), the JWS signature check fails. The library demotes the stored tier to `"none"` before re-throwing. From that moment every adapter and every route sees the demoted tier — including reads on the victim's device. The victim's next refresh re-promotes the session via a valid JWS signature, so legitimate use is uninterrupted.
+2. **Per-request freshness check.** Adapters compare `session.lastRefreshAt + boundCookieTtl + refreshGraceMs` against the current time. If the bound cookie's window has elapsed since the last successful refresh, the request sees `tier: "none"` even if the stored tier is still `"dbsc"` — a defense in depth for unguarded routes that don't call `requireProof()`.
 
-Application code must enforce `tier === "dbsc"` on sensitive routes for this to matter — see [best-practices.md](./best-practices.md#enforcing-the-tier--the-part-that-actually-defends).
+3. **Tier demotion on failed refresh.** When the attacker's browser auto-refreshes (Chrome does this whenever the bound cookie is gone), the TPM-signed JWS check fails because the attacker's device has no matching key. The library demotes the stored tier to `"none"` before re-throwing. From that moment every adapter and every route sees the demoted tier.
 
-Residual risk: up to `boundCookieTtl` seconds of attacker access on their first request (default 10 min, configurable to 60s or less for sensitive deployments), then degraded. Compare to no-DBSC: full access until the app session expires or the user manually logs out.
+Application code must call `requireProof()` on sensitive routes for layer 1 to apply — see [best-practices.md](./best-practices.md#enforcing-the-tier--the-part-that-actually-defends).
+
+Residual risk: layer 1 collapses the window to zero on guarded routes — a stolen cookie 403s immediately. Routes not guarded by `requireProof()` still rely on layers 2 and 3, so they retain up to `boundCookieTtl` seconds of attacker access on the first request before degrading. Pre-2.7, even guarded routes had that window on Chromium — see CHANGELOG 2.7.0.
 
 **S2: JWK substitution**
 An attacker substitutes their own public key during registration.

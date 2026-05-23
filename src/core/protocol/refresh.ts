@@ -19,11 +19,11 @@ export async function handleRefresh(
     );
   }
 
-  const key = await storage.getBoundKey(req.sessionId);
+  const key = await storage.getBoundKey(req.sessionId, "native");
   if (!key) {
     throw new DbscVerificationError(
       ErrorCodes.KEY_NOT_FOUND,
-      "no bound key for session",
+      "no native bound key for session",
     );
   }
 

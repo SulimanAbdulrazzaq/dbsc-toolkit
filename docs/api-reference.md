@@ -62,13 +62,24 @@ interface RefreshProof {
   verified: boolean;
 }
 
+type BoundKeyKind = "native" | "bound";   // v2.7+: a session can hold both
+
+interface BoundKey {
+  sessionId: string;
+  kind: BoundKeyKind;     // "native" = TPM (used by /dbsc/refresh);
+                          // "bound"  = polyfill ECDSA (used by requireProof + /dbsc-bound/refresh)
+  jwk: JsonWebKey;
+  createdAt: number;
+  algorithm: "ES256" | "RS256";
+}
+
 interface StorageAdapter {
   getSession(id: string): Promise<Session | null>;
   setSession(session: Session): Promise<void>;
   deleteSession(id: string): Promise<void>;
-  getBoundKey(sessionId: string): Promise<BoundKey | null>;
+  getBoundKey(sessionId: string, kind?: BoundKeyKind): Promise<BoundKey | null>;
   setBoundKey(key: BoundKey): Promise<void>;
-  deleteBoundKey(sessionId: string): Promise<void>;
+  deleteBoundKey(sessionId: string, kind?: BoundKeyKind): Promise<void>;
   getChallenge(jti: string): Promise<Challenge | null>;
   setChallenge(challenge: Challenge): Promise<void>;
   consumeChallenge(jti: string): Promise<boolean>;
@@ -126,13 +137,19 @@ Produces a stable, deterministic, opaque `sessionId` for `bindSession()` when th
 
 ```ts
 interface RequireProofOptions {
-  allowDbscWithoutProof?: boolean;  // default true — the hardware-backed dbsc tier skips the proof
+  allowDbscWithoutProof?: boolean;  // v2.7+ default: false — every tier must carry a proof header
   timestampWindowMs?: number;       // accepted proof timestamp window, ms
   storage?: StorageAdapter;         // override; default = the adapter's storage
 }
 
 function noBindingReason(skipped?: SkippedEntry[]): string;
 ```
+
+`allowDbscWithoutProof` defaults to `false` as of v2.7 — Chromium sessions
+register a polyfill key alongside the TPM key on first init, so the per-request
+proof works the same way on every tier. Set this to `true` only if your
+Chromium client cannot ship the v2.7 client SDK (then the legacy v2.6
+behavior is restored, with the refresh-cycle replay window — see CHANGELOG).
 
 `RequireProofOptions` is the (entirely optional) option shape of every adapter's `requireProof()`. `noBindingReason` produces the quota-aware human reason used in a `tier: "none"` rejection — exported for custom adapters.
 
@@ -335,17 +352,16 @@ function bindSession(
 // Per-request signing gate for sensitive routes — see docs/per-request-signing.md.
 interface RequireBoundProofOptions {
   storage: StorageAdapter;
-  allowDbscWithoutProof?: boolean;   // default true — tier=dbsc passes through
+  allowDbscWithoutProof?: boolean;   // v2.7+ default: false — every tier must prove
   timestampWindowMs?: number;        // default 5 * 60 * 1000
-  signBody?: boolean;                // default false — when true, verifies bh=sha256(body) for tier=bound only (2.3.0+).
-                                     // tier=dbsc still passes through unless allowDbscWithoutProof is set to false.
+  signBody?: boolean;                // default false — when true, verifies bh=sha256(body) on every tier
 }
 function requireBoundProof(opts: RequireBoundProofOptions): RequestHandler;
 ```
 
 After mount, every request has `res.locals.dbsc` populated. Call `bindSession` once on your login response to start a new binding — it writes the session row, issues a challenge, sets both registration headers (legacy + new), and sets the two short-lived cookies Chrome needs.
 
-`requireBoundProof()` gates sensitive routes on a fresh proof signed by the bound key — pair it with `wrapFetch()` on the client. Native DBSC users pass through by default. The same `RequireBoundProofOptions` shape is used by every adapter; the wrapper just changes return type to match each framework's middleware idiom (Fastify returns a `preHandler`, Hono a `MiddlewareHandler`, Next.js a handler-callable that returns `{ ok }` or a short-circuit response).
+`requireBoundProof()` gates sensitive routes on a fresh proof signed by the bound key — pair it with `wrapFetch()` on the client. As of v2.7 every tier must carry a proof header, including Chromium: the client SDK now co-registers a polyfill ECDSA key on Chromium sessions alongside the TPM key, and `wrapFetch` signs every guarded request with that key. The TPM key continues to drive `/dbsc/refresh` in the background. The same `RequireBoundProofOptions` shape is used by every adapter; the wrapper just changes return type to match each framework's middleware idiom (Fastify returns a `preHandler`, Hono a `MiddlewareHandler`, Next.js a handler-callable that returns `{ ok }` or a short-circuit response).
 
 ### `requireProof` (Express)
 

@@ -1,7 +1,23 @@
 export type ProtectionTier = "dbsc" | "bound" | "none";
 
+/**
+ * Discriminator on `BoundKey`. v2.7+ a single session can hold two keys:
+ * the TPM/native key used by the W3C DBSC refresh flow, and the polyfill
+ * ECDSA key used by `requireProof()` to gate every request. Chromium
+ * sessions register both keys; non-Chromium sessions register the polyfill
+ * key only.
+ */
+export type BoundKeyKind = "native" | "bound";
+
 export interface BoundKey {
   sessionId: string;
+  /**
+   * `"native"` for the W3C DBSC TPM key (verified on /dbsc/refresh);
+   * `"bound"` for the polyfill ECDSA key (verified on every requireProof()
+   * request and on /dbsc-bound/refresh). Older `BoundKey` rows without a
+   * `kind` field are treated as `"native"` by the storage layer.
+   */
+  kind: BoundKeyKind;
   jwk: JsonWebKey;
   createdAt: number;
   algorithm: "ES256" | "RS256";
@@ -42,9 +58,20 @@ export interface StorageAdapter {
   setSession(session: Session): Promise<void>;
   deleteSession(id: string): Promise<void>;
 
-  getBoundKey(sessionId: string): Promise<BoundKey | null>;
+  /**
+   * Read a bound key. Pass `kind` to disambiguate when both `"native"` and
+   * `"bound"` rows exist for the session (Chromium sessions). Without
+   * `kind` the adapter returns `"native"` first, falling back to `"bound"`
+   * — matches v2.6 behavior on rows that have not yet been re-keyed by
+   * `kind`.
+   */
+  getBoundKey(sessionId: string, kind?: BoundKeyKind): Promise<BoundKey | null>;
   setBoundKey(key: BoundKey): Promise<void>;
-  deleteBoundKey(sessionId: string): Promise<void>;
+  /**
+   * Delete the bound key(s) for a session. Pass `kind` to remove just one
+   * slot; without `kind` both slots are removed.
+   */
+  deleteBoundKey(sessionId: string, kind?: BoundKeyKind): Promise<void>;
 
   getChallenge(jti: string): Promise<Challenge | null>;
   setChallenge(challenge: Challenge): Promise<void>;

@@ -2,6 +2,91 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.7.0] — 2026-05-23
+
+This release closes the cookie-replay window on Chromium. A user who reproduced
+the scenario end-to-end against the v2.6.1 demo confirmed the failure mode: copy
+`__Host-dbsc-session` into a second browser, hit a route guarded by `requireProof()`
+on the `dbsc` tier, and the request was let through for the rest of the
+refresh cycle (~10 min by default). Native DBSC's TPM key only signs the
+refresh challenge — it cannot sign individual requests, and Chrome locks the
+TPM key away from JavaScript — so `requireProof()` on a Chromium session had
+no per-request signature to verify and just trusted the session row.
+
+This release fixes that by giving Chromium sessions **two keys**: the TPM key
+still drives the W3C refresh in the background, and a polyfill ECDSA key (the
+same one Firefox/Safari already use) lives in IndexedDB and signs every
+request. The polyfill key is generated `extractable: false`, so even with XSS
+an attacker cannot exfiltrate it. A stolen cookie now also needs the
+non-extractable IndexedDB key — which is what closes the window.
+
+The dev-facing API does not change. `initBoundDbsc()` and `requireProof()`
+keep the same signatures. Apps that were already routing `requireProof()`
+calls through `wrapFetch({ signBody: true })` (the published guidance) need
+no code changes.
+
+### Behavior changes
+
+- **`requireProof()` default flipped.** `allowDbscWithoutProof` now defaults
+  to **`false`** (was `true`). Chromium sessions must carry
+  `X-Dbsc-Bound-Proof` to pass through, exactly like every other browser. The
+  v2.6 default — letting `dbsc` tier through unproved — is what made the
+  cookie-replay window observable. The flag is still respected; set it back
+  to `true` only if your Chromium client cannot ship the v2.7 polyfill
+  co-registration described below.
+
+- **Chromium sessions co-register a polyfill key.** `initBoundDbsc()` no
+  longer short-circuits when it sees `tier: "dbsc"` from the server. The
+  server now reports a new state phase, `needs-bound-registration`, when a
+  native-bound session lacks the polyfill key; the client registers one
+  before the call resolves. The outcome the consumer sees stays
+  `{ phase: "native-dbsc", tier: "dbsc" }` — the polyfill key is internal.
+  Failures during co-registration surface as `skipReason:
+  "polyfill-co-registration-failed"` on the outcome so consumers can detect
+  the degraded state.
+
+### Added
+
+- **`BoundKey.kind: "native" | "bound"`** — single sessions can now hold both
+  rows. `BoundKeyKind` is re-exported from `dbsc-toolkit`.
+- **`StorageAdapter.getBoundKey(sessionId, kind?)`** — the new optional
+  parameter selects a specific row. Calls without `kind` keep working: the
+  adapter prefers the `"native"` row, falling back to `"bound"` — the v2.6
+  behavior for code paths that did not care.
+- **`StorageAdapter.deleteBoundKey(sessionId, kind?)`** — same shape; without
+  `kind` both rows are removed.
+- **Postgres migration `002_bound_key_kind.sql`** — adds the `kind` column
+  with `DEFAULT 'native'` and migrates the primary key from `(session_id)`
+  to `(session_id, kind)`. Non-destructive — every existing row becomes
+  `kind = 'native'`, which is the correct interpretation.
+
+### Internals
+
+- Native registration and refresh now read/write `BoundKey` rows under
+  `kind = "native"`; polyfill registration and refresh use `kind = "bound"`.
+  The `SESSION_ALREADY_REGISTERED` cross-kind collision is gone — registering
+  a polyfill key on a session that already has a native key now succeeds, by
+  design.
+- `requireBoundProof` always verifies against the `kind = "bound"` row,
+  regardless of which tier the session is on. That makes the per-request
+  enforcement identical across `dbsc` and `bound` tiers.
+- Redis storage has a one-shot back-compat read of the v2.6
+  `dbsc:key:{sid}` layout; it gets rewritten under the new
+  `dbsc:key:{sid}:{kind}` layout the next time the key is set.
+
+### Migration
+
+- **Postgres users:** apply `migrations/002_bound_key_kind.sql` before
+  deploying 2.7. Existing rows are preserved.
+- **Redis users:** no migration. Legacy keys are read once and rewritten.
+- **Memory users:** none (state is in-process).
+- **Apps that called `requireProof()` on Chromium without `wrapFetch`** —
+  routes will start returning 403 after upgrading the server. Either upgrade
+  the client SDK alongside the server (recommended — `wrapFetch` then
+  signs with the polyfill key the new client registers automatically), or
+  pass `requireProof({ allowDbscWithoutProof: true })` to reinstate the
+  v2.6 default for that route.
+
 ## [2.6.1] — 2026-05-22
 
 A post-release audit caught one real bug and a few rough edges. All fixed here.

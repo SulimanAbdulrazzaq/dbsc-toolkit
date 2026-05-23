@@ -1,4 +1,4 @@
-import type { StorageAdapter, Session, BoundKey, Challenge } from "../types.js";
+import type { StorageAdapter, Session, BoundKey, BoundKeyKind, Challenge } from "../types.js";
 
 export class MemoryStorage implements StorageAdapter {
   private sessions = new Map<string, Session>();
@@ -15,19 +15,30 @@ export class MemoryStorage implements StorageAdapter {
 
   async deleteSession(id: string): Promise<void> {
     this.sessions.delete(id);
-    this.keys.delete(id);
+    this.keys.delete(`${id}:native`);
+    this.keys.delete(`${id}:bound`);
   }
 
-  async getBoundKey(sessionId: string): Promise<BoundKey | null> {
-    return this.keys.get(sessionId) ?? null;
+  async getBoundKey(sessionId: string, kind?: BoundKeyKind): Promise<BoundKey | null> {
+    if (kind) return this.keys.get(`${sessionId}:${kind}`) ?? null;
+    return (
+      this.keys.get(`${sessionId}:native`) ??
+      this.keys.get(`${sessionId}:bound`) ??
+      null
+    );
   }
 
   async setBoundKey(key: BoundKey): Promise<void> {
-    this.keys.set(key.sessionId, key);
+    this.keys.set(`${key.sessionId}:${key.kind}`, key);
   }
 
-  async deleteBoundKey(sessionId: string): Promise<void> {
-    this.keys.delete(sessionId);
+  async deleteBoundKey(sessionId: string, kind?: BoundKeyKind): Promise<void> {
+    if (kind) {
+      this.keys.delete(`${sessionId}:${kind}`);
+      return;
+    }
+    this.keys.delete(`${sessionId}:native`);
+    this.keys.delete(`${sessionId}:bound`);
   }
 
   async getChallenge(jti: string): Promise<Challenge | null> {
@@ -47,14 +58,16 @@ export class MemoryStorage implements StorageAdapter {
 
   async revokeSession(sessionId: string): Promise<void> {
     this.sessions.delete(sessionId);
-    this.keys.delete(sessionId);
+    this.keys.delete(`${sessionId}:native`);
+    this.keys.delete(`${sessionId}:bound`);
   }
 
   async revokeAllForUser(userId: string): Promise<void> {
     for (const [id, sess] of this.sessions.entries()) {
       if (sess.userId === userId) {
         this.sessions.delete(id);
-        this.keys.delete(id);
+        this.keys.delete(`${id}:native`);
+        this.keys.delete(`${id}:bound`);
       }
     }
   }

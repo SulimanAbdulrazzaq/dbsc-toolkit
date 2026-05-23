@@ -7,7 +7,11 @@ import {
 
 export interface RequireBoundProofOptions {
   storage: StorageAdapter;
-  /** Require proof header on tier=dbsc too. Default false. */
+  /**
+   * Skip the per-request proof header on `tier: "dbsc"`. **Default `false`
+   * as of v2.7.** Older versions defaulted to `true`, which left a
+   * refresh-cycle replay window open on Chromium.
+   */
   allowDbscWithoutProof?: boolean;
   /** Accepted timestamp window, ms. Default 5 min. */
   timestampWindowMs?: number;
@@ -17,7 +21,7 @@ export interface RequireBoundProofOptions {
 
 /** Gates a route on a fresh bound-key proof. */
 export function requireBoundProof(opts: RequireBoundProofOptions): MiddlewareHandler {
-  const allowDbsc = opts.allowDbscWithoutProof ?? true;
+  const allowDbsc = opts.allowDbscWithoutProof ?? false;
   const signBody = opts.signBody ?? false;
   return async (c: Context, next): Promise<Response | void> => {
     const dbsc = c.get("dbsc");

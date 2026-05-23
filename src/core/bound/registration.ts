@@ -53,11 +53,11 @@ export async function handleBoundRegistration(
     throw new DbscVerificationError(ErrorCodes.SIGNATURE_INVALID, "signature does not verify against publicKey");
   }
 
-  const existing = await storage.getBoundKey(req.sessionId);
+  const existing = await storage.getBoundKey(req.sessionId, "bound");
   if (existing) {
     throw new DbscVerificationError(
       ErrorCodes.SESSION_ALREADY_REGISTERED,
-      "session already has a bound key; cannot register again",
+      "session already has a polyfill bound key; cannot register again",
     );
   }
 
@@ -69,6 +69,7 @@ export async function handleBoundRegistration(
   const now = Date.now();
   const boundKey: BoundKey = {
     sessionId: req.sessionId,
+    kind: "bound",
     jwk: req.publicKey,
     createdAt: now,
     algorithm,
@@ -76,9 +77,18 @@ export async function handleBoundRegistration(
 
   await storage.setBoundKey(boundKey);
 
+  // Co-existence: on Chromium, a "native" key may already exist. We do not
+  // demote tier from "dbsc" to "bound" in that case — native remains the
+  // authoritative refresh path. Only set tier="bound" when there is no
+  // native key (Firefox/Safari/older Chromium).
   const session = await storage.getSession(req.sessionId);
   if (session) {
-    await storage.setSession({ ...session, tier: "bound", lastRefreshAt: now });
+    const hasNative = await storage.getBoundKey(req.sessionId, "native");
+    if (hasNative) {
+      await storage.setSession({ ...session, lastRefreshAt: now });
+    } else {
+      await storage.setSession({ ...session, tier: "bound", lastRefreshAt: now });
+    }
   }
 
   return { boundKey };

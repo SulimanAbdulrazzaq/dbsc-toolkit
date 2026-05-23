@@ -319,13 +319,25 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
       if (!sid) return c.json({ phase: "unbound", sessionId: null, ...(nativeSkipped && { nativeSkipped }) });
       const session = await storage.getSession(sid);
       if (!session) return c.json({ phase: "unbound", sessionId: null, ...(nativeSkipped && { nativeSkipped }) });
-      const key = await storage.getBoundKey(sid);
-      if (!key) {
+      const nativeKey = await storage.getBoundKey(sid, "native");
+      const boundKey = await storage.getBoundKey(sid, "bound");
+      if (!nativeKey && !boundKey) {
         const challenge = await issueChallenge(sid, storage);
         return c.json({
           phase: "needs-registration",
           sessionId: sid,
           challenge: challenge.jti,
+          ...(nativeSkipped && { nativeSkipped }),
+        });
+      }
+      if (nativeKey && !boundKey) {
+        const challenge = await issueChallenge(sid, storage);
+        return c.json({
+          phase: "needs-bound-registration",
+          sessionId: sid,
+          tier: session.tier,
+          challenge: challenge.jti,
+          refreshIntervalMs: boundCookieTtl,
           ...(nativeSkipped && { nativeSkipped }),
         });
       }

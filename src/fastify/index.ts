@@ -352,13 +352,25 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     if (!session) {
       return reply.status(200).send({ phase: "unbound", sessionId: null, ...(nativeSkipped && { nativeSkipped }) });
     }
-    const key = await storage.getBoundKey(sessionId);
-    if (!key) {
+    const nativeKey = await storage.getBoundKey(sessionId, "native");
+    const boundKey = await storage.getBoundKey(sessionId, "bound");
+    if (!nativeKey && !boundKey) {
       const challenge = await issueChallenge(sessionId, storage);
       return reply.status(200).send({
         phase: "needs-registration",
         sessionId,
         challenge: challenge.jti,
+        ...(nativeSkipped && { nativeSkipped }),
+      });
+    }
+    if (nativeKey && !boundKey) {
+      const challenge = await issueChallenge(sessionId, storage);
+      return reply.status(200).send({
+        phase: "needs-bound-registration",
+        sessionId,
+        tier: session.tier,
+        challenge: challenge.jti,
+        refreshIntervalMs: boundCookieTtl,
         ...(nativeSkipped && { nativeSkipped }),
       });
     }

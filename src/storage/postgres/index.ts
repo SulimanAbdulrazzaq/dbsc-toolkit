@@ -1,5 +1,11 @@
 import type { Pool, PoolClient } from "pg";
-import type { StorageAdapter, Session, BoundKey, Challenge } from "../../core/index.js";
+import type {
+  StorageAdapter,
+  Session,
+  BoundKey,
+  BoundKeyKind,
+  Challenge,
+} from "../../core/index.js";
 
 export class PostgresStorage implements StorageAdapter {
   constructor(private readonly pool: Pool) {}
@@ -46,22 +52,37 @@ export class PostgresStorage implements StorageAdapter {
     await this.pool.query("DELETE FROM dbsc_sessions WHERE id = $1", [id]);
   }
 
-  async getBoundKey(sessionId: string): Promise<BoundKey | null> {
-    const { rows } = await this.pool.query<{
+  async getBoundKey(sessionId: string, kind?: BoundKeyKind): Promise<BoundKey | null> {
+    type Row = {
       session_id: string;
+      kind: string;
       jwk: unknown;
       algorithm: string;
       created_at: string;
-    }>(
-      "SELECT session_id, jwk, algorithm, created_at FROM dbsc_bound_keys WHERE session_id = $1",
-      [sessionId],
-    );
-
-    const row = rows[0];
+    };
+    let row: Row | undefined;
+    if (kind) {
+      const { rows } = await this.pool.query<Row>(
+        "SELECT session_id, kind, jwk, algorithm, created_at FROM dbsc_bound_keys WHERE session_id = $1 AND kind = $2",
+        [sessionId, kind],
+      );
+      row = rows[0];
+    } else {
+      // Prefer "native" over "bound" so the v2.6 single-key callers keep
+      // their previous behavior on Chromium-style sessions.
+      const { rows } = await this.pool.query<Row>(
+        `SELECT session_id, kind, jwk, algorithm, created_at FROM dbsc_bound_keys
+         WHERE session_id = $1
+         ORDER BY CASE kind WHEN 'native' THEN 0 ELSE 1 END
+         LIMIT 1`,
+        [sessionId],
+      );
+      row = rows[0];
+    }
     if (!row) return null;
-
     return {
       sessionId: row.session_id,
+      kind: (row.kind as BoundKeyKind | undefined) ?? "native",
       jwk: row.jwk as JsonWebKey,
       algorithm: row.algorithm as BoundKey["algorithm"],
       createdAt: parseInt(row.created_at, 10),
@@ -70,14 +91,21 @@ export class PostgresStorage implements StorageAdapter {
 
   async setBoundKey(key: BoundKey): Promise<void> {
     await this.pool.query(
-      `INSERT INTO dbsc_bound_keys (session_id, jwk, algorithm, created_at)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (session_id) DO UPDATE SET jwk = $2, algorithm = $3`,
-      [key.sessionId, JSON.stringify(key.jwk), key.algorithm, key.createdAt],
+      `INSERT INTO dbsc_bound_keys (session_id, kind, jwk, algorithm, created_at)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (session_id, kind) DO UPDATE SET jwk = $3, algorithm = $4`,
+      [key.sessionId, key.kind, JSON.stringify(key.jwk), key.algorithm, key.createdAt],
     );
   }
 
-  async deleteBoundKey(sessionId: string): Promise<void> {
+  async deleteBoundKey(sessionId: string, kind?: BoundKeyKind): Promise<void> {
+    if (kind) {
+      await this.pool.query(
+        "DELETE FROM dbsc_bound_keys WHERE session_id = $1 AND kind = $2",
+        [sessionId, kind],
+      );
+      return;
+    }
     await this.pool.query("DELETE FROM dbsc_bound_keys WHERE session_id = $1", [sessionId]);
   }
 

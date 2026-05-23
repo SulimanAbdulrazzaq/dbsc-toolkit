@@ -119,6 +119,43 @@ describe("GET /dbsc-bound/state", () => {
       await ctx.close();
     }
   });
+
+  // v2.7+: a native-bound (dbsc) session without a polyfill key triggers
+  // the new needs-bound-registration phase so the client co-registers a
+  // polyfill key for requireProof(). Modelled directly via storage —
+  // the state route reads from the reg cookie when the bound cookie isn't
+  // set yet, which is the early-in-the-flow shape we want here.
+  it("returns phase: needs-bound-registration when only a native key exists", async () => {
+    const sessionId = "sess-state-dual";
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, res) => {
+        await bindSession(res, sessionId, storage, { userId: "u1", secure: false });
+        await storage.setBoundKey({
+          sessionId,
+          kind: "native",
+          jwk: { kty: "EC", crv: "P-256", x: "x", y: "y" },
+          algorithm: "ES256",
+          createdAt: Date.now(),
+        });
+        const s = await storage.getSession(sessionId);
+        await storage.setSession({ ...s!, tier: "dbsc", lastRefreshAt: Date.now() });
+        res.json({ ok: true });
+      });
+    });
+    try {
+      const loginRes = await fetch(`${ctx.url}/login`, { method: "POST" });
+      const jar = parseSetCookie(loginRes.headers.getSetCookie?.() ?? []);
+      const stateRes = await fetch(`${ctx.url}/dbsc-bound/state`, {
+        headers: { Cookie: cookieHeader(jar) },
+      });
+      const body = await stateRes.json();
+      expect(body.phase).toBe("needs-bound-registration");
+      expect(body.tier).toBe("dbsc");
+      expect(body.challenge).toBeTruthy();
+    } finally {
+      await ctx.close();
+    }
+  });
 });
 
 async function registerBoundSession(ctx: Awaited<ReturnType<typeof startServer>>) {
@@ -326,6 +363,55 @@ describe("requireBoundProof middleware", () => {
       expect(res.status).toBe(403);
       const body = await res.json();
       expect(body.code).toBe("SIGNATURE_INVALID");
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  // v2.7+ default flip: dbsc tier no longer passes through without proof.
+  // Set up a fully-bound session, then promote it to tier="dbsc" to model
+  // a Chromium session that has completed native DBSC + the polyfill co-reg.
+  it("rejects a dbsc-tier session that sends no proof header (v2.7 default)", async () => {
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, res) => {
+        await bindSession(res, "sess-pr-dbsc-default", storage, { userId: "u1", secure: false });
+        res.json({ ok: true });
+      });
+      app.get("/strict", requireBoundProof({ storage }), (_req, res) => res.json({ ok: true }));
+    });
+    try {
+      const { jar, sessionId } = await registerBoundSession(ctx);
+      const s = await ctx.storage.getSession(sessionId);
+      await ctx.storage.setSession({ ...s!, tier: "dbsc", lastRefreshAt: Date.now() });
+
+      const res = await fetch(`${ctx.url}/strict`, { headers: { Cookie: cookieHeader(jar) } });
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.code).toBe("MISSING_PROOF");
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("allowDbscWithoutProof: true reinstates the v2.6 escape hatch", async () => {
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, res) => {
+        await bindSession(res, "sess-pr-dbsc-escape", storage, { userId: "u1", secure: false });
+        res.json({ ok: true });
+      });
+      app.get(
+        "/legacy",
+        requireBoundProof({ storage, allowDbscWithoutProof: true }),
+        (_req, res) => res.json({ ok: true }),
+      );
+    });
+    try {
+      const { jar, sessionId } = await registerBoundSession(ctx);
+      const s = await ctx.storage.getSession(sessionId);
+      await ctx.storage.setSession({ ...s!, tier: "dbsc", lastRefreshAt: Date.now() });
+
+      const res = await fetch(`${ctx.url}/legacy`, { headers: { Cookie: cookieHeader(jar) } });
+      expect(res.status).toBe(200);
     } finally {
       await ctx.close();
     }

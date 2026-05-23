@@ -34,9 +34,12 @@ export async function verifyBoundProof(
   if (Math.abs(Date.now() - parsed.ts) > windowMs) {
     throw new DbscVerificationError(ErrorCodes.SIGNATURE_INVALID, "proof timestamp outside window");
   }
-  const key = await storage.getBoundKey(req.sessionId);
+  // The per-request proof is always verified against the polyfill key.
+  // On Chromium sessions that also hold a "native" TPM key, that key is used
+  // only by /dbsc/refresh — Chrome cannot sign request-scoped messages with it.
+  const key = await storage.getBoundKey(req.sessionId, "bound");
   if (!key) {
-    throw new DbscVerificationError(ErrorCodes.KEY_NOT_FOUND, "no bound key for session");
+    throw new DbscVerificationError(ErrorCodes.KEY_NOT_FOUND, "no polyfill bound key for session");
   }
 
   const wantBodySig = req.signBody === true;

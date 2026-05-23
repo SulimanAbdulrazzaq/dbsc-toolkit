@@ -1,6 +1,7 @@
 export type {
   ProtectionTier,
   BoundKey,
+  BoundKeyKind,
   Session,
   Challenge,
   RegistrationProof,

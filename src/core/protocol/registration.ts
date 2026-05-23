@@ -40,11 +40,11 @@ export async function handleRegistration(
     throw new DbscVerificationError(ErrorCodes.JTI_MISMATCH, "jti does not match challenge");
   }
 
-  const existingKey = await storage.getBoundKey(req.sessionId);
+  const existingKey = await storage.getBoundKey(req.sessionId, "native");
   if (existingKey) {
     throw new DbscVerificationError(
       ErrorCodes.SESSION_ALREADY_REGISTERED,
-      "session already has a bound key; cannot register again",
+      "session already has a native bound key; cannot register again",
     );
   }
 
@@ -56,6 +56,7 @@ export async function handleRegistration(
   const now = Date.now();
   const boundKey: BoundKey = {
     sessionId: req.sessionId,
+    kind: "native",
     jwk,
     createdAt: now,
     algorithm,

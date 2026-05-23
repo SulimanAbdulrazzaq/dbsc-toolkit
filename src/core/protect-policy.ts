@@ -4,18 +4,19 @@ import type { SkippedEntry } from "./protocol/headers.js";
 /**
  * Options for `requireProof()`. All optional — `requireProof()` with no
  * arguments is the normal call. `requireProof()` always means: the request
- * must come from a bound device and prove it per-request. It works on every
- * browser — Chromium's hardware-backed `dbsc` tier passes through, the
- * software `bound` tier (Firefox / Safari / older Chromium) supplies a signed,
- * body-hashed proof.
+ * must come from a bound device and prove it per-request, on every browser.
+ * As of v2.7 Chromium sessions register a polyfill key alongside the TPM
+ * key, so the per-request signature works the same way on every tier.
  */
 export interface RequireProofOptions {
   /**
-   * Let the hardware-backed `dbsc` tier through without a proof header.
-   * Default true — Chromium enforces the cookie↔key binding browser-side, and
-   * the native protocol does not sign request bodies. Set false to demand a
-   * signed proof from Chromium too (the client must then call
-   * `wrapFetch({ signBody: true })`).
+   * Skip the per-request proof header on `tier: "dbsc"`. **Default `false`
+   * as of v2.7.** v2.6 and earlier defaulted to `true`, which left a
+   * refresh-cycle replay window open on Chromium (a stolen cookie could
+   * pass `requireProof()` until the next /dbsc/refresh failed signature
+   * verification — up to `boundCookieTtl + refreshGraceMs`). Setting this
+   * to `true` reinstates the legacy behavior; only safe if your Chromium
+   * client cannot ship the v2.7 polyfill co-registration.
    */
   allowDbscWithoutProof?: boolean;
   /** Accepted proof timestamp window, ms. */

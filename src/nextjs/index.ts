@@ -337,13 +337,27 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
         res.headers.set("X-Server-Time", xServerTime);
         return res;
       }
-      const key = await storage.getBoundKey(sid);
-      if (!key) {
+      const nativeKey = await storage.getBoundKey(sid, "native");
+      const boundKey = await storage.getBoundKey(sid, "bound");
+      if (!nativeKey && !boundKey) {
         const challenge = await issueChallenge(sid, storage);
         const res = NextResponse.json({
           phase: "needs-registration",
           sessionId: sid,
           challenge: challenge.jti,
+          ...(nativeSkipped && { nativeSkipped }),
+        });
+        res.headers.set("X-Server-Time", xServerTime);
+        return res;
+      }
+      if (nativeKey && !boundKey) {
+        const challenge = await issueChallenge(sid, storage);
+        const res = NextResponse.json({
+          phase: "needs-bound-registration",
+          sessionId: sid,
+          tier: session.tier,
+          challenge: challenge.jti,
+          refreshIntervalMs: boundCookieTtl,
           ...(nativeSkipped && { nativeSkipped }),
         });
         res.headers.set("X-Server-Time", xServerTime);
