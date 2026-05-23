@@ -67,6 +67,7 @@ export async function requireProof(
         allowDbscWithoutProof: opts.allowDbscWithoutProof,
       }),
       ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
+      ...(opts.replayCache !== undefined && { replayCache: opts.replayCache }),
     },
   );
 }

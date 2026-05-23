@@ -3,6 +3,7 @@ import {
   verifyBoundProof,
   DbscVerificationError,
   type StorageAdapter,
+  type ProofReplayCache,
 } from "../core/index.js";
 
 export interface RequireBoundProofOptions {
@@ -17,6 +18,8 @@ export interface RequireBoundProofOptions {
   timestampWindowMs?: number;
   /** Verify SHA-256 body hash. Register a buffer content-type parser so req.body arrives as Buffer. */
   signBody?: boolean;
+  /** v2.8+: optional replay cache; `requireProof()` reads from middleware context. */
+  replayCache?: ProofReplayCache;
 }
 
 /** Gates a route on a fresh bound-key proof. */
@@ -55,6 +58,7 @@ export function requireBoundProof(opts: RequireBoundProofOptions): preHandlerAsy
           timestampWindowMs: opts.timestampWindowMs,
           signBody,
           bodyBytes,
+          ...(opts.replayCache !== undefined && { replayCache: opts.replayCache }),
         },
         opts.storage,
       );

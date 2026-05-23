@@ -87,6 +87,27 @@ export interface RateLimiter {
   recordFailure(ip: string, sessionId?: string): Promise<void>;
 }
 
+/**
+ * Replay cache for per-request proofs (v2.8+). Used by `verifyBoundProof`
+ * after the cryptographic checks pass: a `(sessionId, ts, sig-prefix)` tuple
+ * is recorded with a short TTL; a second request carrying the same tuple is
+ * rejected as `PROOF_REPLAY`. Closes the captured-proof replay gap that the
+ * ±5-minute timestamp window leaves open.
+ *
+ * Implementations:
+ * - `NoopReplayCache` (default) — accepts everything. Backward-compatible.
+ * - `MemoryReplayCache` — Map + setTimeout. Dev only; not multi-process safe.
+ * - `RedisReplayCache` — `SET NX EX`. Production. Multi-process safe.
+ */
+export interface ProofReplayCache {
+  /**
+   * Record `key` with the given TTL. Returns `true` if this is the first
+   * sighting (request is allowed), `false` if the key was already present
+   * (a replay — reject the request).
+   */
+  checkAndRecord(key: string, ttlMs: number): Promise<boolean>;
+}
+
 export interface TelemetryEvent {
   sessionId: string;
   tier: ProtectionTier;
@@ -153,6 +174,16 @@ export interface DbscOptions {
    */
   cookieScope?: "host" | "site";
   rateLimiter?: RateLimiter;
+  /**
+   * Replay cache for per-request proofs (v2.8+). Without it, an attacker who
+   * captures one valid proof off the wire can replay it for up to the
+   * timestamp window. With it, the second replay is rejected as
+   * `PROOF_REPLAY`. Defaults to a no-op cache (v2.6 / v2.7 behavior).
+   *
+   * Pass `new MemoryReplayCache()` for single-process apps; pass
+   * `new RedisReplayCache(redis)` for multi-process production.
+   */
+  replayCache?: ProofReplayCache;
   onEvent?: (event: AnyTelemetryEvent) => void;
   /**
    * Optional callback for transparent migration. On every request that does not

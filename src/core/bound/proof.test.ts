@@ -412,3 +412,89 @@ describe("verifyBoundProof body signing", () => {
     });
   });
 });
+
+// v2.8+: replay cache integration
+describe("verifyBoundProof — replay cache", () => {
+  class CountingCache {
+    seen = new Set<string>();
+    calls = 0;
+    async checkAndRecord(key: string, _ttlMs: number): Promise<boolean> {
+      this.calls++;
+      if (this.seen.has(key)) return false;
+      this.seen.add(key);
+      return true;
+    }
+  }
+
+  it("accepts a proof and records it on the first sighting", async () => {
+    const { storage, sessionId, privateKey } = await bootstrapBoundSession("sess-replay-1");
+    const replayCache = new CountingCache();
+    const ts = Date.now();
+    const header = await buildProof(privateKey, sessionId, "GET", "/x", ts);
+
+    await expect(
+      verifyBoundProof(
+        { sessionId, proofHeader: header, method: "GET", path: "/x", replayCache },
+        storage,
+      ),
+    ).resolves.toBeUndefined();
+    expect(replayCache.calls).toBe(1);
+    expect(replayCache.seen.size).toBe(1);
+  });
+
+  it("rejects a second arrival of the same proof with PROOF_REPLAY", async () => {
+    const { storage, sessionId, privateKey } = await bootstrapBoundSession("sess-replay-2");
+    const replayCache = new CountingCache();
+    const ts = Date.now();
+    const header = await buildProof(privateKey, sessionId, "GET", "/x", ts);
+
+    await verifyBoundProof(
+      { sessionId, proofHeader: header, method: "GET", path: "/x", replayCache },
+      storage,
+    );
+    await expect(
+      verifyBoundProof(
+        { sessionId, proofHeader: header, method: "GET", path: "/x", replayCache },
+        storage,
+      ),
+    ).rejects.toMatchObject({
+      name: "DbscVerificationError",
+      code: ErrorCodes.PROOF_REPLAY,
+    });
+  });
+
+  it("does not poison the cache when the signature fails — replay key is only recorded after verify", async () => {
+    const { storage, sessionId, privateKey } = await bootstrapBoundSession("sess-replay-3");
+    const replayCache = new CountingCache();
+    const ts = Date.now();
+    // Real signature but for the wrong path → SIGNATURE_INVALID, not PROOF_REPLAY.
+    const badHeader = await buildProof(privateKey, sessionId, "GET", "/expected", ts);
+
+    await expect(
+      verifyBoundProof(
+        { sessionId, proofHeader: badHeader, method: "GET", path: "/other", replayCache },
+        storage,
+      ),
+    ).rejects.toMatchObject({ code: ErrorCodes.SIGNATURE_INVALID });
+    expect(replayCache.calls).toBe(0);
+    expect(replayCache.seen.size).toBe(0);
+  });
+
+  it("skips the replay check when no cache is supplied (backward compat)", async () => {
+    const { storage, sessionId, privateKey } = await bootstrapBoundSession("sess-replay-4");
+    const ts = Date.now();
+    const header = await buildProof(privateKey, sessionId, "GET", "/x", ts);
+
+    await verifyBoundProof(
+      { sessionId, proofHeader: header, method: "GET", path: "/x" },
+      storage,
+    );
+    // Same proof a second time without a cache → still accepted (Noop path).
+    await expect(
+      verifyBoundProof(
+        { sessionId, proofHeader: header, method: "GET", path: "/x" },
+        storage,
+      ),
+    ).resolves.toBeUndefined();
+  });
+});

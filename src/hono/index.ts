@@ -20,6 +20,7 @@ import {
   ErrorCodes,
   type DbscOptions,
   type StorageAdapter,
+  type ProofReplayCache,
   type ProtectionTier,
   type SkippedEntry,
 } from "../core/index.js";
@@ -34,6 +35,7 @@ export type { CreateDbscOptions, DbscKit, BindOptions } from "./create-dbsc.js";
 export interface DbscInternal {
   storage: StorageAdapter;
   secure: boolean;
+  replayCache?: ProofReplayCache;
 }
 export const DBSC_INTERNAL: unique symbol = Symbol("dbsc-toolkit.hono.internal");
 
@@ -135,6 +137,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
     refreshGraceMs = 30_000,
     registrationCookieTtl = DEFAULT_REG_TTL_MS,
     rateLimiter = new NoopRateLimiter(),
+    replayCache,
     onEvent,
     autoBind,
     secure = true,
@@ -500,6 +503,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
     (dbscSession as unknown as Record<PropertyKey, unknown>)[DBSC_INTERNAL] = {
       storage,
       secure,
+      ...(replayCache !== undefined && { replayCache }),
     } satisfies DbscInternal;
     c.set("dbsc", dbscSession);
 

@@ -21,6 +21,7 @@ import {
   ErrorCodes,
   type DbscOptions,
   type StorageAdapter,
+  type ProofReplayCache,
   type ProtectionTier,
   type SkippedEntry,
 } from "../core/index.js";
@@ -129,6 +130,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
     boundCookieTtl = DEFAULT_BOUND_TTL_MS,
     registrationCookieTtl = DEFAULT_REG_TTL_MS,
     rateLimiter = new NoopRateLimiter(),
+    replayCache,
     onEvent,
     autoBind,
     secure = true,

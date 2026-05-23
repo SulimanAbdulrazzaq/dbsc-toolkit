@@ -1,4 +1,4 @@
-import type { StorageAdapter } from "./types.js";
+import type { ProofReplayCache, StorageAdapter } from "./types.js";
 import type { SkippedEntry } from "./protocol/headers.js";
 
 /**
@@ -23,6 +23,12 @@ export interface RequireProofOptions {
   timestampWindowMs?: number;
   /** Storage override. Defaults to the storage the adapter middleware was given. */
   storage?: StorageAdapter;
+  /**
+   * v2.8+: optional replay cache. Express / Fastify / Hono adapters read this
+   * from the middleware context (`DbscOptions.replayCache`); pass it here
+   * only when calling the Next.js `requireProof` directly or overriding.
+   */
+  replayCache?: ProofReplayCache;
 }
 
 /** Human-readable reason for a `tier: "none"` rejection — quota-aware. */

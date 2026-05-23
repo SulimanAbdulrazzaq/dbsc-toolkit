@@ -8,6 +8,7 @@ export type {
   RefreshProof,
   StorageAdapter,
   RateLimiter,
+  ProofReplayCache,
   DbscOptions,
   DbscKitExtras,
   AutoBindResult,
@@ -53,6 +54,7 @@ export { verifyBoundProof, parseProofHeader, BOUND_PROOF_HEADER } from "./bound/
 export type { VerifyBoundProofRequest } from "./bound/proof.js";
 
 export { NoopRateLimiter } from "./ratelimit/interface.js";
+export { NoopReplayCache } from "./replay/interface.js";
 export { emit } from "./telemetry/hooks.js";
 
 export { deriveSessionId } from "./derive-session-id.js";

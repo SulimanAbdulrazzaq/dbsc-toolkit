@@ -22,6 +22,7 @@ import {
   ErrorCodes,
   type DbscOptions,
   type StorageAdapter,
+  type ProofReplayCache,
   type ProtectionTier,
   type SkippedEntry,
 } from "../core/index.js";
@@ -41,6 +42,7 @@ declare module "fastify" {
 export interface DbscInternal {
   storage: StorageAdapter;
   secure: boolean;
+  replayCache?: ProofReplayCache;
 }
 export const DBSC_INTERNAL: unique symbol = Symbol("dbsc-toolkit.fastify.internal");
 
@@ -129,6 +131,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     refreshGraceMs = 30_000,
     registrationCookieTtl = DEFAULT_REG_TTL_MS,
     rateLimiter = new NoopRateLimiter(),
+    replayCache,
     onEvent,
     autoBind,
     secure = true,
@@ -161,6 +164,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     (req as unknown as Record<PropertyKey, unknown>)[DBSC_INTERNAL] = {
       storage,
       secure,
+      ...(replayCache !== undefined && { replayCache }),
     } satisfies DbscInternal;
 
     if (sessionId) {

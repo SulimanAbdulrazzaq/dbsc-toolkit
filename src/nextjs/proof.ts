@@ -4,6 +4,7 @@ import {
   verifyBoundProof,
   DbscVerificationError,
   type StorageAdapter,
+  type ProofReplayCache,
   type ProtectionTier,
 } from "../core/index.js";
 
@@ -19,6 +20,8 @@ export interface RequireBoundProofOptions {
   timestampWindowMs?: number;
   /** Verify SHA-256 body hash. Helper clones req before reading so handler can still parse the original. */
   signBody?: boolean;
+  /** v2.8+: optional replay cache. */
+  replayCache?: ProofReplayCache;
 }
 
 export interface RequireBoundProofContext {
@@ -62,6 +65,7 @@ export async function requireBoundProof(
         timestampWindowMs: opts.timestampWindowMs,
         signBody,
         bodyBytes,
+        ...(opts.replayCache !== undefined && { replayCache: opts.replayCache }),
       },
       opts.storage,
     );

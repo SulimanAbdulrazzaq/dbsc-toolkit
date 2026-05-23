@@ -22,6 +22,7 @@ import {
   ErrorCodes,
   type DbscOptions,
   type StorageAdapter,
+  type ProofReplayCache,
   type Session,
   type ProtectionTier,
   type SkippedEntry,
@@ -38,6 +39,8 @@ export type { CreateDbscOptions, DbscKit, BindOptions } from "./create-dbsc.js";
 export interface DbscInternal {
   storage: StorageAdapter;
   secure: boolean;
+  /** v2.8+: optional replay cache; undefined → no replay check (Noop). */
+  replayCache?: ProofReplayCache;
 }
 export const DBSC_INTERNAL: unique symbol = Symbol("dbsc-toolkit.express.internal");
 
@@ -165,6 +168,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
     refreshGraceMs = 30_000,
     registrationCookieTtl = DEFAULT_REG_TTL,
     rateLimiter = new NoopRateLimiter(),
+    replayCache,
     onEvent,
     autoBind,
     secure = true,
@@ -629,6 +633,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
     (res.locals as Record<PropertyKey, unknown>)[DBSC_INTERNAL] = {
       storage,
       secure,
+      ...(replayCache !== undefined && { replayCache }),
     } satisfies DbscInternal;
 
     if (sessionId) {

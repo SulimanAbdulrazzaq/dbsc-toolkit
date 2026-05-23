@@ -1,11 +1,12 @@
 import { DbscVerificationError, ErrorCodes } from "../errors.js";
-import type { StorageAdapter } from "../types.js";
+import type { ProofReplayCache, StorageAdapter } from "../types.js";
 import { verifyP256Signature } from "./verify.js";
 
 export const BOUND_PROOF_HEADER = "X-Dbsc-Bound-Proof";
 const DEFAULT_WINDOW_MS = 5 * 60 * 1000;
 const MAX_HEADER_LEN = 8 * 1024;
 const MAX_SEGMENTS = 8;
+const SIG_PREFIX_LEN = 43; // 256 bits in base64url — enough uniqueness for a replay key
 
 export interface VerifyBoundProofRequest {
   sessionId: string;
@@ -17,6 +18,13 @@ export interface VerifyBoundProofRequest {
   bodyBytes?: Uint8Array | undefined;
   /** Hash and verify body bytes into the signed message. */
   signBody?: boolean | undefined;
+  /**
+   * Optional replay cache. v2.8+: after the signature checks pass, the proof's
+   * `(sessionId, ts, sig-prefix)` is recorded. A second arrival of the same
+   * tuple within `2 * timestampWindowMs` is rejected as `PROOF_REPLAY`.
+   * Defaults to no-op — pass an implementation (Memory / Redis) to enable.
+   */
+  replayCache?: ProofReplayCache | undefined;
 }
 
 export async function verifyBoundProof(
@@ -74,6 +82,20 @@ export async function verifyBoundProof(
   const ok = await verifyP256Signature(key.jwk, parsed.sig, message);
   if (!ok) {
     throw new DbscVerificationError(ErrorCodes.SIGNATURE_INVALID, "proof signature did not verify");
+  }
+
+  // Replay check, after the cryptographic gate. The cache key is the verified
+  // tuple — recording before the signature check would let an attacker poison
+  // the cache by replaying garbage and locking legitimate replays. TTL is
+  // 2 * window because a proof at the edge of the future window survives
+  // until the past window closes.
+  if (req.replayCache) {
+    const sigPrefix = parsed.sig.slice(0, SIG_PREFIX_LEN);
+    const replayKey = `${req.sessionId}.${parsed.ts}.${sigPrefix}`;
+    const fresh = await req.replayCache.checkAndRecord(replayKey, 2 * windowMs);
+    if (!fresh) {
+      throw new DbscVerificationError(ErrorCodes.PROOF_REPLAY, "proof already used (replay)");
+    }
   }
 }
 

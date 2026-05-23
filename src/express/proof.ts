@@ -3,6 +3,7 @@ import {
   verifyBoundProof,
   DbscVerificationError,
   type StorageAdapter,
+  type ProofReplayCache,
 } from "../core/index.js";
 
 export interface RequireBoundProofOptions {
@@ -20,6 +21,13 @@ export interface RequireBoundProofOptions {
   timestampWindowMs?: number;
   /** Verify SHA-256 body hash. Route must deliver raw bytes (e.g. express.raw({type:"*\/*"})). */
   signBody?: boolean;
+  /**
+   * v2.8+: optional replay cache. If provided, a second arrival of the same
+   * `(sessionId, ts, sig-prefix)` proof is rejected as `PROOF_REPLAY`.
+   * `requireProof()` reads this from the middleware context — pass it here
+   * only if mounting `requireBoundProof` standalone.
+   */
+  replayCache?: ProofReplayCache;
 }
 
 /** Gates a route on a fresh bound-key proof. */
@@ -59,6 +67,7 @@ export function requireBoundProof(opts: RequireBoundProofOptions): RequestHandle
           timestampWindowMs: opts.timestampWindowMs,
           signBody,
           bodyBytes,
+          ...(opts.replayCache !== undefined && { replayCache: opts.replayCache }),
         },
         opts.storage,
       );

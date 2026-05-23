@@ -54,6 +54,7 @@ export function requireProof(opts: RequireProofOptions = {}): RequestHandler {
           allowDbscWithoutProof: opts.allowDbscWithoutProof,
         }),
         ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
+        ...(internal?.replayCache !== undefined && { replayCache: internal.replayCache }),
       });
     }
     proofHandler(req, res, next);

@@ -48,6 +48,7 @@ export function requireProof(opts: RequireProofOptions = {}): preHandlerAsyncHoo
           allowDbscWithoutProof: opts.allowDbscWithoutProof,
         }),
         ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
+        ...(internal?.replayCache !== undefined && { replayCache: internal.replayCache }),
       });
     }
     await (proofHandler as (req: FastifyRequest, reply: FastifyReply) => Promise<void>)(req, reply);
