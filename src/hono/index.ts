@@ -15,6 +15,7 @@ import {
   LEGACY_CHALLENGE_HEADER,
   NoopRateLimiter,
   emit,
+  maybeEmitPolyfillMissing,
   DbscProtocolError,
   DbscVerificationError,
   ErrorCodes,
@@ -151,6 +152,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
   };
 
   const COOKIES = cookieNames(secure);
+  const polyfillMissingEmitted = new Set<string>();
 
   return async (c: Context, next) => {
     const url = new URL(c.req.url);
@@ -476,6 +478,15 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
           tier = "none";
         } else {
           tier = session.tier;
+        }
+        if (onEvent) {
+          await maybeEmitPolyfillMissing({
+            storage,
+            session,
+            ip: c.req.header("x-forwarded-for") ?? "unknown",
+            emitted: polyfillMissingEmitted,
+            onEvent,
+          });
         }
       }
     } else if (autoBind && !getCookie(c, COOKIES.reg)) {

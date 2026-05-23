@@ -47,7 +47,7 @@ export async function verifyBoundProof(
   // only by /dbsc/refresh — Chrome cannot sign request-scoped messages with it.
   const key = await storage.getBoundKey(req.sessionId, "bound");
   if (!key) {
-    throw new DbscVerificationError(ErrorCodes.KEY_NOT_FOUND, "no polyfill bound key for session");
+    throw new DbscVerificationError(ErrorCodes.KEY_NOT_FOUND_BOUND, "no polyfill bound key for session");
   }
 
   const wantBodySig = req.signBody === true;

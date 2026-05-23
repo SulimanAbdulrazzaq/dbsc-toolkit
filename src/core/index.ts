@@ -19,6 +19,7 @@ export type {
   VerificationFailureEvent,
   SessionStolenEvent,
   TierChangeEvent,
+  PolyfillMissingEvent,
 } from "./types.js";
 
 export { DbscProtocolError, DbscVerificationError, DbscStorageError, ErrorCodes } from "./errors.js";
@@ -56,6 +57,7 @@ export type { VerifyBoundProofRequest } from "./bound/proof.js";
 export { NoopRateLimiter } from "./ratelimit/interface.js";
 export { NoopReplayCache } from "./replay/interface.js";
 export { emit } from "./telemetry/hooks.js";
+export { maybeEmitPolyfillMissing, POLYFILL_MISSING_GRACE_MS } from "./telemetry/polyfill-missing.js";
 
 export { deriveSessionId } from "./derive-session-id.js";
 export type { DeriveSessionIdInput } from "./derive-session-id.js";

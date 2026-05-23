@@ -39,6 +39,12 @@ export const ErrorCodes = {
   JTI_MISMATCH: "JTI_MISMATCH",
   SIGNATURE_INVALID: "SIGNATURE_INVALID",
   KEY_NOT_FOUND: "KEY_NOT_FOUND",
+  // v2.8+: kind-specific variants so the client can distinguish a storage
+  // wipe (the native key is gone — session must restart from /login) from a
+  // missing polyfill key (re-init the client SDK to re-register without a
+  // full logout).
+  KEY_NOT_FOUND_NATIVE: "KEY_NOT_FOUND_NATIVE",
+  KEY_NOT_FOUND_BOUND: "KEY_NOT_FOUND_BOUND",
   SESSION_NOT_FOUND: "SESSION_NOT_FOUND",
   SESSION_ALREADY_REGISTERED: "SESSION_ALREADY_REGISTERED",
   RATE_LIMITED: "RATE_LIMITED",

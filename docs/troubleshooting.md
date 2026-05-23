@@ -245,6 +245,53 @@ This was the breakthrough during initial development — `dbscHeaders=["secure-s
 
 A net-export capture is the most useful diagnostic — if your origin's session terminates silently after registration, the log entries explain which validation step Chrome failed.
 
+## `PROOF_REPLAY` 403 on a guarded route (v2.8+)
+
+The proof header for this request matches one already seen for the same
+session within the timestamp window. Either an actual replay attack, or a
+client bug that re-sends the same signed proof.
+
+Common causes when it's not an attack:
+
+1. **Client retried after a network error.** `wrapFetch` signs once per
+   call — if the application logic retries the same request without
+   re-signing, the second attempt carries the original `ts` and `sig` and
+   gets rejected. Re-call `wrapFetch` on the retry.
+2. **A Service Worker cached a request.** Caches that intercept a guarded
+   request can replay it; the proof header is bound to `(method, path,
+   ts, body)` so a delayed replay always 403s. Mark guarded routes as
+   `cache: "no-store"` or skip the service worker for them.
+3. **Two tabs sharing IndexedDB raced on the same `ts`.** Possible in
+   theory if both call the same path within the same millisecond. Rare;
+   surfaces as `PROOF_REPLAY` on the second tab. The retry succeeds.
+
+If you do *not* want the replay cache (e.g. legacy clients that legitimately
+retry without re-signing), pass `replayCache: new NoopReplayCache()` to
+`createDbsc` to disable it explicitly. The default `Noop` cache is the
+v2.6/v2.7 behavior — no replay check.
+
+## `polyfill_missing` telemetry event firing (v2.8+)
+
+A Chromium session has held a `kind: "native"` TPM key for more than the
+60s grace window without ever co-registering its polyfill key. The session
+reads `tier: "dbsc"` but every `requireProof()` call 403s with
+`KEY_NOT_FOUND_BOUND`.
+
+Causes:
+
+1. **Client SDK not loaded.** Confirm the page mounts `/dbsc-client/index.js`
+   and calls `initBoundDbsc()` on first load.
+2. **Co-registration failed silently.** Check the outcome promise from
+   `initBoundDbsc()` for `skipReason: "polyfill-co-registration-failed"`.
+3. **A Chromium quota / sandbox issue.** Check the Application →
+   IndexedDB → `dbsc-toolkit` database in DevTools. If empty, the key
+   generation failed. `chrome://settings/clearBrowserData` for the origin
+   often clears the condition.
+
+The signal fires at most once per session per server-process restart, so
+the volume is bounded — a spike means many real users are in the degraded
+state, worth paging on.
+
 ## When to file a bug
 
 If you see a `MALFORMED_JWS` or `INVALID_JWK` from a normal Chromium 145+ client (Chrome, Edge, Brave) with no middleware in between, it's likely a Chromium bug. File at <https://crbug.com> with the net-export log attached.

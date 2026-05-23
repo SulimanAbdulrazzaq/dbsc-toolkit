@@ -17,6 +17,7 @@ import {
   LEGACY_CHALLENGE_HEADER,
   NoopRateLimiter,
   emit,
+  maybeEmitPolyfillMissing,
   DbscProtocolError,
   DbscVerificationError,
   ErrorCodes,
@@ -145,6 +146,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
   };
 
   const COOKIES = cookieNames(secure);
+  const polyfillMissingEmitted = new Set<string>();
 
   fastify.decorateRequest<FastifyRequest["dbsc"] | null>("dbsc", null);
 
@@ -176,6 +178,15 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
           req.dbsc.tier = "none";
         } else {
           req.dbsc.tier = session.tier;
+        }
+        if (onEvent) {
+          await maybeEmitPolyfillMissing({
+            storage,
+            session,
+            ip: req.ip ?? "unknown",
+            emitted: polyfillMissingEmitted,
+            onEvent,
+          });
         }
       }
     } else if (autoBind && !req.cookies?.[COOKIES.reg]) {

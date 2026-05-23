@@ -143,12 +143,30 @@ export interface TierChangeEvent extends TelemetryEvent {
   reason: string;
 }
 
+/**
+ * v2.8+: emitted when a Chromium session that holds a `kind: "native"` TPM
+ * key has gone past a grace window without ever co-registering its
+ * `kind: "bound"` polyfill key. The session reads `tier: "dbsc"` but
+ * `requireProof()` will 403 every guarded request — degraded state worth
+ * alerting on. Fires at most once per session per process (a small
+ * in-memory dedup set; restarts re-arm). The grace window starts at
+ * `session.createdAt` and defaults to 60s — long enough for native
+ * registration + polyfill co-registration to complete on a warm host, well
+ * shorter than the bound-cookie TTL so the signal arrives before the first
+ * background refresh.
+ */
+export interface PolyfillMissingEvent extends TelemetryEvent {
+  type: "polyfill_missing";
+  ip: string;
+}
+
 export type AnyTelemetryEvent =
   | RegistrationEvent
   | RefreshEvent
   | VerificationFailureEvent
   | SessionStolenEvent
-  | TierChangeEvent;
+  | TierChangeEvent
+  | PolyfillMissingEvent;
 
 export interface DbscOptions {
   storage: StorageAdapter;

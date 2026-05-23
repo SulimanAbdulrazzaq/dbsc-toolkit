@@ -30,13 +30,8 @@ cookieDomain?: string;            // required when cookieScope is "site"
 
 Not committed — listed so the intent is recorded.
 
-### Server-side replay cache for per-request proofs
-
-`requireBoundProof` defends against replay with a ±5-minute timestamp window. An MITM that captures and replays an *unchanged* request within that window still succeeds. A `(sessionId, ts, path)` dedup cache in Redis would close this for apps that need strict same-second replay rejection. Deferred because the timestamp window is sufficient for the dominant threat (passive cookie theft); body signing already covers body substitution.
-
-### Third-party security audit
-
-The library has no external security audit. Noted in [HOW-IT-WORKS.md](./HOW-IT-WORKS.md) under production readiness. Not actionable as a code change — it needs a funded engagement — but it is recorded here as a known gap.
+(none currently — replay cache shipped in v2.8.0, audit gap noted in
+README "Known limitations" instead of here.)
 
 ## How items move off this list
 

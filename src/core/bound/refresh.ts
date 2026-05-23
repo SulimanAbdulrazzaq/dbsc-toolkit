@@ -29,7 +29,7 @@ export async function handleBoundRefresh(
 
   const key = await storage.getBoundKey(req.sessionId, "bound");
   if (!key) {
-    throw new DbscVerificationError(ErrorCodes.KEY_NOT_FOUND, "no polyfill bound key for session");
+    throw new DbscVerificationError(ErrorCodes.KEY_NOT_FOUND_BOUND, "no polyfill bound key for session");
   }
 
   const challenge = await storage.getChallenge(req.expectedJti);

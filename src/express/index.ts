@@ -16,6 +16,7 @@ import {
   LEGACY_CHALLENGE_HEADER,
   NoopRateLimiter,
   emit,
+  maybeEmitPolyfillMissing,
   parseCookieHeader,
   DbscProtocolError,
   DbscVerificationError,
@@ -175,6 +176,10 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
   } = opts;
 
   const COOKIES = cookieNames(secure);
+  // Per-middleware-instance dedup set for the polyfill_missing telemetry event.
+  // Re-armed on process restart, which is fine: the signal is for ops alerting,
+  // not for security enforcement.
+  const polyfillMissingEmitted = new Set<string>();
 
   async function handleRegistrationRoute(req: Request, res: Response): Promise<void> {
     const ip = req.ip ?? "unknown";
@@ -645,6 +650,15 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
           res.locals.dbsc.tier = "none";
         } else {
           res.locals.dbsc.tier = session.tier;
+        }
+        if (onEvent) {
+          await maybeEmitPolyfillMissing({
+            storage,
+            session,
+            ip: req.ip ?? "unknown",
+            emitted: polyfillMissingEmitted,
+            onEvent,
+          });
         }
       }
     } else if (autoBind && !(req.cookies?.[COOKIES.reg])) {

@@ -215,7 +215,7 @@ describe("verifyBoundProof", () => {
       ),
     ).rejects.toMatchObject({
       name: "DbscVerificationError",
-      code: ErrorCodes.KEY_NOT_FOUND,
+      code: ErrorCodes.KEY_NOT_FOUND_BOUND,
     });
   });
 

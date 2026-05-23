@@ -109,6 +109,7 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
         ...(opts.boundCookieTtl !== undefined && { boundCookieTtl: opts.boundCookieTtl }),
         ...(opts.refreshGraceMs !== undefined && { refreshGraceMs: opts.refreshGraceMs }),
         ...(res !== undefined && { res }),
+        ...(opts.onEvent !== undefined && { onEvent: opts.onEvent }),
         secure,
       }),
     requireProof: (req: NextRequest, session: RequireProofSession) =>

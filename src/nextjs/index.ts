@@ -16,6 +16,7 @@ import {
   LEGACY_CHALLENGE_HEADER,
   NoopRateLimiter,
   emit,
+  maybeEmitPolyfillMissing,
   DbscProtocolError,
   DbscVerificationError,
   ErrorCodes,
@@ -521,10 +522,22 @@ export interface DbscSessionInfo {
   revoke: () => Promise<void>;
 }
 
+// Module-level dedup for the polyfill_missing event on Next.js. The middleware
+// is invoked from `middleware.ts` which is itself instantiated per
+// edge-runtime — restarts re-arm the set, which is fine.
+const polyfillMissingEmitted = new Set<string>();
+
 export async function getDbscSession(
   req: NextRequest,
   storage: DbscOptions["storage"],
-  opts: { boundCookieTtl?: number; refreshGraceMs?: number; res?: NextResponse; secure?: boolean } = {},
+  opts: {
+    boundCookieTtl?: number;
+    refreshGraceMs?: number;
+    res?: NextResponse;
+    secure?: boolean;
+    /** Internal — the kit threads this through so polyfill_missing can fire. */
+    onEvent?: DbscOptions["onEvent"];
+  } = {},
 ): Promise<DbscSessionInfo> {
   const skippedRaw: Record<string, string | undefined> = {
     "secure-session-skipped": req.headers.get("secure-session-skipped") ?? undefined,
@@ -554,6 +567,17 @@ export async function getDbscSession(
   const refreshable = session.tier === "dbsc" || session.tier === "bound";
   if (refreshable && Date.now() > staleAfter) {
     return { sessionId, tier: "none", skipped, revoke };
+  }
+
+  if (opts.onEvent) {
+    const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+    await maybeEmitPolyfillMissing({
+      storage,
+      session,
+      ip,
+      emitted: polyfillMissingEmitted,
+      onEvent: opts.onEvent,
+    });
   }
 
   return { sessionId, tier: session.tier, skipped, revoke };

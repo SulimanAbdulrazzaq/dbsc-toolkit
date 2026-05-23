@@ -2,6 +2,74 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.8.0] — 2026-05-24
+
+A follow-up to v2.7 that closes the captured-proof replay gap, smooths the
+client-side ergonomics, and surfaces a degraded-mode signal that v2.7
+silently dropped.
+
+### Added
+
+- **Replay cache for per-request proofs.** v2.7's per-request proof has a
+  ±5-minute timestamp window — an attacker who captures one valid signed
+  proof off the wire (compromised proxy, log spillage) could replay it for
+  up to 5 minutes against the same path. v2.8 adds a `ProofReplayCache`
+  interface; when provided, `verifyBoundProof` records the
+  `(sessionId, ts, sig-prefix)` tuple after the signature passes and 403s
+  any second arrival with `code: "PROOF_REPLAY"`. Three implementations:
+  `NoopReplayCache` (default, backward compatible), `MemoryReplayCache`
+  (single-process dev), `RedisReplayCache` (multi-process production).
+  Wire it on the kit: `createDbsc({ storage, replayCache: new RedisReplayCache(redis) })`.
+- **`installFetchInterceptor({ pathPrefixes })`** in the browser SDK. Swaps
+  `globalThis.fetch` with a wrapper that routes matching same-origin
+  requests through `wrapFetch` and everything else through the original
+  fetch. For apps with many guarded routes where calling `wrapFetch` at
+  every call site is a footgun. Validation rejects the obvious dangers:
+  empty prefixes, bare `"/"` (would sign everything including static
+  assets), absolute URL prefixes (would leak the key cross-origin), and
+  prefixes missing the leading `/`. Returns an `uninstall` function. For
+  small apps, the per-call `wrapFetch(...)` shape stays recommended.
+- **`PolyfillMissingEvent`** telemetry. A Chromium-bound session that goes
+  past a 60s grace window without registering its polyfill key reads
+  `tier: "dbsc"` but every `requireProof()` call 403s — a degraded state
+  that previously had no server-side signal. The middleware emits the
+  event once per session per process restart so ops can alert on it.
+- **`KEY_NOT_FOUND_NATIVE` and `KEY_NOT_FOUND_BOUND` error codes.** The
+  generic `KEY_NOT_FOUND` was ambiguous: storage wipe (session is gone,
+  user must restart from `/login`) versus missing polyfill key (client
+  SDK can re-init without a full logout). The two paths now report
+  distinct codes; the legacy `KEY_NOT_FOUND` is kept in `ErrorCodes` for
+  any consumer pinned to it.
+
+### Behavior changes
+
+- **`wrapFetch` `signBody` defaults to `true`.** v2.6/2.7 default was
+  `false`; `requireProof()` always wants a body hash, so signing by
+  default is the safe shape. Apps that called `wrapFetch({ signBody: true })`
+  explicitly are unchanged. Apps that called bare `wrapFetch()` on a route
+  guarded by `requireProof()` were getting `MALFORMED_PROOF` 403s before
+  this change; they now succeed.
+
+### Internals
+
+- Replay-cache wiring threads through every adapter's middleware context
+  (`DbscInternal.replayCache`), so `requireProof()` picks it up without
+  re-passing.
+- A small per-instance `Set<sessionId>` dedups the `polyfill_missing`
+  event so it fires at most once per session per process; restarts re-arm
+  the set (ops signal, not security gate).
+
+### Notes
+
+- The replay cache key is only recorded **after** the signature verifies.
+  An attacker replaying garbage cannot poison the cache and lock out the
+  legitimate client.
+- The replay TTL is `2 * timestampWindowMs` (default 10 min) — a proof at
+  the future edge of the window must remain rejected until the past edge
+  closes.
+- The Redis adapter uses `SET NX EX` for an atomic single round-trip
+  check-and-record. Multi-process safe.
+
 ## [2.7.0] — 2026-05-23
 
 This release closes the cookie-replay window on Chromium. A user who reproduced
