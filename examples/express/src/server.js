@@ -459,8 +459,8 @@ document.getElementById('login-jwt-btn').onclick = () => doLogin('/login-jwt', '
 document.getElementById('me-btn').onclick = async () => show(await rawReq('GET', '/me'));
 
 document.getElementById('profile-btn').onclick = async () => {
-  // boundFetch signs the request (signBody:true). On Chromium the header is
-  // ignored (native DBSC passes through); on Firefox/Safari it is required.
+  // boundFetch signs the request (signBody:true). v2.7+: required on every
+  // browser, including Chromium. A stolen cookie without the proof = 403.
   if (typeof window.boundFetch !== 'function') return show({ status: 0, body: { error: 'SDK not loaded yet' } });
   const r = await window.boundFetch('/profile', { method: 'GET', credentials: 'include' });
   const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
@@ -543,8 +543,10 @@ document.getElementById('clear-btn').onclick = async () => {
 <script type="module">
   import { initBoundDbsc, wrapFetch, clearBoundKey } from '/dbsc-client/index.js';
   window.clearBoundKey = clearBoundKey;
-  // boundFetch signs every request (signBody:true) so requireProof() routes
-  // pass on Firefox/Safari. Per-call — never assigned to globalThis.fetch.
+  // boundFetch signs every request (signBody:true). v2.7+ this is required on
+  // every browser including Chromium — the polyfill key co-registered alongside
+  // the TPM key is what requireProof() verifies. Per-call — never assigned
+  // to globalThis.fetch.
   window.boundFetch = wrapFetch({ signBody: true });
   // 8s probe window — Render cold starts can push native registration past
   // the 5s default, which would let the polyfill win on a TPM-capable browser.

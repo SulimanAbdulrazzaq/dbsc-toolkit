@@ -78,18 +78,20 @@ createDbsc({ storage, rateLimiter: new RedisRateLimiter(redis) }).install(app);
 
 ## Bound cookie TTL
 
-Default: 10 minutes. The trade-off:
+Default: 10 minutes. Governs how often the browser re-proves the binding via `/dbsc/refresh`.
 
-- **Shorter TTL** = stolen cookies become useless faster, but more refresh load on the server and Chrome.
-- **Longer TTL** = larger window where a stolen cookie still works.
+Since v2.7, sensitive routes guarded by `requireProof()` 403 a stolen cookie immediately — the TTL does not affect that path. This knob still matters for routes that **don't** call `requireProof()`: a stolen cookie keeps working there until the next refresh fails and demotes the tier to `"none"`.
 
-Suggested values by application sensitivity:
+- **Shorter TTL** = stolen cookies on unguarded routes degrade sooner, but more refresh traffic.
+- **Longer TTL** = larger window for the unguarded-route case.
+
+If everything sensitive is behind `requireProof()`, leaving the default at 10 minutes is fine. Tighten the TTL when you have sensitive reads on routes you do not want to mark with `requireProof()`:
 
 | Application | TTL |
 |-------------|-----|
-| Banking, payments | 2-5 minutes |
-| Email, social | 10 minutes (default) |
-| Read-only content | 30 minutes |
+| Banking, payments (and you guard them with `requireProof()`) | 10 minutes (default) is fine |
+| Email / social with sensitive *unguarded* reads | 2-5 minutes |
+| Read-only public content | 30 minutes |
 
 Set in adapter options:
 
@@ -107,7 +109,11 @@ If you forget this step, the library buys you nothing. A stolen cookie still rea
 
 When an attacker copies a bound cookie to another device, this is what the server sees on the attacker's requests:
 
-1. First request, within the bound cookie's TTL: the freshness check passes (`session.lastRefreshAt + boundCookieTtl` is still in the future), so tier reads `"dbsc"`. The attacker has full access during this window. **Keep `boundCookieTtl` short for sensitive applications** — see the bound cookie TTL section above.
+**Routes guarded by `requireProof()` (v2.7+): the stolen cookie is rejected on the first request.** The polyfill ECDSA key sits in IndexedDB on the victim's browser with `extractable: false` — the attacker has the cookie but cannot produce the proof signature. The handler returns 403 with `code: "MISSING_PROOF"`. The refresh-cycle window described below applies only to routes that do *not* call `requireProof()`.
+
+**Routes not guarded by `requireProof()` (and pre-v2.7 behavior):**
+
+1. First request, within the bound cookie's TTL: the freshness check passes (`session.lastRefreshAt + boundCookieTtl` is still in the future), so tier reads `"dbsc"`. The attacker has access during this window. **Keep `boundCookieTtl` short, or mark the route with `requireProof()` to close the window entirely.**
 
 2. As soon as the window elapses, the adapter's freshness check fails — tier reads `"none"` on every subsequent request from the attacker, even though the stored session is still `"dbsc"`. The attacker still has the cookie value, but it no longer buys them anything.
 
@@ -115,7 +121,7 @@ When an attacker copies a bound cookie to another device, this is what the serve
 
 4. The victim's next request triggers a refresh, signs with their real TPM key, succeeds — stored tier is restored to `"dbsc"`. Legitimate use is uninterrupted.
 
-The window in step (1) is the cost of cookie theft under DBSC. Compared to "indefinite session takeover" without DBSC, it's bounded by `boundCookieTtl`. With a 60-second TTL, a stolen cookie is useful for roughly a minute.
+So the cost of cookie theft under DBSC depends on the route: guarded routes refuse on contact, unguarded routes give up to `boundCookieTtl` of attacker access before degrading. Compared to "indefinite session takeover" without DBSC, even the worst case is bounded.
 
 ### Policy patterns
 
