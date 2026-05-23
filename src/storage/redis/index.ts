@@ -149,3 +149,5 @@ export class RedisStorage implements StorageAdapter {
     await pipeline.exec();
   }
 }
+
+export { RedisReplayCache } from "./replay-cache.js";

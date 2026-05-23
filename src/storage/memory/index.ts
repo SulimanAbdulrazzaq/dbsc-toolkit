@@ -106,3 +106,5 @@ export class MemoryStorage implements StorageAdapter {
     }
   }
 }
+
+export { MemoryReplayCache } from "./replay-cache.js";

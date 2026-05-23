@@ -9,7 +9,7 @@ import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
 import Redis from "ioredis";
 
 import { createDbsc, requireProof } from "dbsc-toolkit/express";
-import { MemoryStorage } from "dbsc-toolkit/storage/memory";
+import { MemoryStorage, MemoryReplayCache } from "dbsc-toolkit/storage/memory";
 import { RedisStorage } from "dbsc-toolkit/storage/redis";
 
 const app = express();
@@ -159,9 +159,16 @@ const KIT_OPTIONS = {
   secure: true,                // __Host- cookies + Secure flag
   clientPath: "/dbsc-client",  // where install() serves the browser SDK
 };
+// v2.8: per-request proof replay cache. The demo uses Memory so the replay
+// button works in this single-process server even when REDIS_URL is set.
+// Production with multiple replicas should use RedisReplayCache from
+// dbsc-toolkit/storage/redis.
+const replayCache = new MemoryReplayCache();
+
 const dbscKit = createDbsc({
   storage: dbscStorage,
   rateLimiter,
+  replayCache,
   onEvent: (event) => emitLog({ t: "dbsc-event", ...event }),
   ...KIT_OPTIONS,
 });
@@ -356,12 +363,14 @@ ${storageBanner}
 </div>
 
 <h2>3. Session + protected routes</h2>
-<p class="sub"><code>/me</code> works in either mode and needs no DBSC. <code>/profile</code> (GET) and <code>/payment</code> (POST) are gated by <code>requireProof()</code> — one guard, every browser. The theft button sends no proof, to show the rejection.</p>
+<p class="sub"><code>/me</code> works in either mode and needs no DBSC. <code>/profile</code> (GET) and <code>/payment</code> (POST) are gated by <code>requireProof()</code> — one guard, every browser. The theft / tamper / replay buttons exercise each attack the proof defends against.</p>
 <button id="me-btn">Check session (/me)</button>
 <button id="profile-btn" class="primary">GET /profile (requireProof)</button>
 <button id="pay-btn" class="primary">POST /payment (requireProof + signed body)</button>
 <button id="theft-btn">Simulate stolen cookie (no proof)</button>
 <button id="tamper-btn">Tamper: replay proof, change amount</button>
+<button id="replay-btn">Replay: identical request twice (v2.8 PROOF_REPLAY)</button>
+<button id="interceptor-btn">Install fetch interceptor → bare fetch /profile</button>
 
 <h2>4. createDbsc options</h2>
 <p class="sub">The live kit config. The rate limiter guards <code>/dbsc/*</code>; the button fires 15 rapid <code>POST /dbsc/refresh</code> to trip the per-session limit (${RL_LIMITS.refresh}/min) — watch for 429s.</p>
@@ -498,6 +507,53 @@ document.getElementById('tamper-btn').onclick = async () => {
     'Content-Type': 'application/octet-stream', 'X-Dbsc-Bound-Proof': proof,
   });
   show({ ...r, path: '/payment (tampered)' });
+};
+document.getElementById('replay-btn').onclick = async () => {
+  // Sign a /profile request and capture the proof. Then re-send the identical
+  // request twice using the captured proof. With v2.8 replay cache wired,
+  // the second 200s and the third 403s with PROOF_REPLAY.
+  const { wrapFetch } = await import('/dbsc-client/index.js');
+  let proof = null;
+  const capture = async (_i, init = {}) => {
+    proof = new Headers(init.headers || {}).get('X-Dbsc-Bound-Proof');
+    return new Response(null, { status: 200 });
+  };
+  await wrapFetch({ fetch: capture })('/profile', { method: 'GET' });
+  if (!proof) return show({ status: 0, body: { error: 'no proof captured — log in and bind first' } });
+  const first = await rawReq('GET', '/profile', null, { 'X-Dbsc-Bound-Proof': proof });
+  const second = await rawReq('GET', '/profile', null, { 'X-Dbsc-Bound-Proof': proof });
+  show({
+    path: '/profile, same proof replayed twice',
+    first: { status: first.status, body: first.body },
+    second: { status: second.status, body: second.body, expected: 'PROOF_REPLAY on v2.8+' },
+  });
+};
+let interceptorUninstall = null;
+document.getElementById('interceptor-btn').onclick = async () => {
+  if (interceptorUninstall) {
+    interceptorUninstall();
+    interceptorUninstall = null;
+    show({ note: 'interceptor uninstalled — globalThis.fetch restored', then: 'bare fetch /profile now 403s without proof' });
+    const r = await fetch('/profile', { credentials: 'include' });
+    const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
+    return show({ note: 'after uninstall', status: r.status, body: b });
+  }
+  const { installFetchInterceptor } = await import('/dbsc-client/index.js');
+  try {
+    interceptorUninstall = installFetchInterceptor({ pathPrefixes: ['/profile', '/payment'] });
+  } catch (err) {
+    return show({ status: 0, body: { error: 'installFetchInterceptor threw', message: String(err) } });
+  }
+  // Bare fetch — no wrapFetch wrapper. The interceptor routes /profile through wrapFetch automatically.
+  const r = await fetch('/profile', { credentials: 'include' });
+  const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
+  show({
+    note: 'interceptor installed for /profile and /payment',
+    test: 'bare fetch /profile (no manual wrapFetch)',
+    status: r.status,
+    body: b,
+    expected: '200 — the interceptor signed it for us. Click again to uninstall.',
+  });
 };
 
 document.getElementById('config-btn').onclick = async () => show(await rawReq('GET', '/config'));
