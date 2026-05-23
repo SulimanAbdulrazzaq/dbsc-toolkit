@@ -2,6 +2,31 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.8.1] — 2026-05-24
+
+### Fixed
+
+- **`LICENSE` now matches the canonical Apache License 2.0 text from
+  apache.org.** Earlier versions shipped a reworded summary that
+  declared `"license": "Apache-2.0"` in `package.json` but did not
+  carry the full legal text. The notable bits that were missing:
+  - Section 1: the full `"Legal Entity"` definition (the (i)/(ii)/(iii)
+    control criteria), the `"Work"` / `"Derivative Works"` /
+    `"Contribution"` wording, and the `"Not a Contribution"` exclusion.
+  - Section 3: the **patent termination clause** — if a downstream user
+    sues a contributor for patent infringement on the Work, their patent
+    grant terminates. This is one of Apache 2.0's defining clauses; its
+    absence in the prior text was the most impactful gap.
+  - Section 4(d): the full `NOTICE` file handling rules.
+  - Sections 5–9: the trailing legal language (`Notwithstanding the
+    above`, trademark customary-use carve-out, `solely responsible`,
+    `loss of goodwill / work stoppage`, `indemnify, defend, and hold
+    harmless`).
+  - The `APPENDIX` and the `Copyright 2026 Suliman Abdulrazzaq` notice.
+
+  No API changes. No code changes. The fix aligns the textual license
+  with what `package.json` and the npm registry have always declared.
+
 ## [2.8.0] — 2026-05-24
 
 A follow-up to v2.7 that closes the captured-proof replay gap, smooths the
