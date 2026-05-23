@@ -1,27 +1,41 @@
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { randomBytes } from "node:crypto";
-import { deriveSessionId, type RequireProofOptions } from "../core/index.js";
+import {
+  deriveSessionId,
+  deviceCookieName,
+  resolveCookieScope,
+  type RequireProofOptions,
+  type CookieScope,
+} from "../core/index.js";
 import { dbsc, bindSession, type DbscHonoOptions } from "./index.js";
 import { requireProof } from "./require-proof.js";
 
 const DEVICE_COOKIE_TTL_SEC = 365 * 24 * 60 * 60;
 
+interface DeviceScope {
+  secure: boolean;
+  cookieScope?: CookieScope;
+  cookieDomain?: string;
+}
+
 /**
  * Returns a stable per-device value for the JWT `bind()` path: reads the
- * `__Host-dbsc-device` cookie, or mints + sets one if absent.
+ * device cookie (named per cookie scope), or mints + sets one if absent.
  */
-function resolveDeviceHint(c: Context, secure: boolean): string {
-  const name = secure ? "__Host-dbsc-device" : "dbsc-device";
+function resolveDeviceHint(c: Context, scope: DeviceScope): string {
+  const name = deviceCookieName(scope);
+  const { domain } = resolveCookieScope(scope);
   const existing = getCookie(c, name);
   if (existing) return existing;
   const value = randomBytes(16).toString("hex");
   setCookie(c, name, value, {
     httpOnly: true,
-    secure,
+    secure: scope.secure,
     sameSite: "Lax",
     path: "/",
     maxAge: DEVICE_COOKIE_TTL_SEC,
+    ...(domain !== undefined && { domain }),
   });
   return value;
 }
@@ -60,6 +74,13 @@ export interface DbscKit {
  */
 export function createDbsc(opts: CreateDbscOptions): DbscKit {
   const secure = opts.secure ?? true;
+  const cookieScope = opts.cookieScope;
+  const cookieDomain = opts.cookieDomain;
+  const scope: DeviceScope = {
+    secure,
+    ...(cookieScope !== undefined && { cookieScope }),
+    ...(cookieDomain !== undefined && { cookieDomain }),
+  };
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
   const middleware = dbsc(opts);
 
@@ -69,7 +90,7 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     if (typeof a === "string") {
       sessionId = a;
     } else {
-      const deviceHint = bindOpts.deviceHint ?? resolveDeviceHint(c, secure);
+      const deviceHint = bindOpts.deviceHint ?? resolveDeviceHint(c, scope);
       sessionId = await deriveSessionId({
         userId: bindOpts.userId,
         deviceHint,
@@ -79,6 +100,8 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     await bindSession(c, sessionId, opts.storage, {
       userId: bindOpts.userId,
       secure,
+      ...(cookieScope !== undefined && { cookieScope }),
+      ...(cookieDomain !== undefined && { cookieDomain }),
       registrationPath,
       ...(opts.registrationCookieTtl !== undefined && {
         registrationCookieTtl: opts.registrationCookieTtl,

@@ -129,6 +129,8 @@ app.post("/logout", async (req, res) => {
 
 **No server-side session id** (NextAuth JWT mode, iron-session, Lucia stateless)? Call `dbsc.bind(res, { userId })` with no id — the kit derives a stable one and manages a per-device cookie so each browser of the same user binds independently. Per-system recipes: [docs/integration-recipes.md](./docs/integration-recipes.md).
 
+**App split across subdomains** (`app.example.com` + `api.example.com`)? Default `__Host-` cookies are origin-locked — keep DBSC on one origin (proxy `/dbsc/*` and `/dbsc-bound/*` through the UI host) for the strongest setting. If a same-origin layout is genuinely not workable, v2.9.0+ exposes `cookieScope: "site"` + `cookieDomain: "example.com"` on `createDbsc({...})`, switching the binding cookies to `__Secure-` with a `Domain` attribute. The validator throws at construction if either is wrong, so misconfiguration is loud, not silent. Trade-off and concrete recipe: [docs/integration-recipes.md#multi-subdomain-apps-cookiescope-site](./docs/integration-recipes.md#multi-subdomain-apps-cookiescope-site).
+
 **The full step-by-step** — every option and its default, the `autoBind` transparent-rollout variant, the per-route policy table, the migration timeline — is in [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md).
 
 ## Protect your routes

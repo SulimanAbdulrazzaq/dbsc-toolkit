@@ -17,6 +17,9 @@ import {
   NoopRateLimiter,
   emit,
   maybeEmitPolyfillMissing,
+  resolveCookieNames,
+  resolveCookieScope,
+  cookieAttributesString,
   DbscProtocolError,
   DbscVerificationError,
   ErrorCodes,
@@ -25,6 +28,7 @@ import {
   type ProofReplayCache,
   type ProtectionTier,
   type SkippedEntry,
+  type CookieScope,
 } from "../core/index.js";
 
 export { requireBoundProof } from "./proof.js";
@@ -38,11 +42,13 @@ export type { RequireProofSession, RequireProofResult } from "./require-proof.js
 export { createDbsc } from "./create-dbsc.js";
 export type { CreateDbscOptions, DbscKit, BindOptions } from "./create-dbsc.js";
 
-const cookieNames = (secure: boolean) => ({
-  bound: secure ? "__Host-dbsc-session" : "dbsc-session",
-  reg: secure ? "__Host-dbsc-reg" : "dbsc-reg",
-  challenge: secure ? "__Host-dbsc-challenge" : "dbsc-challenge",
-});
+interface ScopeArgs {
+  secure: boolean;
+  cookieScope?: CookieScope;
+  cookieDomain?: string;
+}
+
+const cookieNames = (s: ScopeArgs) => resolveCookieNames(s);
 
 const DEFAULT_BOUND_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_REG_TTL_MS = 24 * 60 * 60 * 1000;
@@ -56,12 +62,14 @@ export interface DbscNextOptions extends DbscOptions {
   boundRefreshPath?: string;
 }
 
-function cookieBase(secure: boolean) {
+function cookieBase(scope: ScopeArgs) {
+  const { domain } = resolveCookieScope(scope);
   return {
     httpOnly: true,
-    secure,
+    secure: scope.secure,
     sameSite: "lax" as const,
     path: "/",
+    ...(domain !== undefined && { domain }),
   };
 }
 
@@ -69,6 +77,10 @@ export interface BindSessionOptions {
   userId: string;
   /** Match the value passed to createDbscMiddleware({ secure }). Defaults true. Mismatch = cookies the middleware cannot read. */
   secure?: boolean;
+  /** Match the value passed to createDbscMiddleware({ cookieScope }). Defaults "host". */
+  cookieScope?: CookieScope;
+  /** Match the value passed to createDbscMiddleware({ cookieDomain }). Required for cookieScope: "site". */
+  cookieDomain?: string;
   registrationPath?: string;
   registrationCookieTtl?: number;
   sessionTtl?: number;
@@ -84,6 +96,11 @@ export async function bindSession(
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
   const regCookieTtl = opts.registrationCookieTtl ?? DEFAULT_REG_TTL_MS;
   const sessionTtl = opts.sessionTtl ?? DEFAULT_SESSION_TTL_MS;
+  const scope: ScopeArgs = {
+    secure,
+    ...(opts.cookieScope !== undefined && { cookieScope: opts.cookieScope }),
+    ...(opts.cookieDomain !== undefined && { cookieDomain: opts.cookieDomain }),
+  };
 
   const existing = await storage.getSession(sessionId);
   const now = Date.now();
@@ -98,7 +115,7 @@ export async function bindSession(
     });
   }
 
-  const COOKIES = cookieNames(secure);
+  const COOKIES = cookieNames(scope);
   const challenge = await issueChallenge(sessionId, storage);
   const regHeader = buildRegistrationHeader({
     registrationPath,
@@ -110,11 +127,11 @@ export async function bindSession(
   res.headers.set(LEGACY_REGISTRATION_HEADER, regHeader);
 
   res.cookies.set(COOKIES.reg, sessionId, {
-    ...cookieBase(secure),
+    ...cookieBase(scope),
     maxAge: regCookieTtl / 1000,
   });
   res.cookies.set(COOKIES.challenge, challenge.jti, {
-    ...cookieBase(secure),
+    ...cookieBase(scope),
     maxAge: 5 * 60,
   });
 }
@@ -135,9 +152,19 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
     onEvent,
     autoBind,
     secure = true,
+    cookieScope,
+    cookieDomain,
   } = opts;
 
-  const COOKIES = cookieNames(secure);
+  const scope: ScopeArgs = {
+    secure,
+    ...(cookieScope !== undefined && { cookieScope }),
+    ...(cookieDomain !== undefined && { cookieDomain }),
+  };
+  // Fail-fast validation
+  resolveCookieScope(scope);
+  const cookieAttrs = cookieAttributesString(scope);
+  const COOKIES = cookieNames(scope);
 
   return async function middleware(req: NextRequest): Promise<NextResponse> {
     const url = req.nextUrl.pathname;
@@ -190,13 +217,13 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
             {
               type: "cookie",
               name: COOKIES.bound,
-              attributes: "Path=/; Secure; HttpOnly; SameSite=Lax",
+              attributes: cookieAttrs,
             },
           ],
         };
         const res = NextResponse.json(body, { status: 200 });
         res.cookies.set(COOKIES.bound, sessionId, {
-          ...cookieBase(secure),
+          ...cookieBase(scope),
           maxAge: boundCookieTtl / 1000,
         });
         res.cookies.delete(COOKIES.challenge);
@@ -233,7 +260,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
         res.headers.set(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
         res.headers.set(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
         res.cookies.set(COOKIES.challenge, challenge.jti, {
-          ...cookieBase(secure),
+          ...cookieBase(scope),
           maxAge: 5 * 60,
         });
         return res;
@@ -246,7 +273,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
         res.headers.set(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
         res.headers.set(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
         res.cookies.set(COOKIES.challenge, challenge.jti, {
-          ...cookieBase(secure),
+          ...cookieBase(scope),
           maxAge: 5 * 60,
         });
         return res;
@@ -275,13 +302,13 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
             {
               type: "cookie",
               name: COOKIES.bound,
-              attributes: "Path=/; Secure; HttpOnly; SameSite=Lax",
+              attributes: cookieAttrs,
             },
           ],
         };
         const res = NextResponse.json(body, { status: 200 });
         res.cookies.set(COOKIES.bound, sessionId, {
-          ...cookieBase(secure),
+          ...cookieBase(scope),
           maxAge: boundCookieTtl / 1000,
         });
         res.cookies.delete(COOKIES.challenge);
@@ -308,7 +335,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
           res.headers.set(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
           res.headers.set(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
           res.cookies.set(COOKIES.challenge, challenge.jti, {
-            ...cookieBase(secure),
+            ...cookieBase(scope),
             maxAge: 5 * 60,
           });
           return res;
@@ -421,7 +448,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
           refresh_url: boundRefreshPath,
           tier: "bound",
         });
-        res.cookies.set(COOKIES.bound, sid, { ...cookieBase(secure), maxAge: boundCookieTtl / 1000 });
+        res.cookies.set(COOKIES.bound, sid, { ...cookieBase(scope), maxAge: boundCookieTtl / 1000 });
         return res;
       } catch (err) {
         await rateLimiter.recordFailure(ip, sid);
@@ -473,7 +500,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
           refresh_url: boundRefreshPath,
           tier: "bound",
         });
-        res.cookies.set(COOKIES.bound, sid, { ...cookieBase(secure), maxAge: boundCookieTtl / 1000 });
+        res.cookies.set(COOKIES.bound, sid, { ...cookieBase(scope), maxAge: boundCookieTtl / 1000 });
         res.headers.set("X-Server-Time", xServerTime);
         return res;
       } catch (err) {
@@ -504,6 +531,8 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
         await bindSession(res, result.sessionId, storage, {
           userId: result.userId,
           secure,
+          ...(cookieScope !== undefined && { cookieScope }),
+          ...(cookieDomain !== undefined && { cookieDomain }),
           registrationPath,
           registrationCookieTtl,
         });
@@ -535,6 +564,8 @@ export async function getDbscSession(
     refreshGraceMs?: number;
     res?: NextResponse;
     secure?: boolean;
+    cookieScope?: CookieScope;
+    cookieDomain?: string;
     /** Internal — the kit threads this through so polyfill_missing can fire. */
     onEvent?: DbscOptions["onEvent"];
   } = {},
@@ -546,7 +577,12 @@ export async function getDbscSession(
   const skipped = parseSessionSkippedHeader(skippedRaw);
 
   const secure = opts.secure ?? true;
-  const COOKIES = cookieNames(secure);
+  const scope: ScopeArgs = {
+    secure,
+    ...(opts.cookieScope !== undefined && { cookieScope: opts.cookieScope }),
+    ...(opts.cookieDomain !== undefined && { cookieDomain: opts.cookieDomain }),
+  };
+  const COOKIES = cookieNames(scope);
   const sessionId = req.cookies.get(COOKIES.bound)?.value ?? null;
 
   const revoke = async () => {

@@ -66,3 +66,11 @@ export { noBindingReason } from "./protect-policy.js";
 export type { RequireProofOptions } from "./protect-policy.js";
 
 export { parseCookieHeader } from "./protocol/cookies.js";
+
+export {
+  resolveCookieScope,
+  cookieNames as resolveCookieNames,
+  deviceCookieName,
+  cookieAttributesString,
+} from "./cookies/options.js";
+export type { CookieScope, CookieScopeOptions, CookieScopeResolved } from "./cookies/options.js";

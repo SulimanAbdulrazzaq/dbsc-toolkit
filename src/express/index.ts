@@ -1,5 +1,4 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
-import { randomBytes as nodeRandomBytes } from "node:crypto";
 import {
   handleRegistration,
   handleRefresh,
@@ -18,16 +17,18 @@ import {
   emit,
   maybeEmitPolyfillMissing,
   parseCookieHeader,
+  resolveCookieNames,
+  cookieAttributesString,
+  resolveCookieScope,
   DbscProtocolError,
   DbscVerificationError,
   ErrorCodes,
   type DbscOptions,
   type StorageAdapter,
   type ProofReplayCache,
-  type Session,
   type ProtectionTier,
   type SkippedEntry,
-  type AutoBindResult,
+  type CookieScope,
 } from "../core/index.js";
 
 export { requireBoundProof } from "./proof.js";
@@ -45,11 +46,13 @@ export interface DbscInternal {
 }
 export const DBSC_INTERNAL: unique symbol = Symbol("dbsc-toolkit.express.internal");
 
-const cookieNames = (secure: boolean) => ({
-  bound: secure ? "__Host-dbsc-session" : "dbsc-session",
-  reg: secure ? "__Host-dbsc-reg" : "dbsc-reg",
-  challenge: secure ? "__Host-dbsc-challenge" : "dbsc-challenge",
-});
+interface ScopeArgs {
+  secure: boolean;
+  cookieScope?: CookieScope;
+  cookieDomain?: string;
+}
+
+const cookieNames = (s: ScopeArgs) => resolveCookieNames(s);
 
 const DEFAULT_BOUND_TTL = 10 * 60 * 1000;
 const DEFAULT_REG_TTL = 24 * 60 * 60 * 1000;
@@ -78,13 +81,15 @@ declare global {
   }
 }
 
-function cookieOpts(ttlMs: number, secure: boolean) {
+function cookieOpts(ttlMs: number, scope: ScopeArgs) {
+  const { domain } = resolveCookieScope(scope);
   return {
     httpOnly: true,
-    secure,
+    secure: scope.secure,
     sameSite: "lax" as const,
     maxAge: ttlMs / 1000,
     path: "/",
+    ...(domain !== undefined && { domain }),
   };
 }
 
@@ -96,6 +101,7 @@ function serializeCookie(name: string, value: string, opts: ReturnType<typeof co
   parts.push(`SameSite=${sameSite}`);
   parts.push(`Max-Age=${opts.maxAge}`);
   parts.push(`Path=${opts.path}`);
+  if (opts.domain) parts.push(`Domain=${opts.domain}`);
   return parts.join("; ");
 }
 
@@ -103,6 +109,10 @@ export interface BindSessionOptions {
   userId: string;
   /** Match the value passed to dbsc({ secure }). Defaults true. Mismatch = cookies the middleware cannot read. */
   secure?: boolean;
+  /** Match the value passed to dbsc({ cookieScope }). Defaults "host". */
+  cookieScope?: CookieScope;
+  /** Match the value passed to dbsc({ cookieDomain }). Required for cookieScope: "site". */
+  cookieDomain?: string;
   registrationPath?: string;
   registrationCookieTtl?: number;
   sessionTtl?: number;
@@ -118,7 +128,12 @@ export async function bindSession(
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
   const regCookieTtl = opts.registrationCookieTtl ?? DEFAULT_REG_TTL;
   const sessionTtl = opts.sessionTtl ?? DEFAULT_SESSION_TTL;
-  const COOKIES = cookieNames(secure);
+  const scope: ScopeArgs = {
+    secure,
+    ...(opts.cookieScope !== undefined && { cookieScope: opts.cookieScope }),
+    ...(opts.cookieDomain !== undefined && { cookieDomain: opts.cookieDomain }),
+  };
+  const COOKIES = cookieNames(scope);
 
   const existing = await storage.getSession(sessionId);
   const now = Date.now();
@@ -151,8 +166,8 @@ export async function bindSession(
       : [];
   res.setHeader("Set-Cookie", [
     ...priorList,
-    serializeCookie(COOKIES.reg, sessionId, cookieOpts(regCookieTtl, secure)),
-    serializeCookie(COOKIES.challenge, challenge.jti, cookieOpts(5 * 60 * 1000, secure)),
+    serializeCookie(COOKIES.reg, sessionId, cookieOpts(regCookieTtl, scope)),
+    serializeCookie(COOKIES.challenge, challenge.jti, cookieOpts(5 * 60 * 1000, scope)),
   ]);
 }
 
@@ -173,9 +188,19 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
     onEvent,
     autoBind,
     secure = true,
+    cookieScope,
+    cookieDomain,
   } = opts;
 
-  const COOKIES = cookieNames(secure);
+  const scope: ScopeArgs = {
+    secure,
+    ...(cookieScope !== undefined && { cookieScope }),
+    ...(cookieDomain !== undefined && { cookieDomain }),
+  };
+  // Fail-fast: rejects "site" without domain, mismatched secure flag, etc.
+  resolveCookieScope(scope);
+  const cookieAttrs = cookieAttributesString(scope);
+  const COOKIES = cookieNames(scope);
   // Per-middleware-instance dedup set for the polyfill_missing telemetry event.
   // Re-armed on process restart, which is fine: the signal is for ops alerting,
   // not for security enforcement.
@@ -217,8 +242,8 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       });
 
       res.setHeader("Set-Cookie", [
-        serializeCookie(COOKIES.bound, sessionId, cookieOpts(boundCookieTtl, secure)),
-        serializeCookie(COOKIES.challenge, "", { ...cookieOpts(0, secure), maxAge: 0 }),
+        serializeCookie(COOKIES.bound, sessionId, cookieOpts(boundCookieTtl, scope)),
+        serializeCookie(COOKIES.challenge, "", { ...cookieOpts(0, scope), maxAge: 0 }),
       ]);
       res.setHeader("Content-Type", "application/json");
       const origin = `${req.protocol}://${req.get("host")}`;
@@ -234,7 +259,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
           {
             type: "cookie",
             name: COOKIES.bound,
-            attributes: "Path=/; Secure; HttpOnly; SameSite=Lax",
+            attributes: cookieAttrs,
           },
         ],
       });
@@ -282,7 +307,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       res.setHeader(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
       res.setHeader(
         "Set-Cookie",
-        serializeCookie(COOKIES.challenge, challenge.jti, cookieOpts(5 * 60 * 1000, secure)),
+        serializeCookie(COOKIES.challenge, challenge.jti, cookieOpts(5 * 60 * 1000, scope)),
       );
       res.status(403).end();
       return;
@@ -295,7 +320,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       res.setHeader(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
       res.setHeader(
         "Set-Cookie",
-        serializeCookie(COOKIES.challenge, challenge.jti, cookieOpts(5 * 60 * 1000, secure)),
+        serializeCookie(COOKIES.challenge, challenge.jti, cookieOpts(5 * 60 * 1000, scope)),
       );
       res.status(403).end();
       return;
@@ -313,8 +338,8 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       });
 
       res.setHeader("Set-Cookie", [
-        serializeCookie(COOKIES.bound, sessionId, cookieOpts(boundCookieTtl, secure)),
-        serializeCookie(COOKIES.challenge, "", { ...cookieOpts(0, secure), maxAge: 0 }),
+        serializeCookie(COOKIES.bound, sessionId, cookieOpts(boundCookieTtl, scope)),
+        serializeCookie(COOKIES.challenge, "", { ...cookieOpts(0, scope), maxAge: 0 }),
       ]);
       res.setHeader("Content-Type", "application/json");
       const origin = `${req.protocol}://${req.get("host")}`;
@@ -330,7 +355,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
           {
             type: "cookie",
             name: COOKIES.bound,
-            attributes: "Path=/; Secure; HttpOnly; SameSite=Lax",
+            attributes: cookieAttrs,
           },
         ],
       });
@@ -362,7 +387,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
         res.setHeader(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
         res.setHeader(
           "Set-Cookie",
-          serializeCookie(COOKIES.challenge, challenge.jti, cookieOpts(5 * 60 * 1000, secure)),
+          serializeCookie(COOKIES.challenge, challenge.jti, cookieOpts(5 * 60 * 1000, scope)),
         );
         res.status(403).json({ error: err.message });
         return;
@@ -483,7 +508,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       });
 
       res.setHeader("Set-Cookie", [
-        serializeCookie(COOKIES.bound, sessionId, cookieOpts(boundCookieTtl, secure)),
+        serializeCookie(COOKIES.bound, sessionId, cookieOpts(boundCookieTtl, scope)),
       ]);
       res.status(200).json({
         session_identifier: sessionId,
@@ -549,7 +574,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       });
 
       res.setHeader("Set-Cookie", [
-        serializeCookie(COOKIES.bound, sessionId, cookieOpts(boundCookieTtl, secure)),
+        serializeCookie(COOKIES.bound, sessionId, cookieOpts(boundCookieTtl, scope)),
       ]);
       res.status(200).json({
         session_identifier: sessionId,
@@ -631,7 +656,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       revoke: async () => {
         if (sessionId) await storage.revokeSession(sessionId);
         res.setHeader("Set-Cookie", [
-          serializeCookie(COOKIES.bound, "", { ...cookieOpts(0, secure), maxAge: 0 }),
+          serializeCookie(COOKIES.bound, "", { ...cookieOpts(0, scope), maxAge: 0 }),
         ]);
       },
     };
@@ -667,6 +692,8 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
         await bindSession(res, result.sessionId, storage, {
           userId: result.userId,
           secure,
+          ...(cookieScope !== undefined && { cookieScope }),
+          ...(cookieDomain !== undefined && { cookieDomain }),
           registrationPath,
           registrationCookieTtl,
         });

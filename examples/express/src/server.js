@@ -8,7 +8,7 @@ import bcrypt from "bcryptjs";
 import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
 import Redis from "ioredis";
 
-import { createDbsc, requireProof } from "dbsc-toolkit/express";
+import { createDbsc, requireProof, bindSession } from "dbsc-toolkit/express";
 import { MemoryStorage, MemoryReplayCache } from "dbsc-toolkit/storage/memory";
 import { RedisStorage } from "dbsc-toolkit/storage/redis";
 
@@ -157,6 +157,10 @@ const KIT_OPTIONS = {
   boundCookieTtl: 60 * 1000,   // 60s — short so demo viewers see refresh fire
   refreshGraceMs: 30 * 1000,   // hold tier for 30s past expiry while refresh is in flight
   secure: true,                // __Host- cookies + Secure flag
+  cookieScope: "host",         // v2.9+: "host" (__Host-) or "site" (__Secure- + Domain).
+                               // Live demo stays "host" — Render has no apex to share
+                               // cookies across. The /cookie-scope endpoint below
+                               // demonstrates the on-the-wire shape under "site".
   clientPath: "/dbsc-client",  // where install() serves the browser SDK
 };
 // v2.8: per-request proof replay cache. The demo uses Memory so the replay
@@ -303,6 +307,67 @@ app.get("/config", (_req, res) => {
   });
 });
 
+// SECTION 5 — cookieScope inspector
+// The kit is configured cookieScope: "host" for the live demo, so the bound
+// cookie is __Host-dbsc-session with no Domain attribute. The endpoint below
+// drives bindSession() against a throwaway response with cookieScope: "site"
+// + cookieDomain: "example.com" and reports the Set-Cookie + registration
+// attributes the browser would receive. Same code path as production —
+// nothing is mocked.
+app.get("/cookie-scope", async (_req, res) => {
+  // A tiny Express response object recorder. bindSession only uses setHeader,
+  // getHeader, req.cookies — no streaming.
+  function recorder() {
+    const headers = new Map();
+    return {
+      req: { cookies: {}, headers: {} },
+      setHeader(name, value) { headers.set(name, value); },
+      getHeader(name) { return headers.get(name); },
+      headersOut: () => Object.fromEntries(headers),
+    };
+  }
+
+  async function captureFor(scopeOpts) {
+    const rec = recorder();
+    try {
+      await bindSession(rec, "demo-sess-" + scopeOpts.cookieScope, dbscStorage, {
+        userId: "demo-user-cookie-scope",
+        secure: true,
+        ...scopeOpts,
+      });
+      const out = rec.headersOut();
+      return {
+        ok: true,
+        registrationHeader: out["Secure-Session-Registration"],
+        setCookie: Array.isArray(out["Set-Cookie"]) ? out["Set-Cookie"] : [out["Set-Cookie"]].filter(Boolean),
+      };
+    } catch (err) {
+      return { ok: false, error: String(err.message || err) };
+    }
+  }
+
+  const host = await captureFor({});
+  const site = await captureFor({ cookieScope: "site", cookieDomain: "example.com" });
+  const siteNoDomain = await captureFor({ cookieScope: "site" });
+
+  res.json({
+    note: "Each block is what bindSession() actually wrote to the response. Compare cookie name + Domain attribute. The third call demonstrates the construction-time validator.",
+    host: {
+      config: { cookieScope: "host" },
+      ...host,
+    },
+    site: {
+      config: { cookieScope: "site", cookieDomain: "example.com" },
+      ...site,
+    },
+    "site (missing cookieDomain)": {
+      config: { cookieScope: "site" },
+      ...siteNoDomain,
+      expected: "throws at construction — see error field",
+    },
+  });
+});
+
 // HTML UI — four sections.
 
 app.get("/", (_req, res) => {
@@ -376,6 +441,10 @@ ${storageBanner}
 <p class="sub">The live kit config. The rate limiter guards <code>/dbsc/*</code>; the button fires 15 rapid <code>POST /dbsc/refresh</code> to trip the per-session limit (${RL_LIMITS.refresh}/min) — watch for 429s.</p>
 <button id="config-btn">Show active options (/config)</button>
 <button id="rl-btn">Trip the rate limiter</button>
+
+<h2>5. cookieScope inspector (v2.9+)</h2>
+<p class="sub">The live demo runs <code>cookieScope: "host"</code> — <code>__Host-</code> cookies, no <code>Domain</code>. The button drives <code>bindSession()</code> three times against a throwaway response — once each for <code>host</code>, <code>site</code> (<code>example.com</code>), and <code>site</code> without a domain — and prints the actual <code>Set-Cookie</code> + registration-header bytes. The third call demonstrates the construction-time validator throwing on a misconfigured scope.</p>
+<button id="scope-btn">Inspect cookieScope wire shape</button>
 
 <button id="logout-btn">Log out</button>
 <button id="clear-btn">Clear cookies</button>
@@ -557,6 +626,7 @@ document.getElementById('interceptor-btn').onclick = async () => {
 };
 
 document.getElementById('config-btn').onclick = async () => show(await rawReq('GET', '/config'));
+document.getElementById('scope-btn').onclick = async () => show(await rawReq('GET', '/cookie-scope'));
 document.getElementById('rl-btn').onclick = async () => {
   const results = await Promise.all(
     Array.from({ length: 15 }, () => fetch('/dbsc/refresh', { method: 'POST', credentials: 'include' }).then((r) => r.status)),

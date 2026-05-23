@@ -16,6 +16,9 @@ import {
   NoopRateLimiter,
   emit,
   maybeEmitPolyfillMissing,
+  resolveCookieNames,
+  resolveCookieScope,
+  cookieAttributesString,
   DbscProtocolError,
   DbscVerificationError,
   ErrorCodes,
@@ -24,6 +27,7 @@ import {
   type ProofReplayCache,
   type ProtectionTier,
   type SkippedEntry,
+  type CookieScope,
 } from "../core/index.js";
 
 export { requireBoundProof } from "./proof.js";
@@ -40,11 +44,13 @@ export interface DbscInternal {
 }
 export const DBSC_INTERNAL: unique symbol = Symbol("dbsc-toolkit.hono.internal");
 
-const cookieNames = (secure: boolean) => ({
-  bound: secure ? "__Host-dbsc-session" : "dbsc-session",
-  reg: secure ? "__Host-dbsc-reg" : "dbsc-reg",
-  challenge: secure ? "__Host-dbsc-challenge" : "dbsc-challenge",
-});
+interface ScopeArgs {
+  secure: boolean;
+  cookieScope?: CookieScope;
+  cookieDomain?: string;
+}
+
+const cookieNames = (s: ScopeArgs) => resolveCookieNames(s);
 
 const DEFAULT_BOUND_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_REG_TTL_MS = 24 * 60 * 60 * 1000;
@@ -75,6 +81,10 @@ export interface BindSessionOptions {
   userId: string;
   /** Match the value passed to dbsc({ secure }). Defaults true. Mismatch = cookies the middleware cannot read. */
   secure?: boolean;
+  /** Match the value passed to dbsc({ cookieScope }). Defaults "host". */
+  cookieScope?: CookieScope;
+  /** Match the value passed to dbsc({ cookieDomain }). Required for cookieScope: "site". */
+  cookieDomain?: string;
   registrationPath?: string;
   registrationCookieTtl?: number;
   sessionTtl?: number;
@@ -90,6 +100,12 @@ export async function bindSession(
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
   const regCookieTtl = opts.registrationCookieTtl ?? DEFAULT_REG_TTL_MS;
   const sessionTtl = opts.sessionTtl ?? DEFAULT_SESSION_TTL_MS;
+  const scope: ScopeArgs = {
+    secure,
+    ...(opts.cookieScope !== undefined && { cookieScope: opts.cookieScope }),
+    ...(opts.cookieDomain !== undefined && { cookieDomain: opts.cookieDomain }),
+  };
+  const { domain } = resolveCookieScope(scope);
 
   const existing = await storage.getSession(sessionId);
   const now = Date.now();
@@ -104,7 +120,7 @@ export async function bindSession(
     });
   }
 
-  const COOKIES = cookieNames(secure);
+  const COOKIES = cookieNames(scope);
   const challenge = await issueChallenge(sessionId, storage);
   const regHeader = buildRegistrationHeader({
     registrationPath,
@@ -120,6 +136,7 @@ export async function bindSession(
     secure,
     sameSite: "lax" as const,
     path: "/",
+    ...(domain !== undefined && { domain }),
   };
   setCookie(c, COOKIES.reg, sessionId, { ...cookieBase, maxAge: regCookieTtl / 1000 });
   setCookie(c, COOKIES.challenge, challenge.jti, { ...cookieBase, maxAge: 5 * 60 });
@@ -142,16 +159,27 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
     onEvent,
     autoBind,
     secure = true,
+    cookieScope,
+    cookieDomain,
   } = opts;
+
+  const scope: ScopeArgs = {
+    secure,
+    ...(cookieScope !== undefined && { cookieScope }),
+    ...(cookieDomain !== undefined && { cookieDomain }),
+  };
+  const { domain } = resolveCookieScope(scope);
+  const cookieAttrs = cookieAttributesString(scope);
 
   const cookieOpts = {
     httpOnly: true,
     secure,
     sameSite: "lax" as const,
     path: "/",
+    ...(domain !== undefined && { domain }),
   };
 
-  const COOKIES = cookieNames(secure);
+  const COOKIES = cookieNames(scope);
   const polyfillMissingEmitted = new Set<string>();
 
   return async (c: Context, next) => {
@@ -207,7 +235,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
               {
                 type: "cookie",
                 name: COOKIES.bound,
-                attributes: "Path=/; Secure; HttpOnly; SameSite=Lax",
+                attributes: cookieAttrs,
               },
             ],
           },
@@ -276,7 +304,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
               {
                 type: "cookie",
                 name: COOKIES.bound,
-                attributes: "Path=/; Secure; HttpOnly; SameSite=Lax",
+                attributes: cookieAttrs,
               },
             ],
           },
@@ -495,6 +523,8 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
         await bindSession(c, result.sessionId, storage, {
           userId: result.userId,
           secure,
+          ...(cookieScope !== undefined && { cookieScope }),
+          ...(cookieDomain !== undefined && { cookieDomain }),
           registrationPath,
           registrationCookieTtl,
         });
@@ -507,7 +537,12 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
       skipped,
       revoke: async () => {
         if (sessionId) await storage.revokeSession(sessionId);
-        deleteCookie(c, COOKIES.bound, { path: "/", secure, sameSite: "Lax" });
+        deleteCookie(c, COOKIES.bound, {
+          path: "/",
+          secure,
+          sameSite: "Lax",
+          ...(domain !== undefined && { domain }),
+        });
       },
     };
 

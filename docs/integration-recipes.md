@@ -190,11 +190,36 @@ await dbsc.bind(res, {
 
 ---
 
-## Multi-subdomain apps
+## Multi-subdomain apps (`cookieScope: "site"`)
 
-`__Host-` cookies are origin-locked, so a binding made on `app.example.com` is not visible on `api.example.com`. Today: **keep the DBSC endpoints and the authenticated UI on one origin.** If the API is a separate subdomain, proxy `/dbsc/*` and `/dbsc-bound/*` through the UI origin. Never add a `Domain` attribute by hand — it breaks the `__Host-` prefix and the browser silently drops the cookie.
+`__Host-` cookies are origin-locked, so a binding made on `app.example.com` is invisible on `api.example.com`. Two options:
 
-A `cookieScope: "site"` option that switches to `__Secure-` cookies with a `Domain` attribute is planned — see [ROADMAP.md](../ROADMAP.md).
+**Option A — keep DBSC on one origin (recommended).** Proxy `/dbsc/*` and `/dbsc-bound/*` through the UI origin. Sessions stay bound under the strongest cookie prefix (`__Host-`) and the binding cookie cannot be touched by a sibling subdomain.
+
+**Option B — `cookieScope: "site"` (v2.9.0+).** When a same-origin deployment is genuinely not workable, opt into site scope. Cookies switch from `__Host-` to `__Secure-` and gain a `Domain` attribute, so a binding made on `app.example.com` is read on `api.example.com` too.
+
+```ts
+import { createDbsc } from "dbsc-toolkit/express";
+
+const dbsc = createDbsc({
+  storage,
+  cookieScope: "site",
+  cookieDomain: "example.com",   // the registrable apex, no leading dot
+});
+dbsc.install(app);
+```
+
+What this changes on the wire:
+
+- Binding cookie: `__Secure-dbsc-session` (not `__Host-dbsc-session`).
+- Registration / challenge / device cookies: same `__Secure-` switch.
+- Every `Set-Cookie` adds `Domain=example.com`.
+- The `credentials[0].attributes` string in the registration response gains `; Domain=example.com` to match.
+- Construction throws if `cookieDomain` is missing, if `secure: false`, if `cookieDomain` starts with a dot, or if `cookieDomain` is passed without `cookieScope: "site"`. There is no silent fallback.
+
+**Trade-off.** `__Host-` cookies refuse to be set or read by any other origin than the one that set them, including sibling subdomains under the same apex. `__Secure-` + `Domain=example.com` does not — every subdomain can set or overwrite a cookie of that name. If a compromised `lab.example.com` is in the threat model, host scope is strictly safer. Use site scope only when the operational cost of routing the auth surface through one origin is higher than this risk.
+
+Never add a `Domain` attribute by hand on the host-scope cookies — it breaks the `__Host-` prefix and the browser silently drops the cookie.
 
 ---
 

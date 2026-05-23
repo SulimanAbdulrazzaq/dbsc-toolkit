@@ -2,6 +2,54 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.9.0] — 2026-05-24
+
+Multi-subdomain binding. The last item on `ROADMAP.md` ships.
+
+### Added
+
+- **`cookieScope: "site"` + `cookieDomain`** on every adapter's
+  `dbsc({...})` / `createDbsc({...})` / `bindSession({...})` options.
+  `"site"` switches the binding cookies from `__Host-` to `__Secure-`
+  and adds the supplied `Domain` attribute, so an app split across
+  subdomains (e.g. `app.example.com` for the UI, `api.example.com`
+  for the API) can share one DBSC binding. The default stays
+  `cookieScope: "host"` — `__Host-` cookies with no `Domain`, which
+  is the strongest setting and what every app got before this
+  release. Both new options are forwarded by `createDbsc().bind()`,
+  the auto-bind path, the JWT-mode device cookie, and the registration
+  response's `credentials[].attributes` string. See
+  [docs/integration-recipes.md](./docs/integration-recipes.md) for the
+  reverse-proxy alternative when host-scope is workable.
+
+- **Construction-time validation.** Passing `cookieScope: "site"` without
+  `cookieDomain`, or with `secure: false`, throws at `dbsc()` /
+  `createDbsc()` time — not silently at request time. A leading dot in
+  the domain (`.example.com`) is rejected too. Passing `cookieDomain`
+  under host scope is also rejected (it would silently do nothing).
+
+- **`resolveCookieScope`, `resolveCookieNames`, `deviceCookieName`,
+  `cookieAttributesString`** exported from `dbsc-toolkit` for adapter
+  authors. Used internally by all four shipped adapters; documented in
+  `docs/api-reference.md` for anyone writing a fifth.
+
+### Security
+
+- `__Secure-` cookies do not carry `__Host-`'s protection against a
+  sibling subdomain setting or overwriting the cookie. Only enable
+  `cookieScope: "site"` when a same-origin deployment (or proxying the
+  `/dbsc/*` + `/dbsc-bound/*` routes to one origin) is genuinely not
+  workable. The validation refuses configurations that would be
+  obviously wrong; the trade-off documented above is the residual one.
+
+### Tests
+
+- 7 new tests in `src/core/cookies/options.test.ts` covering scope
+  resolution, validation errors, and the attributes string.
+- 4 new Express integration tests in
+  `src/express/cookie-scope.test.ts` asserting the on-the-wire cookie
+  shape in both modes and the construction-time throws.
+
 ## [2.8.1] — 2026-05-24
 
 ### Fixed

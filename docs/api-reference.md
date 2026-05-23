@@ -106,7 +106,8 @@ interface DbscOptions {
   boundCookieTtl?: number;          // default 600000 (10 min, in ms)
   registrationCookieTtl?: number;   // default 86400000 (24h, in ms)
   refreshGraceMs?: number;          // default 30000 — see below (2.5.0+)
-  cookieScope?: "host" | "site";    // default "host" — "site" not yet implemented, see ROADMAP.md
+  cookieScope?: "host" | "site";    // default "host" — "site" enables multi-subdomain (2.9.0+)
+  cookieDomain?: string;            // required when cookieScope: "site" (2.9.0+)
   rateLimiter?: RateLimiter;
   replayCache?: ProofReplayCache;   // v2.8+; default NoopReplayCache (no replay check)
   onEvent?: (event: AnyTelemetryEvent) => void;
@@ -123,7 +124,34 @@ interface AutoBindResult {
 
 `refreshGraceMs` (2.5.0+) extends the freshness check. A bound cookie's freshness lapses at `lastRefreshAt + boundCookieTtl`, but the browser's next `/dbsc/refresh` lands a short moment later — during that gap a `/me`-style poll would see `tier: "none"`. The middleware keeps the previous tier until `lastRefreshAt + boundCookieTtl + refreshGraceMs`. Default 30000 ms. Set `0` to demote the instant freshness lapses (use on routes that tolerate no grace).
 
-`cookieScope` is reserved. `"host"` (default, current behavior) uses `__Host-` cookies. `"site"` for multi-subdomain apps is planned but not yet implemented — see [ROADMAP.md](../ROADMAP.md). Passing `"site"` today has no effect.
+`cookieScope` (2.9.0+) picks the cookie-prefix model. `"host"` (default) keeps the `__Host-` prefix — origin-locked, no `Domain` attribute, strongest. `"site"` switches to `__Secure-` and emits `Domain=<cookieDomain>`, so an app spread across `app.example.com` and `api.example.com` can share one binding. `"site"` requires `cookieDomain` (the registrable apex, no leading dot) and `secure: true`; passing either wrong throws at `dbsc()` / `createDbsc()` construction so the misconfiguration cannot reach a request. `__Secure-` cookies do not carry `__Host-`'s protection against a sibling subdomain setting or overwriting the cookie — prefer host scope when a same-origin deployment (or proxying `/dbsc/*` + `/dbsc-bound/*` through one origin) is workable. See [integration-recipes.md](./integration-recipes.md#multi-subdomain-cookiescope-site).
+
+### Cookie-scope helpers (for adapter authors)
+
+```ts
+export type CookieScope = "host" | "site";
+
+interface CookieScopeOptions {
+  secure: boolean;
+  cookieScope?: CookieScope;
+  cookieDomain?: string;
+}
+
+interface CookieScopeResolved {
+  hostPrefix: boolean;       // true when __Host- is in effect
+  prefix: "__Host-" | "__Secure-" | "";
+  domain: string | undefined;
+}
+
+function resolveCookieScope(opts: CookieScopeOptions): CookieScopeResolved;
+function resolveCookieNames(opts: CookieScopeOptions): {
+  bound: string; reg: string; challenge: string;
+};
+function deviceCookieName(opts: CookieScopeOptions): string;
+function cookieAttributesString(opts: CookieScopeOptions): string;
+```
+
+Used internally by all four shipped adapters. Export surface for anyone writing a fifth — see [adapters.md](./adapters.md) "Writing your own adapter". `resolveCookieScope` is the validator: it throws when `"site"` is set without `cookieDomain`, with `secure: false`, with a leading-dot domain, or when a domain is given under host scope. Run it once at construction so the failure mode is loud, not silent at request time.
 
 ### `deriveSessionId`
 

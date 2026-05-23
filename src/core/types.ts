@@ -184,13 +184,23 @@ export interface DbscOptions {
    */
   refreshGraceMs?: number;
   /**
-   * Cookie prefix scope. "host" (default) uses `__Host-` cookies — origin
-   * locked, no Domain attribute, strongest. "site" uses `__Secure-` cookies
-   * with a Domain attribute so the binding works across subdomains
-   * (app.example.com + api.example.com); this drops `__Host-`'s
-   * subdomain-takeover protection. See docs/integration-recipes.md.
+   * Cookie prefix scope. `"host"` (default) uses `__Host-` cookies —
+   * origin-locked, no `Domain` attribute, strongest. `"site"` uses
+   * `__Secure-` cookies carrying `Domain=<cookieDomain>` so the binding works
+   * across subdomains (e.g. `app.example.com` + `api.example.com`). The
+   * `"site"` mode drops `__Host-`'s protection against a sibling subdomain
+   * setting or overwriting the cookie; only enable it when a same-origin
+   * deployment is genuinely not workable. See docs/integration-recipes.md.
    */
   cookieScope?: "host" | "site";
+  /**
+   * Required when `cookieScope: "site"`. The `Domain` attribute attached to
+   * every DBSC cookie — typically the registrable apex (`example.com`) so the
+   * cookie is visible on every subdomain. Omit the leading dot. Throws at
+   * `dbsc()` / `createDbsc()` construction when `"site"` is set without it.
+   * Ignored in `"host"` mode.
+   */
+  cookieDomain?: string;
   rateLimiter?: RateLimiter;
   /**
    * Replay cache for per-request proofs (v2.8+). Without it, an attacker who

@@ -1,9 +1,20 @@
 import type { NextRequest } from "next/server.js";
 import { NextResponse } from "next/server.js";
 import { randomBytes } from "node:crypto";
-import { deriveSessionId } from "../core/index.js";
+import {
+  deriveSessionId,
+  deviceCookieName,
+  resolveCookieScope,
+  type CookieScope,
+} from "../core/index.js";
 
 const DEVICE_COOKIE_TTL_SEC = 365 * 24 * 60 * 60;
+
+interface DeviceScope {
+  secure: boolean;
+  cookieScope?: CookieScope;
+  cookieDomain?: string;
+}
 import {
   createDbscMiddleware,
   bindSession,
@@ -56,11 +67,19 @@ export interface DbscKit {
  */
 export function createDbsc(opts: CreateDbscOptions): DbscKit {
   const secure = opts.secure ?? true;
+  const cookieScope = opts.cookieScope;
+  const cookieDomain = opts.cookieDomain;
+  const scope: DeviceScope = {
+    secure,
+    ...(cookieScope !== undefined && { cookieScope }),
+    ...(cookieDomain !== undefined && { cookieDomain }),
+  };
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
   const mw = createDbscMiddleware(opts);
 
   function resolveDeviceHint(req: NextRequest, res: NextResponse): string {
-    const name = secure ? "__Host-dbsc-device" : "dbsc-device";
+    const name = deviceCookieName(scope);
+    const { domain } = resolveCookieScope(scope);
     const existing = req.cookies.get(name)?.value;
     if (existing) return existing;
     const value = randomBytes(16).toString("hex");
@@ -70,6 +89,7 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
       sameSite: "lax",
       path: "/",
       maxAge: DEVICE_COOKIE_TTL_SEC,
+      ...(domain !== undefined && { domain }),
     });
     return value;
   }
@@ -92,6 +112,8 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     await bindSession(res, sessionId, opts.storage, {
       userId: bindOpts.userId,
       secure,
+      ...(cookieScope !== undefined && { cookieScope }),
+      ...(cookieDomain !== undefined && { cookieDomain }),
       registrationPath,
       ...(opts.registrationCookieTtl !== undefined && {
         registrationCookieTtl: opts.registrationCookieTtl,
@@ -111,6 +133,8 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
         ...(res !== undefined && { res }),
         ...(opts.onEvent !== undefined && { onEvent: opts.onEvent }),
         secure,
+        ...(cookieScope !== undefined && { cookieScope }),
+        ...(cookieDomain !== undefined && { cookieDomain }),
       }),
     requireProof: (req: NextRequest, session: RequireProofSession) =>
       requireProof(req, session, {

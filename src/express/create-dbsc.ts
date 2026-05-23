@@ -1,19 +1,34 @@
 import express, { type Express, type Request, type Response, type RequestHandler } from "express";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
-import { deriveSessionId, parseCookieHeader, type RequireProofOptions } from "../core/index.js";
+import {
+  deriveSessionId,
+  parseCookieHeader,
+  deviceCookieName,
+  resolveCookieScope,
+  type RequireProofOptions,
+  type CookieScope,
+} from "../core/index.js";
 import { dbsc, bindSession, type DbscExpressOptions } from "./index.js";
 import { requireProof } from "./require-proof.js";
 
 const DEVICE_COOKIE_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
+interface DeviceScope {
+  secure: boolean;
+  cookieScope?: CookieScope;
+  cookieDomain?: string;
+}
+
 /**
  * Returns a stable per-device value for the JWT `bind()` path: reads the
- * `__Host-dbsc-device` cookie, or mints + sets one if absent. Two browsers of
- * the same user thus derive distinct sessionIds and bind independently.
+ * device cookie (named per cookie scope), or mints + sets one if absent. Two
+ * browsers of the same user thus derive distinct sessionIds and bind
+ * independently.
  */
-function resolveDeviceHint(res: Response, secure: boolean): string {
-  const name = secure ? "__Host-dbsc-device" : "dbsc-device";
+function resolveDeviceHint(res: Response, scope: DeviceScope): string {
+  const name = deviceCookieName(scope);
+  const { domain } = resolveCookieScope(scope);
   const req = res.req as Request | undefined;
   const existing =
     (req?.cookies?.[name] as string | undefined) ??
@@ -22,10 +37,11 @@ function resolveDeviceHint(res: Response, secure: boolean): string {
   const value = randomBytes(16).toString("hex");
   res.cookie(name, value, {
     httpOnly: true,
-    secure,
+    secure: scope.secure,
     sameSite: "lax",
     path: "/",
     maxAge: DEVICE_COOKIE_TTL_MS,
+    ...(domain !== undefined && { domain }),
   });
   return value;
 }
@@ -71,6 +87,13 @@ export interface DbscKit {
  */
 export function createDbsc(opts: CreateDbscOptions): DbscKit {
   const secure = opts.secure ?? true;
+  const cookieScope = opts.cookieScope;
+  const cookieDomain = opts.cookieDomain;
+  const scope: DeviceScope = {
+    secure,
+    ...(cookieScope !== undefined && { cookieScope }),
+    ...(cookieDomain !== undefined && { cookieDomain }),
+  };
   const clientPath = opts.clientPath ?? "/dbsc-client";
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
   const boundRegistrationPath = opts.boundRegistrationPath ?? "/dbsc-bound/registration";
@@ -85,7 +108,7 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     } else {
       // JWT path: no sessionId. An explicit deviceHint wins; otherwise the kit
       // manages a per-device cookie so each browser binds independently.
-      const deviceHint = bindOpts.deviceHint ?? resolveDeviceHint(res, secure);
+      const deviceHint = bindOpts.deviceHint ?? resolveDeviceHint(res, scope);
       sessionId = await deriveSessionId({
         userId: bindOpts.userId,
         deviceHint,
@@ -95,6 +118,8 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     await bindSession(res, sessionId, opts.storage, {
       userId: bindOpts.userId,
       secure,
+      ...(cookieScope !== undefined && { cookieScope }),
+      ...(cookieDomain !== undefined && { cookieDomain }),
       registrationPath,
       ...(opts.registrationCookieTtl !== undefined && {
         registrationCookieTtl: opts.registrationCookieTtl,
