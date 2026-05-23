@@ -3,6 +3,8 @@ import { recordServerTime } from "./clockSync.js";
 
 export { wrapFetch } from "./wrapFetch.js";
 export type { WrapFetchOptions } from "./wrapFetch.js";
+export { installFetchInterceptor } from "./installFetchInterceptor.js";
+export type { InstallFetchInterceptorOptions } from "./installFetchInterceptor.js";
 
 /**
  * Clears the bound-key record from IndexedDB. Call this on logout so the next

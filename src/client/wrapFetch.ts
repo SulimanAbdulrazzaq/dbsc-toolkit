@@ -4,14 +4,20 @@ import { getKeyRecord } from "./keystore.js";
 export interface WrapFetchOptions {
   fetch?: typeof fetch;
   headerName?: string;
-  /** SHA-256 the body into the proof header. ReadableStream bodies not supported. */
+  /**
+   * SHA-256 the body into the proof header. **Default `true` as of v2.8** —
+   * `requireProof()` on the server always wants a body hash, so signing by
+   * default is the safe shape. Pass `false` only if you have a bespoke
+   * server-side path that disables body checking. ReadableStream bodies not
+   * supported.
+   */
   signBody?: boolean;
 }
 
 export function wrapFetch(opts: WrapFetchOptions = {}): typeof fetch {
   const base = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const headerName = opts.headerName ?? "X-Dbsc-Bound-Proof";
-  const signBody = opts.signBody ?? false;
+  const signBody = opts.signBody ?? true;
 
   return (async (input, init = {}) => {
     const rec = await getKeyRecord().catch(() => null);
