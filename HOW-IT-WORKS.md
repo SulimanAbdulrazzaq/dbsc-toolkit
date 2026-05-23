@@ -202,9 +202,25 @@ Before v2.7, `requireProof()` had a structural gap on Chromium. Native DBSC's TP
 
 v2.7 closes this by giving every Chromium session **two keys**: the TPM key keeps driving `/dbsc/refresh` in the background, and a polyfill ECDSA key (the same one Firefox / Safari already use) lives in IndexedDB and signs every guarded request. The polyfill key is generated `extractable: false` — even with full XSS the attacker cannot exfiltrate it. So a stolen cookie now also needs the IndexedDB key to pass `requireProof()`, and a request from the attacker's browser is 403'd immediately, not after a refresh cycle.
 
-The dev-facing API does not change. `initBoundDbsc()` and `requireProof()` keep their signatures; the client SDK registers the polyfill key automatically when it sees `tier: "dbsc"` from the server, and `wrapFetch({ signBody: true })` signs with whichever key happens to be in IndexedDB (TPM-paired on Chrome, standalone on Firefox / Safari). The only visible change is the default flip: `allowDbscWithoutProof` is now `false`, so a Chromium client that doesn't ship `wrapFetch` will start seeing 403s on guarded routes. The escape hatch (`allowDbscWithoutProof: true`) reinstates the v2.6 behavior for apps that cannot upgrade the client side.
+The dev-facing API does not change. `initBoundDbsc()` and `requireProof()` keep their signatures; the client SDK registers the polyfill key automatically when it sees `tier: "dbsc"` from the server, and `wrapFetch()` signs with whichever key happens to be in IndexedDB (TPM-paired on Chrome, standalone on Firefox / Safari). The only visible change is the default flip: `allowDbscWithoutProof` is now `false`, so a Chromium client that doesn't ship `wrapFetch` will start seeing 403s on guarded routes. The escape hatch (`allowDbscWithoutProof: true`) reinstates the v2.6 behavior for apps that cannot upgrade the client side.
 
-`signBody: true` (v2.3.0+) hardens the proof against body substitution: the proof header carries `bh=sha256(body)` signed into the message, so an active MITM that captures a valid signature cannot modify the body within the timestamp window. See [docs/per-request-signing.md](./docs/per-request-signing.md).
+`signBody: true` (v2.3.0+, and the default in `wrapFetch` as of v2.8) hardens the proof against body substitution: the proof header carries `bh=sha256(body)` signed into the message, so an active MITM that captures a valid signature cannot modify the body within the timestamp window. See [docs/per-request-signing.md](./docs/per-request-signing.md).
+
+### How v2.8 closed the captured-proof replay window
+
+v2.7 closed the *missing-proof* path on Chromium, but the proof itself was still replayable for up to the ±5-minute timestamp window. An attacker who captured one valid signed proof off the wire (a compromised proxy, log spillage, anything that bypasses TLS) could replay the *exact same bytes* against the same path until the window closed. The signature still verifies — it's the legitimate user's signature; only the timestamp ages it out.
+
+v2.8 adds a `ProofReplayCache` interface that records the `(sessionId, ts, sig-prefix)` of every proof that passes verification, with a TTL slightly longer than the accepted window. The second arrival of the same tuple is rejected with `code: "PROOF_REPLAY"`. The key is only recorded *after* the signature verifies, so an attacker replaying garbage cannot poison the cache and lock out the legitimate client.
+
+Three implementations ship: `NoopReplayCache` (default, no-op — backward compatible), `MemoryReplayCache` (dev / single-process), and `RedisReplayCache` (production, `SET NX EX` for atomic check-and-record across processes). Wire it on the kit:
+
+```ts
+createDbsc({ storage, replayCache: new RedisReplayCache(redis) })
+```
+
+The cache is opt-in because for many apps the ±5-minute window is acceptable — passive cookie theft, the dominant threat, is already shut down by the polyfill-key requirement. Apps with a stricter threat model (active MITM, log-spillage exposure, regulatory replay rejection) turn it on.
+
+`installFetchInterceptor({ pathPrefixes })` (v2.8+) is the other v2.8 affordance — apps with many guarded routes can swap `globalThis.fetch` once at boot instead of calling `wrapFetch` at every call site. The interceptor only touches same-origin requests whose pathname matches one of the supplied prefixes; absolute URLs, bare `"/"`, and missing prefixes throw at install time. For small apps the per-call `wrapFetch(...)` shape stays recommended.
 
 A note on the binding flow itself (v2.2.0+): `initBoundDbsc()` resolves with a structured `BoundDbscOutcome` describing exactly what happened — `native-dbsc` when Chromium registered (v2.7+: the polyfill key is co-registered as part of this outcome, and `skipReason: "polyfill-co-registration-failed"` surfaces a degraded mode where native succeeded but the per-request gate is missing), `polyfill-bound` (with an optional `skipReason` like `"quota_exceeded"`) when the Web Crypto fallback took over, `unbound` when there is no session, or `error` when something threw. The SDK actively polls `/dbsc-bound/state` during its probe window instead of blocking-sleeping, so a quota-exhausted Chrome falls back to the polyfill in ~1.5s instead of after the full 5–8s wait. Consumers that previously polled `/me` to find out the tier should `await` the outcome promise directly — no more "no binding for 8s" race UX. See [docs/bound-polyfill.md](./docs/bound-polyfill.md#outcome-promise-220).
 
@@ -222,9 +238,11 @@ The library stores three things per session:
 
 Three storage adapters ship:
 
-- **`MemoryStorage`** — Map-based, in-process, wiped on restart. Dev only. If you deploy to Render free tier or any serverless platform that spins down, you will lose all sessions and every browser with an old `__Host-dbsc-session` cookie will hit `KEY_NOT_FOUND` on refresh and loop registration. The live demo previously tripped on exactly this — it now runs on `RedisStorage` (Upstash free tier) and the loop disappears.
+- **`MemoryStorage`** — Map-based, in-process, wiped on restart. Dev only. If you deploy to Render free tier or any serverless platform that spins down, you will lose all sessions and every browser with an old `__Host-dbsc-session` cookie will hit `KEY_NOT_FOUND_NATIVE` on refresh and loop registration. The live demo previously tripped on exactly this — it now runs on `RedisStorage` (Upstash free tier) and the loop disappears.
 - **`RedisStorage`** — uses `ioredis`. Atomic challenge consume via a small Lua script. Production-ready. Works across instances; survives restarts.
 - **`PostgresStorage`** — uses `pg`. Migrations included. Atomic challenge consume via row-level locking. Same production properties as Redis, just more familiar if your stack is already Postgres-heavy.
+
+v2.8 also ships an optional **`ProofReplayCache`** (separate from `StorageAdapter`) to defeat captured-proof replay — see the "How v2.8 closed the captured-proof replay window" section above. `MemoryReplayCache` lives next to `MemoryStorage` in `dbsc-toolkit/storage/memory`, `RedisReplayCache` next to `RedisStorage` in `dbsc-toolkit/storage/redis`. The default is `NoopReplayCache` (no replay check).
 
 Default TTLs: bound cookie 10 min (browser refreshes it on its own), challenge 5 min (rotated per refresh), session 24 hours (your `bindSession` call can override). The bound-cookie TTL governs the background-refresh cadence — for guarded routes, `requireProof()` 403s immediately on a stolen cookie regardless of this TTL (since v2.7). For routes that do *not* call `requireProof()`, this TTL is still the attacker-window knob: shorter means a stolen cookie degrades to `tier: "none"` sooner, at the cost of more refresh traffic.
 

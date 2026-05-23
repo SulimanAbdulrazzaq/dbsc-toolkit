@@ -140,9 +140,11 @@ After `createDbsc().install()`, every request through the middleware has a `tier
 | Your route does… | Use this guard | What it stops |
 |---|---|---|
 | Public / read-only (feed, search, public profile) | Nothing | n/a — no auth gate at all |
-| Anything authenticated (post, comment, upvote, settings, payment, admin) | `requireProof()` (server) + `wrapFetch({ signBody: true })` (client, for Firefox/Safari) | A stolen cookie cannot be replayed from another device, cannot ride along during the freshness window, and an MITM cannot substitute a POST body |
+| Anything authenticated (post, comment, upvote, settings, payment, admin) | `requireProof()` (server) + `wrapFetch()` (client) | A stolen cookie cannot be replayed from another device, cannot ride along during the freshness window, and an MITM cannot substitute a POST body |
 
-There is deliberately **no tier-level argument**. A `dbsc`-only gate would lock out every Firefox/Safari user; a `bound`-only check (tier without a per-request proof) is not actually secure. `requireProof()` is the one honest answer — it requires a bound device + a per-request proof and works on every browser (Chromium passes through natively, Firefox/Safari supply the signed proof). It signs the request body, so a POST guarded route mounts `express.raw()` in front.
+There is deliberately **no tier-level argument**. A `dbsc`-only gate would lock out every Firefox/Safari user; a `bound`-only check (tier without a per-request proof) is not actually secure. `requireProof()` is the one honest answer — it requires a bound device + a per-request proof and works on every browser. As of v2.7 Chromium sessions also register a polyfill key alongside the TPM key, so the per-request signature is enforced on every tier (not just Firefox/Safari). `wrapFetch` signs the request body by default in v2.8+; a POST guarded route mounts `express.raw()` in front. Apps with many guarded routes can use `installFetchInterceptor({ pathPrefixes: ["/api/secure/"] })` to wrap once at boot instead of per-call.
+
+For apps with a stricter threat model (active MITM, log-spillage exposure), v2.8 also adds an optional **replay cache** that rejects a second arrival of the same proof bytes — pass `replayCache: new RedisReplayCache(redis)` to `createDbsc`. See [docs/per-request-signing.md](./docs/per-request-signing.md).
 
 The full threat boundary, the per-framework wiring (Fastify / Hono / Next.js), and the migration timeline for an existing app are in [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md) and [docs/per-request-signing.md](./docs/per-request-signing.md).
 
@@ -181,7 +183,7 @@ There is no third option, and **never gate a route on `tier === "dbsc"`** — th
 
 - **Concepts and protocol:** [HOW-IT-WORKS.md](./HOW-IT-WORKS.md)
 - **Bound polyfill wire protocol:** [docs/bound-polyfill.md](./docs/bound-polyfill.md)
-- **Per-request signing (close the Firefox/Safari ride-along gap on sensitive routes):** [docs/per-request-signing.md](./docs/per-request-signing.md)
+- **Per-request signing (the v2.7 dual-key story + the v2.8 replay cache):** [docs/per-request-signing.md](./docs/per-request-signing.md)
 - **API reference:** [docs/api-reference.md](./docs/api-reference.md)
 - **Adapters (Express / Fastify / Hono / Next.js + write your own):** [docs/adapters.md](./docs/adapters.md)
 - **Storage (memory / Redis / Postgres):** [docs/storage.md](./docs/storage.md)

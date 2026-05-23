@@ -39,6 +39,11 @@ An attacker captures a JWS proof and replays it for a second refresh.
 
 Mitigation: Challenges are single-use. `consumeChallenge` uses an atomic compare-and-swap (Lua script for Redis, `UPDATE ... WHERE consumed = FALSE` for Postgres). A consumed challenge is permanently rejected.
 
+**T1b: Per-request proof replay (v2.8+)**
+An attacker captures a valid `X-Dbsc-Bound-Proof` header off the wire (compromised proxy, log spillage, decrypted TLS traffic on the attacker's machine) and replays the same request bytes within the ±5-minute timestamp window.
+
+Mitigation: optional `ProofReplayCache` on `createDbsc`. `verifyBoundProof` records `(sessionId, ts, sig-prefix)` after the signature passes and rejects a second arrival with `code: "PROOF_REPLAY"`. TTL is `2 * timestampWindowMs`. Opt-in because for many apps the timestamp window alone is acceptable; turn it on when the threat model includes active MITM or proof exposure. The cache key is recorded *after* the signature verifies, so a garbage replay cannot poison the cache and lock out the legitimate client.
+
 **T2: Storage manipulation**
 An attacker modifies stored public keys to bind their own key.
 

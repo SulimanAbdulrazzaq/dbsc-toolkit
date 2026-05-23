@@ -93,6 +93,12 @@ interface RateLimiter {
   recordFailure(ip: string, sessionId?: string): Promise<void>;
 }
 
+// v2.8+
+interface ProofReplayCache {
+  /** Returns true if first sighting (allow), false on replay (reject). */
+  checkAndRecord(key: string, ttlMs: number): Promise<boolean>;
+}
+
 interface DbscOptions {
   storage: StorageAdapter;
   registrationPath?: string;        // default "/dbsc/registration"
@@ -102,6 +108,7 @@ interface DbscOptions {
   refreshGraceMs?: number;          // default 30000 — see below (2.5.0+)
   cookieScope?: "host" | "site";    // default "host" — "site" not yet implemented, see ROADMAP.md
   rateLimiter?: RateLimiter;
+  replayCache?: ProofReplayCache;   // v2.8+; default NoopReplayCache (no replay check)
   onEvent?: (event: AnyTelemetryEvent) => void;
   autoBind?: (req: any) => Promise<AutoBindResult | null> | AutoBindResult | null;
 }
@@ -169,8 +176,19 @@ interface RefreshEvent { type: "refresh"; sessionId; tier; timestamp; ip }
 interface VerificationFailureEvent { type: "verification_failure"; sessionId; tier; timestamp; reason; ip }
 interface SessionStolenEvent { type: "session_stolen"; sessionId; tier; timestamp; ip }
 interface TierChangeEvent { type: "tier_change"; sessionId; tier; timestamp; from; to; reason }
+// v2.8+: a Chromium session has held a "native" key past the grace window
+// (60s default) without registering its "bound" polyfill key. Fires once per
+// session per server-process restart. The session reads tier: "dbsc" but
+// every requireProof() call 403s — a degraded state worth alerting on.
+interface PolyfillMissingEvent { type: "polyfill_missing"; sessionId; tier: "dbsc"; timestamp; ip }
 
-type AnyTelemetryEvent = RegistrationEvent | RefreshEvent | VerificationFailureEvent | SessionStolenEvent | TierChangeEvent;
+type AnyTelemetryEvent =
+  | RegistrationEvent
+  | RefreshEvent
+  | VerificationFailureEvent
+  | SessionStolenEvent
+  | TierChangeEvent
+  | PolyfillMissingEvent;
 ```
 
 ### Errors
@@ -186,13 +204,23 @@ const ErrorCodes: {
   CHALLENGE_CONSUMED: string;
   CHALLENGE_EXPIRED: string;
   JTI_MISMATCH: string;
-  KEY_NOT_FOUND: string;
+  KEY_NOT_FOUND: string;                 // legacy, retained for back-compat
+  KEY_NOT_FOUND_NATIVE: string;          // v2.8+: missing TPM key (storage wipe)
+  KEY_NOT_FOUND_BOUND: string;           // v2.8+: missing polyfill key (client re-init)
   MALFORMED_JWS: string;
   UNKNOWN_ALGORITHM: string;
   INVALID_JWK: string;
   SIGNATURE_INVALID: string;
+  SESSION_NOT_FOUND: string;
+  SESSION_ALREADY_REGISTERED: string;
+  RATE_LIMITED: string;
+  MISSING_PROOF: string;                 // requireProof + no X-Dbsc-Bound-Proof header
+  MALFORMED_PROOF: string;
+  PROOF_REPLAY: string;                  // v2.8+: replay cache rejected a second arrival
 };
 ```
+
+`KEY_NOT_FOUND` is kept for any consumer pinned to it. v2.8 throw sites use the kind-specific codes: `KEY_NOT_FOUND_NATIVE` from `/dbsc/refresh` (the TPM-key row is missing — usually a storage wipe; the user has to restart from `/login`) and `KEY_NOT_FOUND_BOUND` from `requireProof()` / `/dbsc-bound/refresh` (the polyfill-key row is missing — the client SDK can re-init via `initBoundDbsc()` without a full logout).
 
 ### Header constants and helpers
 
@@ -293,7 +321,7 @@ function verifyBoundProof(req: VerifyBoundProofRequest, storage: StorageAdapter)
 function parseProofHeader(s: string): { ts: number; sig: string } | null;
 ```
 
-The bound polyfill protocol is documented in [bound-polyfill.md](./bound-polyfill.md). The per-request signing flow that closes the bound-tier ride-along gap is documented in [per-request-signing.md](./per-request-signing.md). New `ErrorCodes` entries: `MISSING_PROOF`, `MALFORMED_PROOF`.
+The bound polyfill protocol is documented in [bound-polyfill.md](./bound-polyfill.md). The per-request signing flow is documented in [per-request-signing.md](./per-request-signing.md). `ErrorCodes` entries added across releases: `MISSING_PROOF`, `MALFORMED_PROOF` (v2.1.0+), `PROOF_REPLAY`, `KEY_NOT_FOUND_NATIVE`, `KEY_NOT_FOUND_BOUND` (v2.8+).
 
 ### Telemetry
 
@@ -583,9 +611,25 @@ function clearBoundKey(): Promise<void>;
 interface WrapFetchOptions {
   fetch?: typeof fetch;
   headerName?: string;            // default "X-Dbsc-Bound-Proof"
-  signBody?: boolean;             // default false — when true, adds bh=sha256(body) (2.3.0+)
+  signBody?: boolean;             // v2.8+ default: true. Adds bh=sha256(body) and signs it.
 }
 function wrapFetch(options?: WrapFetchOptions): typeof fetch;
+
+// v2.8+: install once at boot instead of calling wrapFetch per call site.
+// Routes matching same-origin requests whose pathname starts with one of
+// `pathPrefixes` through wrapFetch; everything else through the original
+// fetch. Returns an uninstall function that restores globalThis.fetch.
+//
+// Throws at install time on: empty pathPrefixes, bare "/" (would sign every
+// request including static assets), absolute URL prefixes (would leak the
+// session key cross-origin), prefixes missing the leading "/".
+interface InstallFetchInterceptorOptions {
+  pathPrefixes: string[];
+  signBody?: boolean;             // forwarded to wrapFetch
+  headerName?: string;            // forwarded to wrapFetch
+  fetch?: typeof fetch;           // override globalThis.fetch — useful in tests
+}
+function installFetchInterceptor(options: InstallFetchInterceptorOptions): () => void;
 ```
 
 Typical use:
@@ -595,6 +639,14 @@ Typical use:
   import { initBoundDbsc } from "/dbsc-client/index.js";
   initBoundDbsc();
 </script>
+```
+
+For apps with many guarded routes, install the interceptor once at boot:
+
+```js
+import { installFetchInterceptor } from "dbsc-toolkit/client";
+installFetchInterceptor({ pathPrefixes: ["/api/secure/"] });
+// from now on `fetch("/api/secure/...")` carries the proof header.
 ```
 
 See [bound-polyfill.md](./bound-polyfill.md) for the wire protocol and threat coverage.

@@ -116,6 +116,49 @@ The `dbsc_bound_keys` rows cascade-delete when their session is removed.
 
 ---
 
+## Proof replay cache (v2.8+)
+
+Separate from `StorageAdapter`, the optional `ProofReplayCache` is what powers `PROOF_REPLAY` rejection. Three implementations ship:
+
+| Implementation | Where it lives | Use case | Multi-process safe |
+|----------------|----------------|----------|--------------------|
+| `NoopReplayCache` | `dbsc-toolkit` (default) | v2.6 / v2.7 behavior — no replay check | n/a |
+| `MemoryReplayCache` | `dbsc-toolkit/storage/memory` | Dev / single-process | No |
+| `RedisReplayCache` | `dbsc-toolkit/storage/redis` | Production | Yes (`SET NX EX`) |
+
+Wire on the kit:
+
+```ts
+import { createDbsc } from "dbsc-toolkit/express";
+import { RedisReplayCache } from "dbsc-toolkit/storage/redis";
+
+createDbsc({
+  storage,
+  replayCache: new RedisReplayCache(redis),    // optional kwarg, can share the ioredis client with RedisStorage
+});
+```
+
+The cache is keyed under `dbsc:proof:` by default. Override via the constructor: `new RedisReplayCache(redis, "myapp:proof:")`. Entries expire automatically via Redis TTL — no background GC.
+
+There is no Postgres replay-cache adapter yet. Postgres-only deployments either accept the default no-op cache or pair with Redis for the cache. See [docs/per-request-signing.md](./per-request-signing.md#closing-the-replay-window-v28) for the threat model.
+
+If you implement your own:
+
+```ts
+interface ProofReplayCache {
+  /**
+   * Atomically check whether `key` has been seen, and record it with TTL on
+   * first sighting. Returns `true` if this is the first sighting (request
+   * allowed), `false` if the key was already present (replay — reject).
+   */
+  checkAndRecord(key: string, ttlMs: number): Promise<boolean>;
+}
+```
+
+The atomicity matters: under load, two replicas may receive the same proof at the same instant. A non-atomic "get then set" lets both through; an atomic single round-trip lets exactly one through. Redis `SET NX EX` does this in one network round-trip; Memcached `add` is equivalent; DynamoDB `PutItem` with a `ConditionExpression` does too.
+
+---
+
 ## Writing your own adapter
 
 Implement the `StorageAdapter` interface from core. Every method is async — sync implementations work too if you wrap them in `Promise.resolve(...)`.
@@ -128,9 +171,12 @@ export class MyStorage implements StorageAdapter {
   async setSession(session: Session): Promise<void> { /* ... */ }
   async deleteSession(id: string): Promise<void> { /* ... */ }
 
-  async getBoundKey(sessionId: string): Promise<BoundKey | null> { /* ... */ }
-  async setBoundKey(key: BoundKey): Promise<void> { /* ... */ }
-  async deleteBoundKey(sessionId: string): Promise<void> { /* ... */ }
+  // v2.7+: getBoundKey and deleteBoundKey take an optional `kind`
+  async getBoundKey(sessionId: string, kind?: BoundKeyKind): Promise<BoundKey | null> { /* ... */ }
+  async setBoundKey(key: BoundKey): Promise<void> { /* key.kind selects the slot */ }
+  async deleteBoundKey(sessionId: string, kind?: BoundKeyKind): Promise<void> {
+    /* without kind, remove both kind="native" and kind="bound" rows */
+  }
 
   async getChallenge(jti: string): Promise<Challenge | null> { /* ... */ }
   async setChallenge(challenge: Challenge): Promise<void> { /* ... */ }

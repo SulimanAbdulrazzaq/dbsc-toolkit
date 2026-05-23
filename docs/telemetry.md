@@ -119,6 +119,28 @@ interface TierChangeEvent extends TelemetryEvent {
 
 The library does not auto-emit this event from every internal transition; it is the canonical shape for applications that want to track promotions or demotions explicitly. Useful for: dashboards on what fraction of sessions land at each tier, identifying browsers/platforms where the polyfill carries more traffic than expected.
 
+### `polyfill_missing` (v2.8+)
+
+Fires on a Chromium session that has held a `kind: "native"` TPM key for more than the grace window (default 60s) without ever co-registering its `kind: "bound"` polyfill key. The session reads `tier: "dbsc"` but every `requireProof()` call will 403 with `KEY_NOT_FOUND_BOUND` — a degraded state with no visible failure on the session row, easy to miss in standard monitoring.
+
+```ts
+interface PolyfillMissingEvent extends TelemetryEvent {
+  type: "polyfill_missing";
+  tier: "dbsc";
+  ip: string;
+}
+```
+
+The middleware emits this **at most once per session per server-process restart** — a small in-memory `Set<sessionId>` dedupes within the process, and restarts re-arm the set. The signal is for ops alerting, not security enforcement, so the bounded re-arm is acceptable.
+
+Common causes when this fires for a real user:
+
+- Client SDK not loaded (the page does not import or call `initBoundDbsc()`).
+- The polyfill co-registration failed silently — the client's outcome is `{ phase: "native-dbsc", tier: "dbsc", skipReason: "polyfill-co-registration-failed" }`.
+- Chromium quota / sandbox issue blocking the IndexedDB write.
+
+Wire it to a dashboard counter and a low-volume alert. A spike in `polyfill_missing` typically means a frontend regression that stripped or shadowed `initBoundDbsc()`.
+
 ## OpenTelemetry mapping
 
 The library does not depend on OpenTelemetry, but the event shapes map cleanly onto OTel attributes. Suggested span/metric attribute names:

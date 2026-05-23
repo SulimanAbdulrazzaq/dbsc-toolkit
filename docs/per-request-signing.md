@@ -1,18 +1,20 @@
-# Per-request signing for the bound tier
+# Per-request signing
 
-The `bound` tier ([docs/bound-polyfill.md](./bound-polyfill.md)) signs the *refresh* of the session, not every request. Between refreshes the cookie is the credential, and a copy of that cookie pasted into another browser will work as the legitimate user until the refresh cycle catches up. Native DBSC has the same window, but Chromium enforces the cookie-to-key association browser-side, so a cookie pasted into a second Chrome profile that has no DBSC state cannot keep the cookie alive once it expires. The bound polyfill lives in JavaScript and has no equivalent enforcement.
+Native DBSC signs the *refresh* of the session, not every request, and the TPM key Chrome holds is never exposed to JavaScript — so without a second mechanism, a stolen cookie pasted into another browser works as the legitimate user until the refresh cycle catches up. The bound polyfill ([docs/bound-polyfill.md](./bound-polyfill.md)) closes that window by signing every request with a key in IndexedDB.
 
-This page describes the opt-in feature that closes that gap for the bound tier on the specific routes you choose to protect.
+As of v2.7, **Chromium sessions register the polyfill key alongside the TPM key**, so every guarded request — on every tier, on every browser — carries a signed proof. The TPM key keeps doing the background refresh; the polyfill key handles per-request enforcement. v2.8 adds an optional replay cache that rejects a second arrival of the same proof bytes, closing the captured-proof gap that the ±5-minute timestamp window leaves open.
 
-> **Shorthand:** `requireProof()` is `requireBoundProof` with `signBody: true` and storage taken from the middleware context so you don't re-pass it — it is the guard you reach for on real routes. The `requireBoundProof` documented here is the lower-level primitive: use it directly when you need a proof check *without* body signing, or the raw `RequireBoundProofOptions`. Everything below applies to both.
+> **Shorthand:** `requireProof()` is `requireBoundProof` with `signBody: true` and storage taken from the middleware context so you don't re-pass it — it is the guard you reach for on real routes. The `requireBoundProof` documented here is the lower-level primitive: use it directly when you need a proof check *without* body signing, or want to override `RequireBoundProofOptions` per-route. Everything below applies to both.
 
 ## When to use this — and when not to
 
-**Use it on sensitive routes only.** Payments, admin actions, password change, email change, two-factor enrolment. The routes where a stolen-cookie ride-along during the freshness window would matter.
+**Use it on sensitive routes only.** Payments, admin actions, password change, email change, two-factor enrolment. Any route where a stolen-cookie ride-along during the freshness window would matter.
 
-**Do not use it as a global wrapper.** Every signed request costs ~1 ms on the client (a Web Crypto signature) and a similar amount on the server (the matching verify). On a feed page that fetches 30 items, that's 60 ms of avoidable signing per render. Worse, if you assign `wrapFetch()` to `globalThis.fetch`, third-party SDKs (analytics, React Query, SWR, error reporters) start signing too — for routes that don't care, on origins that don't know what to do with the header. Keep the wrapper per-call.
+**Do not assign `wrapFetch()` to `globalThis.fetch` by hand.** Every signed request costs ~1 ms on the client and a similar amount on the server. On a feed page that fetches 30 items, that's 60 ms of avoidable signing per render. Worse, third-party SDKs (analytics, React Query, SWR, error reporters) would start signing too — for routes that don't care, on origins that don't know what to do with the header.
 
-The native DBSC tier does not need this protection; the middleware passes `tier: "dbsc"` through by default. The cost is paid only by Firefox / Safari / older-Chromium users, on the specific routes you gate. That is the design.
+For apps with many guarded routes, v2.8 ships `installFetchInterceptor({ pathPrefixes })` — it swaps `globalThis.fetch` once at boot, but only routes matching same-origin requests with one of the supplied prefixes through `wrapFetch`. Cross-origin requests and static-asset paths bypass it. See "Bulk install with installFetchInterceptor" below.
+
+For small apps, the per-call `wrapFetch(...)` shape stays the recommended default.
 
 ## How it works
 
@@ -41,15 +43,16 @@ The signed message ties the signature to a specific session, method, and path. A
 
 ## Threat boundary
 
-What this defeats that the plain bound tier did not:
+What this defeats:
 
-- **Cookie pasted into a second browser, victim still active.** Attacker has the cookie. Attacker hits the gated route. Server demands the proof header. Attacker can't produce one — the private key lives in the victim's IndexedDB, non-extractable. Request fails 403 even though `lastRefreshAt` is fresh.
-- **Cookie stolen via XSS exfiltrating `document.cookie` workaround.** Same shape. The XSS can read the cookie value but cannot extract the signing key (`extractable: false` blocks `crypto.subtle.exportKey()`).
+- **Cookie pasted into a second browser, victim still active.** Attacker has the cookie. Attacker hits the gated route. Server demands the proof header. Attacker can't produce one — the private key lives in the victim's IndexedDB, non-extractable. Request fails 403 even though `lastRefreshAt` is fresh. Works on every browser including Chromium since v2.7 (the polyfill key is co-registered alongside the TPM key).
+- **Cookie stolen via XSS exfiltrating `document.cookie`.** Same shape. The XSS can read the cookie value but cannot extract the signing key (`extractable: false` blocks `crypto.subtle.exportKey()`).
+- **MITM body substitution.** v2.3+ pairs the proof header with `bh=sha256(body)` signed into the message (the default in v2.8 — see "Body signing setup" below). The server hashes the received body and rejects on mismatch.
+- **Captured-proof replay (v2.8+, opt-in).** An MITM that captures one valid signed proof off the wire (compromised proxy, log spillage) could replay it against the same path for up to the ±5-minute window. v2.8's `ProofReplayCache` records `(sessionId, ts, sig-prefix)` after each successful verification and 403s any second arrival with `code: "PROOF_REPLAY"`. See "Closing the replay window" below.
 
 What this does *not* defeat:
 
-- **Active MITM that can substitute request bodies.** Closed in v2.3.0 via opt-in body signing. Pass `signBody: true` to both `wrapFetch()` and `requireBoundProof()` and the proof header gains a `bh=sha256(body)` field signed into the message. The server hashes the received body and rejects on mismatch. The route must deliver raw body bytes — see "Body signing setup" below.
-- **Infostealer malware on the victim's machine.** Same boundary as the plain bound tier. Malware that can decrypt the browser's IndexedDB keystore can also sign, which means it can produce valid proofs. Gate on `tier === "dbsc"` for routes that need to defeat this — that's what hardware-backed keys are for.
+- **Infostealer malware on the victim's machine** (for `bound` tier — Firefox / Safari / non-Chromium users). Malware that can decrypt the browser's IndexedDB keystore can also sign, which means it can produce valid proofs. The `dbsc` tier defeats this because the TPM key never leaves the hardware.
 - **Compromised browser process.** A rogue extension or a browser RCE can call `subtle.sign()` directly. Both tiers are defenseless here.
 
 ## Integration
@@ -155,7 +158,9 @@ A sustained spike of `MISSING_PROOF` or `SIGNATURE_INVALID` on a single session 
 
 ## Body signing setup (v2.3.0+)
 
-**Bound-tier only by default.** Like the rest of `requireBoundProof`, body signing inherits the `allowDbscWithoutProof: true` default — `tier: "dbsc"` requests pass through without proof and without body verification. Chromium's native DBSC protocol does not sign request bodies, so demanding `bh=` from Chrome users would only work if they also called `wrapFetch({ signBody: true })` for those routes. If you want body signing on every tier including native DBSC, pass `allowDbscWithoutProof: false` *and* make sure your Chrome users hit those routes through `wrapFetch({ signBody: true })`.
+As of v2.8 `signBody: true` is the default in `wrapFetch` — `requireProof()` always wants a body hash, so the safe shape is the default shape. Apps that already called `wrapFetch({ signBody: true })` explicitly are unchanged. Apps that called bare `wrapFetch()` on a guarded route were getting `MALFORMED_PROOF` 403s anyway; they now succeed.
+
+Server-side, the v2.7 default flipped `allowDbscWithoutProof` to `false` — every tier must carry a proof header, and `requireProof()` always wraps `requireBoundProof` with `signBody: true`. So a Chrome guarded route needs the same setup as a Firefox / Safari one: raw body bytes server-side, `wrapFetch` client-side (or `installFetchInterceptor` once at boot).
 
 Enable on both sides:
 
@@ -165,12 +170,12 @@ import express from "express";
 app.post(
   "/payment",
   express.raw({ type: "*/*" }),                              // raw body bytes
-  requireBoundProof({ storage, signBody: true }),
+  requireProof(),                                            // signBody:true, allowDbscWithoutProof:false
   paymentHandler,
 );
 
 // Client
-const boundFetch = wrapFetch({ signBody: true });
+const boundFetch = wrapFetch();         // signBody: true is the default in v2.8
 await boundFetch("/payment", { method: "POST", body: JSON.stringify(payload) });
 ```
 
@@ -184,8 +189,67 @@ Per-framework raw-body recipe:
 What body signing does and doesn't defeat:
 
 - Defeats MITM body substitution within the timestamp window.
-- Does NOT defeat MITM that can capture AND replay the entire request unchanged (same body, same signature) within the window. Combine with a server-side replay cache (`(sessionId, ts)` dedup in Redis) if you need strict same-second replay rejection on top.
+- Does NOT defeat MITM that can capture AND replay the entire request unchanged (same body, same signature) within the window — for that, turn on the v2.8 replay cache, see below.
 - Does NOT defeat malware running as the victim — same threat boundary as the rest of the bound tier.
+
+## Bulk install with installFetchInterceptor (v2.8+)
+
+For apps with many guarded routes, calling `wrapFetch` at every call site is a footgun — one missed call site is a silent regression to bare `fetch`, which 403s. `installFetchInterceptor` swaps `globalThis.fetch` once at boot:
+
+```js
+import { installFetchInterceptor } from "dbsc-toolkit/client";
+
+installFetchInterceptor({
+  pathPrefixes: ["/api/secure/", "/dbsc-guarded/"],
+});
+
+// From now on, every fetch matching one of those prefixes is signed:
+await fetch("/api/secure/payment", { method: "POST", body });   // proof header added
+await fetch("/public/news");                                    // not matched, not signed
+await fetch("https://stripe.example.com/anything");             // cross-origin, not signed
+```
+
+Constructor throws at install time on the obvious footguns:
+
+- Empty `pathPrefixes` — must specify something.
+- Bare `"/"` — would match every same-origin fetch including static assets and health checks.
+- Absolute URL prefixes (`https://...`) — would route cross-origin requests through `wrapFetch` and leak the session key.
+- Prefixes missing the leading `/`.
+
+The interceptor only signs **same-origin** requests whose pathname matches one of the prefixes. Cross-origin fetches go through the original `fetch` untouched, so third-party SDKs (analytics, error reporters) keep working without accidentally getting your session key.
+
+Returns an `uninstall()` function that restores `globalThis.fetch` — useful in tests, useful on logout.
+
+For small apps, the per-call `wrapFetch(...)` shape stays the recommended default. The interceptor is for the case where you have ~10+ guarded routes scattered across the app.
+
+## Closing the replay window (v2.8+)
+
+A signed proof can be replayed against the same path for up to the ±5-minute timestamp window. An MITM that captures one valid proof off the wire (compromised proxy, log spillage, anyone who can read TLS-decrypted traffic) can replay it. The captured *signature* is the victim's; only the timestamp ages it out.
+
+v2.8 ships a `ProofReplayCache` interface — when supplied, `verifyBoundProof` records `(sessionId, ts, sig-prefix)` after the signature passes, and rejects any second arrival of the same tuple with `code: "PROOF_REPLAY"`. Three implementations:
+
+```ts
+import { createDbsc } from "dbsc-toolkit/express";
+import { RedisReplayCache } from "dbsc-toolkit/storage/redis";
+import { MemoryReplayCache } from "dbsc-toolkit/storage/memory";
+
+// Default — NoopReplayCache, accepts everything. v2.6 / v2.7 behavior.
+createDbsc({ storage });
+
+// Dev / single-process apps.
+createDbsc({ storage, replayCache: new MemoryReplayCache() });
+
+// Production — multi-process safe via SET NX EX.
+createDbsc({ storage, replayCache: new RedisReplayCache(redis) });
+```
+
+Notes:
+
+- The replay key is only recorded **after** the signature verifies. An attacker replaying garbage cannot poison the cache and lock out the legitimate client.
+- The cache TTL is `2 * timestampWindowMs` (default 10 min) — a proof at the future edge of the window must remain rejected until the past edge closes.
+- `RedisReplayCache` uses `SET NX EX` so check-and-record is a single atomic round-trip. Safe across replicas.
+- Opt-in because for many apps the ±5-minute window is acceptable — passive cookie theft (the dominant threat) is already shut down by the polyfill-key requirement, and body signing covers body substitution. Turn the cache on when you have a stricter threat model (active MITM, log-spillage exposure, regulatory replay rejection).
+- For Postgres deployments, pair with Redis for the replay cache, or accept the default `NoopReplayCache`. There's no Postgres replay-cache adapter yet.
 
 ## What's in v1, and what's coming later
 
@@ -201,5 +265,12 @@ In v2.3.0:
 - Body signing (`{ signBody: true }` option, hashes the body into the proof header)
 - `clearBoundKey()` helper for explicit logout cleanup
 
-Deferred:
-- Server-side replay cache (`(sessionId, ts)` dedup in Redis) for apps that want strict same-second replay rejection on top of the timestamp window
+In v2.7.0:
+- `requireProof()` one-call guard with `allowDbscWithoutProof: false` default (the dual-key Chromium flow)
+
+In v2.8.0:
+- `ProofReplayCache` interface + Memory / Redis implementations
+- `installFetchInterceptor({ pathPrefixes })` for bulk client-side install
+- `signBody: true` is the default in `wrapFetch`
+- `KEY_NOT_FOUND_NATIVE` / `KEY_NOT_FOUND_BOUND` error codes
+- `PolyfillMissingEvent` telemetry
