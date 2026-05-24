@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS dbsc_sessions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
-  tier TEXT NOT NULL CHECK (tier IN ('dbsc', 'webauthn', 'hmac', 'none')),
+  tier TEXT NOT NULL CHECK (tier IN ('dbsc', 'bound', 'none')),
   created_at BIGINT NOT NULL,
   expires_at BIGINT NOT NULL,
   last_refresh_at BIGINT NOT NULL DEFAULT 0

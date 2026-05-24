@@ -254,12 +254,13 @@ Default TTLs: bound cookie 10 min (browser refreshes it on its own), challenge 5
 
 | Browser | Tier achieved (out of the box, with `initBoundDbsc()` loaded) |
 |---------|-------------------------------|
-| Chrome 145+ | `dbsc` (native, TPM-backed) |
-| Edge 145+ | `dbsc` |
-| Brave / Opera / Arc / Vivaldi (Chromium 145+) | `dbsc` |
-| Firefox | `bound` (Web Crypto polyfill) |
-| Safari | `bound` (Web Crypto polyfill) |
-| Older Chromium (<145) | `bound` (Web Crypto polyfill) |
+| Chrome 145+ on Windows / macOS | `dbsc` (native, TPM / Secure Enclave) |
+| Edge 145+ on Windows / macOS | `dbsc` |
+| Brave / Opera / Arc / Vivaldi (Chromium 145+ on Windows / macOS) | `dbsc` |
+| Firefox (desktop) | `bound` (Web Crypto polyfill) |
+| Safari (desktop) | `bound` (Web Crypto polyfill) |
+| Mobile Chrome / Safari / Firefox (iOS, Android) | `bound` (Web Crypto polyfill) |
+| Older Chromium (<145), or Chromium on Linux | `bound` (Web Crypto polyfill) |
 
 If you load the client SDK (`initBoundDbsc()` from `dbsc-toolkit/client`) on the page, the right tier shows up automatically. The SDK probes for native DBSC for ~3 seconds after login; if no `__Host-dbsc-session` cookie has appeared, it generates a non-extractable ECDSA P-256 keypair, stores it in IndexedDB, and registers the public key with the server. From that point on it signs refresh challenges automatically.
 

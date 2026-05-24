@@ -62,6 +62,26 @@ export interface DbscHonoOptions extends DbscOptions {
   boundChallengePath?: string;
   boundRegistrationPath?: string;
   boundRefreshPath?: string;
+  /**
+   * How the adapter derives the client IP used as the rate-limiter key.
+   * Hono runs on many runtimes (Node, Bun, Deno, Cloudflare Workers,
+   * Vercel) and each exposes the real client IP differently, so the
+   * default is intentionally conservative — falls back to the literal
+   * string `"unknown"` when no runtime-provided remote address is
+   * available rather than silently trusting `X-Forwarded-For` (which a
+   * client can spoof end-to-end on a misconfigured proxy chain, defeating
+   * IP-keyed rate limiting).
+   *
+   * Pass a custom extractor for your runtime:
+   * - Cloudflare Workers: `(c) => c.req.header("cf-connecting-ip") ?? "unknown"`
+   * - Vercel: `(c) => c.req.header("x-real-ip") ?? "unknown"`
+   * - Behind a known proxy that strips client-supplied XFF:
+   *   `(c) => c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown"`
+   *
+   * Defaults to a best-effort runtime probe (`c.env.requestIP`, then
+   * `c.req.raw.headers.get("cf-connecting-ip")`, then `"unknown"`).
+   */
+  ipExtractor?: (c: Context) => string;
 }
 
 export interface DbscHonoSession {
@@ -161,6 +181,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
     secure = true,
     cookieScope,
     cookieDomain,
+    ipExtractor = defaultIpExtractor,
   } = opts;
 
   const scope: ScopeArgs = {
@@ -184,7 +205,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
 
   return async (c: Context, next) => {
     const url = new URL(c.req.url);
-    const ip = c.req.header("x-forwarded-for") ?? "unknown";
+    const ip = ipExtractor(c);
 
     if (c.req.method === "POST" && url.pathname === registrationPath) {
       const sessionId = getCookie(c, COOKIES.reg);
@@ -512,7 +533,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
           await maybeEmitPolyfillMissing({
             storage,
             session,
-            ip: c.req.header("x-forwarded-for") ?? "unknown",
+            ip: ipExtractor(c),
             emitted: polyfillMissingEmitted,
             onEvent,
           });
@@ -556,4 +577,25 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
 
     await next();
   };
+}
+
+/**
+ * Best-effort client IP extraction for the platforms Hono commonly runs on.
+ * Does NOT trust `X-Forwarded-For` — that header is set by the client on a
+ * misconfigured proxy chain and would let an attacker rotate the
+ * rate-limiter key by spoofing it. Apps deployed behind a known proxy that
+ * strips client-supplied XFF should pass their own `ipExtractor`.
+ */
+function defaultIpExtractor(c: Context): string {
+  // Cloudflare Workers — c.req.header("cf-connecting-ip") is the verified
+  // edge-set client IP.
+  const cf = c.req.header("cf-connecting-ip");
+  if (cf) return cf;
+  // Some runtimes expose the remote address on `c.env.requestIP` or on
+  // the raw request socket. Try both.
+  const env = (c.env as { requestIP?: unknown } | undefined) ?? undefined;
+  if (env && typeof env.requestIP === "string") return env.requestIP;
+  const raw = c.req.raw as unknown as { socket?: { remoteAddress?: string } };
+  if (raw?.socket?.remoteAddress) return raw.socket.remoteAddress;
+  return "unknown";
 }

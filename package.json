@@ -1,6 +1,6 @@
 {
   "name": "dbsc-toolkit",
-  "version": "2.9.4",
+  "version": "2.9.5",
   "description": "Server-side Device Bound Session Credentials (DBSC) for Node.js plus a Web Crypto polyfill for Firefox, Safari, and older Chromium. Cookie-theft protection on every modern browser.",
   "license": "Apache-2.0",
   "type": "module",

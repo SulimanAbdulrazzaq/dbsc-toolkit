@@ -2,6 +2,75 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.9.5] — 2026-05-24
+
+A second-pass audit release. The v2.9.4 audit cycle covered the core crypto
+and protocol layers; this pass found two real bugs that the first audit missed
+because they only surface on Postgres (no Postgres-backed CI environment), one
+real DoS vector on the Hono adapter, and one quiet failure mode in the
+telemetry path.
+
+### Fixed
+
+- **Postgres tier CHECK still listed `webauthn` and `hmac`.** `migrations/001_initial.sql`
+  has shipped since v1.0.1 with the constraint
+  `tier IN ('dbsc', 'webauthn', 'hmac', 'none')`. Those two tiers were removed
+  in v2.0.0 along with the WebAuthn / HMAC fallback machinery, but the schema
+  was never updated. Any fresh-install Postgres deployment that ran a
+  Firefox / Safari / mobile session through the polyfill registration tried
+  to write `tier = 'bound'` and got a SQL CHECK constraint violation —
+  registration would fail with a generic 500 and bound tier was effectively
+  broken on Postgres. v2.9.5 ships `migrations/003_v2_tier_and_challenge_cascade.sql`
+  with the corrected constraint, and the `001_initial.sql` file is updated for
+  fresh installs. Existing deployments apply 003 to fix in place.
+
+- **Postgres orphan challenges.** `dbsc_challenges` had no `ON DELETE CASCADE`
+  back to `dbsc_sessions`, so `revokeAllForUser` (and `revokeSession`) left
+  challenge rows behind. The Memory adapter cleans them via process restart
+  and the Redis adapter via TTL — only Postgres accumulated them. v2.9.5
+  adds the cascading FK and explicitly clears challenges in
+  `revokeAllForUser` as defense in depth for deployments that haven't applied
+  003 yet.
+
+- **`PostgresStorage.runMigrations()` actually applies the bundled `.sql` files now.**
+  The pre-2.9.5 implementation created the `dbsc_migrations` metadata table
+  and stopped — the name implied "this applies the migrations" but in fact it
+  did not. Developers calling `await storage.runMigrations()` and then a query
+  would get a raw `relation "dbsc_sessions" does not exist` error with no
+  guidance. v2.9.5 walks the bundled `migrations/` directory in the package
+  tarball, applies each `.sql` file in order, and records the name in
+  `dbsc_migrations` — already-applied scripts are skipped. Idempotent.
+
+- **Hono adapter silently trusted `X-Forwarded-For` for rate limiting.**
+  Express and Fastify honor their framework's `trust proxy` setting. Hono read
+  the raw `X-Forwarded-For` header and used it as the rate-limiter key on
+  every protocol route. An attacker on a misconfigured proxy chain could spoof
+  the header per request to rotate the rate-limit identity and bypass the
+  per-IP `checkRegistration` cap. v2.9.5 adds an `ipExtractor` option to the
+  Hono kit; the default is a best-effort probe (`cf-connecting-ip` →
+  `c.env.requestIP` → raw socket → `"unknown"`) and never silently reads
+  client-supplied `X-Forwarded-For`. Apps behind a known proxy that strips
+  client-supplied XFF can pass their own extractor.
+
+- **`emit()` swallowed async telemetry-handler rejections.** The function
+  caught synchronous throws but ignored rejected promises from
+  `onEvent: async (e) => ...`. The error became an unhandled promise rejection
+  with no visibility. The auth path was never destabilized (intentional) but
+  ops teams could lose events silently. v2.9.5 attaches a `.catch` to the
+  returned promise so the rejection is dropped explicitly under the same
+  "never crash the auth path" contract.
+
+### Docs
+
+- **`docs/security/best-practices.md`**: the `tier === "dbsc"` exception now
+  has a blockquote callout calling out that gating on it locks every
+  Firefox / Safari / mobile user out of that route. The previous wording
+  hid the trade-off in parenthetical prose.
+
+- **`HOW-IT-WORKS.md` cross-browser table**: explicit "mobile" and
+  "Chromium on Linux" rows so readers don't have to infer that the polyfill
+  covers them.
+
 ## [2.9.4] — 2026-05-24
 
 A four-bug correctness release surfaced by a full codebase audit. None

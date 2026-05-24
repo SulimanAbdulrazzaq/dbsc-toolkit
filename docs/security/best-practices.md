@@ -165,6 +165,20 @@ app.get("/balance", (req, res) => {
 });
 ```
 
+> **About `tier === "dbsc"` as a gate — this is the exception, not the rule.**
+>
+> `requireProof()` is the default route guard and works on every browser.
+> Gating on `tier === "dbsc"` is the ONE exception, reserved for routes whose
+> threat model specifically includes on-device infostealer malware reading the
+> browser profile directory. The TPM/Secure-Enclave key on `dbsc` defeats that;
+> the IndexedDB key on `bound` does not.
+>
+> **The trade-off is hard: every Firefox, Safari, and mobile user is locked
+> out of that route.** They can only reach `tier: "bound"`. If your route does
+> not have an explicit malware-on-device threat, do not use this gate — use
+> `requireProof()` and accept the (smaller) malware risk. Locking out half the
+> web is rarely the right answer.
+
 ### Demotion as a signal
 
 When a logged-in session demotes from `"dbsc"` to `"none"`, that is unusual. A normal user's tier stays at `"dbsc"` as long as their device is the same. Demotion happens when:

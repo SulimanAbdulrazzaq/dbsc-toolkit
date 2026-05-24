@@ -1,3 +1,6 @@
+import { readdir, readFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Pool, PoolClient } from "pg";
 import type {
   StorageAdapter,
@@ -155,16 +158,86 @@ export class PostgresStorage implements StorageAdapter {
   }
 
   async revokeAllForUser(userId: string): Promise<void> {
-    await this.pool.query("DELETE FROM dbsc_sessions WHERE user_id = $1", [userId]);
+    // Belt and suspenders: rely on ON DELETE CASCADE for bound_keys + the
+    // v2.9.5 cascade for challenges, but explicitly clear both anyway so
+    // a Postgres deployment that hasn't applied 003 yet still cleans up.
+    const client: PoolClient = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `DELETE FROM dbsc_challenges
+         WHERE session_id IN (SELECT id FROM dbsc_sessions WHERE user_id = $1)`,
+        [userId],
+      );
+      await client.query(
+        `DELETE FROM dbsc_bound_keys
+         WHERE session_id IN (SELECT id FROM dbsc_sessions WHERE user_id = $1)`,
+        [userId],
+      );
+      await client.query("DELETE FROM dbsc_sessions WHERE user_id = $1", [userId]);
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
+  /**
+   * Apply every bundled `migrations/*.sql` file in order, idempotently. The
+   * `dbsc_migrations` table records which scripts have already run so this
+   * can be called on every boot — already-applied scripts are skipped.
+   *
+   * Migration files ship in the published tarball under `migrations/`; this
+   * resolver walks up from `dist/storage/postgres/index.js` to find them.
+   * Callers who keep their own migration tooling can ignore this method
+   * and apply the SQL themselves.
+   */
   async runMigrations(): Promise<void> {
-    await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS dbsc_migrations (
-        id SERIAL PRIMARY KEY,
-        name TEXT UNIQUE NOT NULL,
-        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )
-    `);
+    const client: PoolClient = await this.pool.connect();
+    try {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS dbsc_migrations (
+          id SERIAL PRIMARY KEY,
+          name TEXT UNIQUE NOT NULL,
+          applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      const migrationsDir = resolveMigrationsDir();
+      const files = (await readdir(migrationsDir))
+        .filter((f) => f.endsWith(".sql"))
+        .sort();
+
+      const { rows: applied } = await client.query<{ name: string }>(
+        "SELECT name FROM dbsc_migrations",
+      );
+      const appliedSet = new Set(applied.map((r) => r.name));
+
+      for (const file of files) {
+        if (appliedSet.has(file)) continue;
+        const sql = await readFile(join(migrationsDir, file), "utf8");
+        await client.query("BEGIN");
+        try {
+          await client.query(sql);
+          await client.query("INSERT INTO dbsc_migrations (name) VALUES ($1)", [file]);
+          await client.query("COMMIT");
+        } catch (err) {
+          await client.query("ROLLBACK").catch(() => {});
+          throw new Error(`migration ${file} failed: ${(err as Error).message}`);
+        }
+      }
+    } finally {
+      client.release();
+    }
   }
+}
+
+function resolveMigrationsDir(): string {
+  // From dist/storage/postgres/index.js → walk up three levels to the
+  // package root, where the published tarball keeps `migrations/`. In the
+  // source tree the same walk lands in the repo root which also has it.
+  const here = dirname(fileURLToPath(import.meta.url));
+  return resolve(here, "..", "..", "..", "migrations");
 }
