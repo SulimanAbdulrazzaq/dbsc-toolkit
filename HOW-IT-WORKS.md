@@ -24,7 +24,7 @@ What DBSC does *not* protect against: malware running with kernel access on the 
 
 Three responsibilities. That's it.
 
-**(1) Speak the W3C wire protocol with Chromium-based browsers.** When you mount the middleware, two routes appear automatically: `POST /dbsc/registration` and `POST /dbsc/refresh`. You never call these — the browser calls them on its own. The library parses the JWS proofs the browser sends, verifies them against the stored public key, and issues fresh challenges. Chromium 145+ (Chrome, Edge, Brave, Opera, Arc, Vivaldi, etc.) drives the entire flow; your code just exposes the routes.
+**(1) Speak the W3C wire protocol with Chromium-based browsers.** When you mount the middleware, two routes appear automatically: `POST /dbsc/registration` and `POST /dbsc/refresh`. You never call these — the browser calls them on its own. The library parses the JWS proofs the browser sends, verifies them against the stored public key, and issues fresh challenges. Chromium 146+ (Chrome, Edge, Brave, Opera, Arc, Vivaldi, etc.) drives the entire flow; your code just exposes the routes.
 
 **(2) Verify hardware-signed proofs and store the binding.** Registration brings the browser's public key. The library validates the JWK, confirms the JWS is self-signed by the matching private key, and stores `sessionId → JWK`. On every refresh, the library re-verifies the signature against that stored key. If it fails, the binding is broken and the session degrades to `tier: "none"`.
 
@@ -175,7 +175,7 @@ The middleware does not interpose itself on your existing authentication. Your s
 
 | Tier | Achieved when | Key location | Defeats |
 |------|---------------|--------------|---------|
-| `dbsc` | Chromium 145+ on Windows or macOS Apple Silicon, hardware key store available, registration JWS verified | TPM (Windows) / Secure Enclave (macOS) | Remote cookie theft **and** infostealer malware reading the browser profile |
+| `dbsc` | Chromium 146+ on Windows or macOS Apple Silicon, hardware key store available, registration JWS verified | TPM (Windows) / Secure Enclave (macOS) | Remote cookie theft **and** infostealer malware reading the browser profile |
 | `bound` | Browser ran the `initBoundDbsc()` polyfill, server verified the ECDSA signature | IndexedDB (non-extractable `CryptoKey`) | Remote cookie theft (XSS, network, logs, paste-to-other-browser). Does NOT defeat infostealer malware reading the browser profile. |
 | `none` | Nothing succeeded, or binding has gone stale | n/a | Nothing the cookie itself doesn't defeat |
 
@@ -254,17 +254,17 @@ Default TTLs: bound cookie 10 min (browser refreshes it on its own), challenge 5
 
 | Browser | Tier achieved (out of the box, with `initBoundDbsc()` loaded) |
 |---------|-------------------------------|
-| Chrome 145+ on Windows / macOS | `dbsc` (native, TPM / Secure Enclave) |
-| Edge 145+ on Windows / macOS | `dbsc` |
-| Brave / Opera / Arc / Vivaldi (Chromium 145+ on Windows / macOS) | `dbsc` |
+| Chrome 146+ on Windows / macOS | `dbsc` (native, TPM / Secure Enclave) |
+| Edge 146+ on Windows / macOS | `dbsc` |
+| Brave / Opera / Arc / Vivaldi (Chromium 146+ on Windows / macOS) | `dbsc` |
 | Firefox (desktop) | `bound` (Web Crypto polyfill) |
 | Safari (desktop) | `bound` (Web Crypto polyfill) |
 | Mobile Chrome / Safari / Firefox (iOS, Android) | `bound` (Web Crypto polyfill) |
-| Older Chromium (<145), or Chromium on Linux | `bound` (Web Crypto polyfill) |
+| Older Chromium (<146), or Chromium on Linux | `bound` (Web Crypto polyfill) |
 
 If you load the client SDK (`initBoundDbsc()` from `dbsc-toolkit/client`) on the page, the right tier shows up automatically. The SDK probes for native DBSC for ~3 seconds after login; if no `__Host-dbsc-session` cookie has appeared, it generates a non-extractable ECDSA P-256 keypair, stores it in IndexedDB, and registers the public key with the server. From that point on it signs refresh challenges automatically.
 
-If you *don't* load the client SDK, you get the original behavior: `tier === "dbsc"` on Chromium 145+, `tier === "none"` everywhere else. The bound polyfill is opt-in via the script tag.
+If you *don't* load the client SDK, you get the original behavior: `tier === "dbsc"` on Chromium 146+, `tier === "none"` everywhere else. The bound polyfill is opt-in via the script tag.
 
 **How the two tiers relate under the hood.** They share storage (`Session`, `BoundKey`, `Challenge`), the same `__Host-dbsc-session` cookie, the same freshness check (`lastRefreshAt + boundCookieTtl + refreshGraceMs`). The `refreshGraceMs` term (default 30s, added in 2.5.0) absorbs the short in-flight gap between a cookie's freshness lapsing and the browser's next `/dbsc/refresh` landing — without it, a `/me`-style poll in that gap would briefly read `tier: "none"` and could false-alarm an auto-logout. Set `refreshGraceMs: 0` to demote the instant freshness lapses. The only protocol differences are: native DBSC posts JWS in headers and is driven by Chromium without app code; the bound polyfill posts JSON bodies and is driven by `initBoundDbsc()`. Both write to `session.tier` and both demote to `"none"` on a failed refresh. The middleware reads `session.tier` and applies the freshness check uniformly. See [docs/bound-polyfill.md](./docs/bound-polyfill.md) for the bound-tier wire format.
 

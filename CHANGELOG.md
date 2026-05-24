@@ -607,7 +607,7 @@ Docs-only release to refresh the README displayed on npmjs.com. The README was r
 
 ## [2.0.0] — 2026-05-20
 
-This is a breaking release. The four-tier system (`dbsc` / `webauthn` / `hmac` / `none`) is gone. In its place: two real tiers (`dbsc` / `bound`) plus `none`, with a Web Crypto polyfill that gives Firefox, Safari, and older Chromium the same protection against cookie theft that native DBSC delivers on Chromium 145+.
+This is a breaking release. The four-tier system (`dbsc` / `webauthn` / `hmac` / `none`) is gone. In its place: two real tiers (`dbsc` / `bound`) plus `none`, with a Web Crypto polyfill that gives Firefox, Safari, and older Chromium the same protection against cookie theft that native DBSC delivers on Chromium 146+.
 
 ### Why this changed
 
@@ -683,7 +683,7 @@ If your code mounted the demo's `/tier/webauthn/begin`, `/tier/webauthn/finish`,
 
 ### Changed
 
-- **Browser + platform support description.** The library has always worked on any Chromium 145+ browser (Chrome, Edge, Brave, Opera, Arc, Vivaldi) across Windows (TPM 2.0), macOS Apple Silicon (Secure Enclave on M1/M2/M3/M4+), and Android (Keystore). Previous docs and the package description over-narrowed this to "Chrome 147+" and "TPM." Swept all user-facing copy to reflect actual Chromium-wide / multi-platform support. Verification claims still cite Chrome 147 on Windows TPM because that's the configuration that was actually tested end-to-end.
+- **Browser + platform support description.** The library has always worked on any Chromium 146+ browser (Chrome, Edge, Brave, Opera, Arc, Vivaldi) across Windows (TPM 2.0), macOS Apple Silicon (Secure Enclave on M1/M2/M3/M4+), and Android (Keystore). Previous docs and the package description over-narrowed this to "Chrome 147+" and "TPM." Swept all user-facing copy to reflect actual Chromium-wide / multi-platform support. Verification claims still cite Chrome 147 on Windows TPM because that's the configuration that was actually tested end-to-end.
 - **README restructured** so first-time readers hit the pitch → pointer to HOW-IT-WORKS.md → live demo → install in that order. Previously the demo banner buried the conceptual explanation.
 - **Hono adapter docs** now consistently show the unified `c.get("dbsc")` shape. The 1.3.x split keys (`c.get("dbscTier")` etc.) are still functional in 1.x but flagged deprecated in the API reference, the README tier table, and the adapter guide. Removal target: 2.0.0.
 - **Express adapter doc (`docs/adapters.md`)** updated to reflect 1.4.0 removals. The example object no longer lists `requireBound()` (which was removed in 1.4.0) and now includes the `skipped` field. New code sample shows `bindSession()` use in a login route.

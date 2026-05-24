@@ -103,11 +103,11 @@ In your HTML, load the polyfill once so Firefox / Safari / older Chromium reach 
 </script>
 ```
 
-Without the script tag those browsers stay on `tier: "none"`. Native Chromium 145+ does not need the script — it negotiates the protocol on its own from the headers `dbsc()` sets.
+Without the script tag those browsers stay on `tier: "none"`. Native Chromium 146+ does not need the script — it negotiates the protocol on its own from the headers `dbsc()` sets.
 
 ### Common failure modes
 
-- **`tier` always reads `"none"` on Chromium 145+?** Running on plain HTTP (DBSC needs HTTPS), or `dbsc.install(app)` was never called. `install()` already sets `trust proxy` and parses cookies, so the old "middleware order" class of bug is gone.
+- **`tier` always reads `"none"` on Chromium 146+?** Running on plain HTTP (DBSC needs HTTPS), or `dbsc.install(app)` was never called. `install()` already sets `trust proxy` and parses cookies, so the old "middleware order" class of bug is gone.
 - **Chrome loops registration?** Storage was wiped — switch off `MemoryStorage` to Redis or Postgres before deploying anywhere that ever restarts.
 - **Tier flips back to `"none"` right after login?** The race between `/login` returning and the browser running `POST /dbsc/registration`. Poll `/me` for ~1 s after login or await the bound-SDK outcome promise. The demo wires both — see [examples/express/src/server.js](./examples/express/src/server.js).
 - **Firefox / Safari still on `"none"`?** Forgot the `<script type="module">` tag above. `install()` serves the SDK at `/dbsc-client` for you; you still load it on the page.
@@ -301,7 +301,7 @@ Neither tier is a substitute for HTTPS, input validation, strong passwords, or M
 
 ## Status
 
-Verified end-to-end on Chrome 147 / Windows / TPM 2.0. Native DBSC requires Chromium 145+ on Windows or macOS Apple Silicon. The bound polyfill works on every browser with Web Crypto + IndexedDB (Firefox, Safari, mobile browsers, older Chromium). No third-party security audit yet. Production-readiness table and adoption guidance: [HOW-IT-WORKS.md#production-readiness](./HOW-IT-WORKS.md#production-readiness).
+Verified end-to-end on Chrome 147 / Windows / TPM 2.0. Native DBSC requires Chromium 146+ on Windows or macOS Apple Silicon. The bound polyfill works on every browser with Web Crypto + IndexedDB (Firefox, Safari, mobile browsers, older Chromium). No third-party security audit yet. Production-readiness table and adoption guidance: [HOW-IT-WORKS.md#production-readiness](./HOW-IT-WORKS.md#production-readiness).
 
 ## License
 

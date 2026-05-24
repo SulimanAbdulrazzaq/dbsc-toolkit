@@ -1,6 +1,6 @@
 # The bound polyfill
 
-DBSC works only on Chromium 145+. Firefox, Safari, and older Chromium ignore the registration headers entirely, so sessions on those browsers would otherwise stay at `tier: "none"`. The bound polyfill closes that gap: it does the same cryptographic refresh-signing using Web Crypto + IndexedDB, with no biometric prompt and no user interaction.
+DBSC works only on Chromium 146+. Firefox, Safari, and older Chromium ignore the registration headers entirely, so sessions on those browsers would otherwise stay at `tier: "none"`. The bound polyfill closes that gap: it does the same cryptographic refresh-signing using Web Crypto + IndexedDB, with no biometric prompt and no user interaction.
 
 Sessions bound via the polyfill carry `tier: "bound"`. They share storage, cookies, and the freshness check with native DBSC. The only differences are where the private key lives and how the proofs travel.
 

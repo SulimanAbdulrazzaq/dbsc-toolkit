@@ -6,7 +6,7 @@
 //     -d '{"userId":"alice"}'
 //
 // The response will include Secure-Session-Registration + cookies. A real
-// Chromium 145+ browser will follow up with POST /dbsc/registration; for
+// Chromium 146+ browser will follow up with POST /dbsc/registration; for
 // non-Chromium browsers, load /dbsc-client/index.js from a frontend.
 
 import Fastify from "fastify";

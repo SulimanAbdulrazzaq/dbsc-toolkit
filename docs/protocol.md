@@ -1,10 +1,10 @@
 # Protocol reference
 
-The exact wire format Chromium 145+ (Chrome, Edge, Brave, Opera, Arc, etc.) speaks. Everything in this document is a verbatim record of what crosses the network — what headers, what JSON shapes, what status codes. Verified against Chrome 147 on Windows; other Chromium-based browsers inherit the same implementation.
+The exact wire format Chromium 146+ (Chrome, Edge, Brave, Opera, Arc, etc.) speaks. Everything in this document is a verbatim record of what crosses the network — what headers, what JSON shapes, what status codes. Verified against Chrome 147 on Windows; other Chromium-based browsers inherit the same implementation.
 
 ## Header names
 
-Chromium 145+ renamed every header during the W3C draft cycle. The old names work as fallback in some adapter code, but everything new uses the `Secure-Session-*` prefix. The session ID header on refresh requests is the odd one out: `Sec-Secure-Session-Id` — both prefixes.
+Chromium 146+ renamed every header during the W3C draft cycle. The old names work as fallback in some adapter code, but everything new uses the `Secure-Session-*` prefix. The session ID header on refresh requests is the odd one out: `Sec-Secure-Session-Id` — both prefixes.
 
 | Direction | Header | Purpose |
 |-----------|--------|---------|

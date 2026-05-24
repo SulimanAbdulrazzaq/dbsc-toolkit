@@ -38,7 +38,7 @@ Unit tests cover protocol logic in isolation. They do not exercise a real browse
 
 1. Deploy `examples/express/` somewhere with HTTPS. The live demo runs on Render with Upstash Redis — that combination is the canonical setup. Railway and Fly work too. **Do not use `MemoryStorage` for this** — Render free tier spins down, the storage gets wiped, and Chromium loops registration; you'll waste an afternoon chasing a ghost. Set `REDIS_URL` to an Upstash connection string.
 2. Click Login. Wait ~1 second for native DBSC, ~3 seconds for the bound polyfill.
-3. Click Check Session. On Chromium 145+ Windows/macOS, `tier` reads `"dbsc"`. On Firefox/Safari, `tier` reads `"bound"`.
+3. Click Check Session. On Chromium 146+ Windows/macOS, `tier` reads `"dbsc"`. On Firefox/Safari, `tier` reads `"bound"`.
 4. Inspect Network. The `POST /dbsc/registration` must carry `Secure-Session-Response` with a non-empty JWS.
 
 The same verification flow is what catches regressions in the 401-vs-403 saga, the response-body shape, the `Sec-Secure-Session-Id` header read, and similar wire-format pitfalls — none of which the unit tests can fully exercise.

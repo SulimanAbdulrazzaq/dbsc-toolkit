@@ -143,7 +143,7 @@ The four shipped adapters cover the major frameworks. For Koa, Hapi, raw `http`,
 
 There are two protocol surfaces. Most adapters wire both.
 
-**Native DBSC** (Chromium 145+ drives this):
+**Native DBSC** (Chromium 146+ drives this):
 
 1. Read `__Host-dbsc-session`, `__Host-dbsc-reg`, and `__Host-dbsc-challenge` cookies.
 2. Read `Sec-Secure-Session-Id` on refresh requests (the bound cookie is gone by then; Chrome sends the session id in this header instead).
@@ -351,7 +351,7 @@ Serve `node_modules/dbsc-toolkit/dist/client/` as a static directory at `/dbsc-c
 
 **Header write order.** Send both `Secure-Session-Registration` and `Sec-Session-Registration` on responses for compatibility with older Chrome builds.
 
-**Registration response body.** Chromium 145+ requires a JSON session config with `session_identifier`, `refresh_url`, `scope`, and `credentials`. A bare `204 No Content` causes the browser to silently terminate the session — registration appears to succeed but no refresh ever happens.
+**Registration response body.** Chromium 146+ requires a JSON session config with `session_identifier`, `refresh_url`, `scope`, and `credentials`. A bare `204 No Content` causes the browser to silently terminate the session — registration appears to succeed but no refresh ever happens.
 
 **Cookie attributes match.** The `attributes` string in the `credentials[].attributes` field must match what your `Set-Cookie` header actually sets (Domain, Path, Secure, HttpOnly, SameSite). Chrome compares them and terminates the session on mismatch. The `__Host-` prefix forces no-Domain, Path=/, Secure — make sure your attributes string omits Domain.
 

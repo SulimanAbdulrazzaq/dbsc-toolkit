@@ -50,7 +50,7 @@ async function seedRegistration(storage: MemoryStorage, sessionId: string) {
   return { challenge, token };
 }
 
-describe("registration response shape matches Chromium 145+ / W3C spec", () => {
+describe("registration response shape matches Chromium 146+ / W3C spec", () => {
   it("returns 200 with spec-compliant JSON body", async () => {
     const storage = new MemoryStorage();
     const sessionId = "sess-shape";

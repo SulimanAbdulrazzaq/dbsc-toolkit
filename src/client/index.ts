@@ -39,7 +39,7 @@ export interface InitBoundDbscOptions {
  * Structured outcome of an `initBoundDbsc()` call. Every exit path resolves to
  * one of these so consumers can render a deterministic status without polling.
  *
- * - `native-dbsc`: Chromium 145+ registered natively. TPM-backed. v2.7+ also
+ * - `native-dbsc`: Chromium 146+ registered natively. TPM-backed. v2.7+ also
  *   ensures a polyfill key exists so `requireProof()` works per-request; if
  *   that co-registration fails the outcome still resolves as `native-dbsc`
  *   but carries `skipReason: "polyfill-co-registration-failed"` — the session

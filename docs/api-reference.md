@@ -282,7 +282,7 @@ interface SkippedEntry { reason: SkippedReason; sessionId?: string }
 function parseSessionSkippedHeader(headers: Record<string, string | string[] | undefined>): SkippedEntry[];
 ```
 
-`buildChallengeHeader` takes an optional `sessionId` that becomes a `;id="..."` parameter on the header value. Chromium 145+ requires it on `Secure-Session-Challenge` responses or it silently drops the challenge.
+`buildChallengeHeader` takes an optional `sessionId` that becomes a `;id="..."` parameter on the header value. Chromium 146+ requires it on `Secure-Session-Challenge` responses or it silently drops the challenge.
 
 `parseSessionSkippedHeader` reads the browser's diagnostic header that explains why a request arrived without the bound credential. See [troubleshooting.md](./troubleshooting.md) for what each reason means.
 
@@ -606,7 +606,7 @@ On the no-sessionId JWT path, pass the request in `BindOptions` so the kit can m
 
 ## `dbsc-toolkit/client`
 
-Browser-side SDK for the bound polyfill. Load on every page that needs `tier: "bound"` on non-Chromium browsers; Chromium 145+ users see no effect (the SDK detects the native binding and steps back).
+Browser-side SDK for the bound polyfill. Load on every page that needs `tier: "bound"` on non-Chromium browsers; Chromium 146+ users see no effect (the SDK detects the native binding and steps back).
 
 ```ts
 interface InitBoundDbscOptions {
