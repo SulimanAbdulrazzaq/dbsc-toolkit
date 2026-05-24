@@ -5,33 +5,26 @@
 [![License](https://img.shields.io/npm/l/dbsc-toolkit.svg)](./LICENSE)
 [![Node](https://img.shields.io/node/v/dbsc-toolkit.svg)](https://nodejs.org)
 
-## The problem this solves
+> **Stop stolen session cookies from being replayed on another device.**
+>
+> `dbsc-toolkit` implements W3C [Device Bound Session Credentials](https://www.w3.org/TR/dbsc/) on the server, and ships a Web Crypto polyfill so the same protection works on browsers that don't speak native DBSC yet. Native DBSC on Chromium 146+ Windows; the polyfill on every other browser. **One server, every browser, no user prompts.**
+>
+> Works with **Express · Fastify · Hono · Next.js · Redis · PostgreSQL**.
 
-When a user logs in to your app, the server hands the browser a session cookie. From that point on, the cookie *is* the user. Every request carrying it gets treated as authenticated. That's the soft spot: if an attacker ever gets a copy of the cookie (via XSS, malware on the user's machine, a leaked log file, a misconfigured proxy), they paste it into their own browser and they *are* your user. No password prompt, no MFA, no second factor. Cookies are portable by design, and that portability is exactly what makes them stealable.
+## Why dbsc-toolkit
 
-## What this library does
+Native DBSC ships on Chrome 146+ for Windows users with a TPM. That's about a third of internet users. Every other DBSC implementation gives the rest of your users nothing — they remain on plain bearer cookies.
 
-Device Bound Session Credentials ([DBSC](https://w3c.github.io/webappsec-dbsc/)) is a new W3C standard that breaks that portability. When the user logs in, the browser generates a private cryptographic key on the user's device, inside the TPM chip on Windows, the Secure Enclave on Macs, or the Android Keystore on phones. The public half goes to your server. Every few minutes the browser proves it still has the private key by signing a fresh server-issued challenge. A copied cookie pasted into another machine has no matching key, so refresh fails and the session dies within minutes.
+This library is the **only** DBSC implementation that covers the other two-thirds via a Web Crypto polyfill. Same wire-level protection against cookie theft, same `requireProof()` guard server-side, key stored non-extractably in IndexedDB instead of a TPM. No biometric prompt, no user interaction, no checkbox.
 
-Chromium 145+ does this natively (Chrome, Edge, Brave, Opera, Arc, Vivaldi). For browsers that don't ship DBSC yet (Firefox, Safari, older Chromium), this library also includes a Web Crypto polyfill that delivers the same protection against remote cookie theft. It activates silently after login with no biometric prompt and no user interaction. The polyfill key lives in the browser's own keystore (IndexedDB) instead of a hardware chip, so it's a notch weaker against malware running on the user's own machine, but it still defeats every remote-theft scenario.
-
-The library exposes both paths as a single `tier` string your route handlers gate on:
-
-| Browser | `tier` value | Where the private key lives |
-|---------|--------------|------------------------------|
-| Chromium 145+ (Chrome, Edge, Brave, Opera, Arc, Vivaldi) | `"dbsc"` | TPM / Secure Enclave / Android Keystore |
-| Firefox, Safari, older Chromium | `"bound"` | Browser's own keystore (non-extractable IndexedDB key) |
-| No active binding (logged out, polyfill not loaded, etc.) | `"none"` | n/a |
-
-This package is the server-side implementation: middleware for Express / Fastify / Hono / Next.js, storage adapters for memory / Redis / Postgres, and a small browser SDK that drives the polyfill on non-Chromium browsers.
-
-**New here?** Read [HOW-IT-WORKS.md](./HOW-IT-WORKS.md) for the 15-minute walk-through.
-
-## Live demo
-
-Try it: <https://dbsc-toolkit.onrender.com/>
-
-Sign up, log in, click **Check session**. Chromium 145+ lands on `tier: "dbsc"` within a second; Firefox/Safari land on `tier: "bound"` within ~3 seconds. The demo uses a 60-second bound-cookie TTL so refresh fires fast. Open DevTools Network and watch. Source in [examples/express/](./examples/express/).
+- ✅ **Native W3C DBSC** on Chromium 146+ (TPM / Secure Enclave / Android Keystore)
+- ✅ **Web Crypto polyfill** on Firefox, Safari, older Chromium — same protection, IndexedDB key
+- ✅ **Express, Fastify, Hono, Next.js** adapters — all four ship in one package
+- ✅ **Memory, Redis, Postgres** storage — pick one, swap with one line
+- ✅ **`requireProof()`** per-request signature guard — works on every browser, body-hash defended against MITM
+- ✅ **Replay cache** (v2.8+) — rejects captured-proof replay outside the timestamp window
+- ✅ **Multi-subdomain** (v2.9+) — `cookieScope: "site"` for `app.example.com` + `api.example.com`
+- ✅ **Apache 2.0** — read every line before you ship it
 
 ## Install
 
@@ -39,11 +32,11 @@ Sign up, log in, click **Check session**. Chromium 145+ lands on `tier: "dbsc"` 
 npm install dbsc-toolkit
 ```
 
-Pick the framework adapter and storage you actually use (each is an optional peer dependency):
+Optional peer deps — install only the framework + storage you actually use:
 
 ```sh
-npm install express ioredis    # Express + Redis
-npm install express pg         # Express + Postgres
+npm install express ioredis      # Express + Redis
+npm install fastify @fastify/cookie pg   # Fastify + Postgres
 ```
 
 ## Quick start
@@ -90,6 +83,83 @@ Without the script tag those browsers stay on `tier: "none"`. Native Chromium 14
 - **Firefox / Safari still on `"none"`?** Forgot the `<script type="module">` tag above. `install()` serves the SDK at `/dbsc-client` for you; you still load it on the page.
 
 Full walk-through: [docs/getting-started.md](./docs/getting-started.md).
+
+## Live demo
+
+<https://dbsc-toolkit.onrender.com/>
+
+Sign up, log in, click **Check session**. Chromium 146+ lands on `tier: "dbsc"` within a second; Firefox/Safari land on `tier: "bound"` within ~3 seconds. The demo uses a 60-second bound-cookie TTL so refresh fires fast — open DevTools Network and watch. Source: [examples/express/](./examples/express/).
+
+## Comparison
+
+|                            | Plain cookies | JWT (bearer) | Native DBSC (Chrome 146+) | **dbsc-toolkit** |
+|----------------------------|:-------------:|:------------:|:-------------------------:|:----------------:|
+| Stops cookie / token replay from another device | ❌ | ❌ | ✅ | ✅ |
+| Works on Chrome / Edge / Brave | ✅ | ✅ | ✅ (Windows + TPM) | ✅ |
+| Works on Firefox            | ✅ | ✅ | ❌ | ✅ (polyfill) |
+| Works on Safari             | ✅ | ✅ | ❌ | ✅ (polyfill) |
+| Works on mobile / no-TPM    | ✅ | ✅ | ❌ | ✅ (polyfill) |
+| Per-request body-hash proof against MITM | ❌ | ❌ | ❌ (TPM key isn't reachable from JS) | ✅ |
+| Captured-proof replay defense | n/a | ❌ | n/a | ✅ (v2.8 replay cache) |
+| Multi-subdomain binding     | ✅ (loose)  | ✅ (loose) | ❌ (`__Host-` only) | ✅ (v2.9 `cookieScope: "site"`) |
+| Server runtime              | any           | any          | n/a (browser-side)        | Node.js ≥ 20 |
+
+The native-DBSC column refers to a server that uses the spec without a polyfill — what every other DBSC implementation currently offers. The polyfill key lives in IndexedDB (`extractable: false`) rather than a TPM, so it's a notch weaker against malware reading the browser profile, but defeats every remote-theft scenario.
+
+## "Why not just use JWT?"
+
+JWTs are still bearer tokens. Whoever has the bytes can replay them. Steal a JWT from a log line, an XSS, a leaked proxy header, a misconfigured intermediary — paste it into another machine and the server treats it as the legitimate user, exactly like a stolen cookie.
+
+DBSC pins the session to a cryptographic key that lives on the user's device (TPM, Secure Enclave, Android Keystore, or — under the polyfill — a non-extractable IndexedDB key). The token alone is no longer sufficient: the browser has to prove possession of the key on every refresh, and on every guarded request via `requireProof()`. The attacker's device has no key, so the replay fails and the session demotes within one cycle.
+
+DBSC complements your existing auth (passwords, MFA, JWT/session cookies) — it does not replace them. It closes the *replay-after-issue* gap that bearer tokens cannot.
+
+## How it works (the 30-second version)
+
+```
+  Browser                                              Server
+  ───────                                              ──────
+   │  POST /login (username, password)                    │
+   │ ───────────────────────────────────────────────────▶ │
+   │                                                      │ verify password
+   │  200 + Secure-Session-Registration header            │
+   │ ◀─────────────────────────────────────────────────── │
+   │                                                      │
+   │ generate keypair                                     │
+   │ (TPM / Secure Enclave / IndexedDB)                   │
+   │                                                      │
+   │  POST /dbsc/registration                             │
+   │  Secure-Session-Response: <JWS containing pub key>   │
+   │ ───────────────────────────────────────────────────▶ │
+   │                                                      │ verify self-signature
+   │                                                      │ store sessionId → pubkey
+   │  200 + __Host-dbsc-session cookie (Max-Age 10 min)   │
+   │ ◀─────────────────────────────────────────────────── │
+   │                                                      │
+   │  every ~10 min, browser hits /dbsc/refresh           │
+   │  signing a fresh server challenge with the key       │
+   │ ───────────────────────────────────────────────────▶ │
+   │                                                      │ verify signature
+   │                                                      │ reissue cookie
+   │  200 + fresh __Host-dbsc-session                     │
+   │ ◀─────────────────────────────────────────────────── │
+```
+
+A copy of `__Host-dbsc-session` pasted into another browser has no matching key — the next refresh fails, the session demotes to `tier: "none"`, and `requireProof()` 403s every guarded request immediately (not on the next refresh cycle). Full walk-through with the exact wire format: [HOW-IT-WORKS.md](./HOW-IT-WORKS.md).
+
+## Who is this for?
+
+**Use `dbsc-toolkit` if:**
+- You run a Node.js backend.
+- Your users authenticate with session cookies (or JWT bearer tokens).
+- Cookie / token theft is in your threat model — XSS, infostealer malware, leaked logs, compromised proxies.
+- You want one library that covers Chrome **and** Firefox / Safari today, not "eventually."
+
+**Not the right fit if:**
+- You don't issue any persistent client credential (every request re-authenticates from scratch).
+- You can't deploy HTTPS — DBSC cookies require `Secure`, and the spec rejects insecure origins.
+- Your backend is Python / Go / Rust / Java / .NET — no port of this library exists yet; you'd implement against the [W3C spec](https://www.w3.org/TR/dbsc/) directly.
+- You need DBSC on iOS / mobile Chrome / ChromeOS *with native key storage* — those platforms don't ship native DBSC. (The polyfill still works there; the key just lives in IndexedDB instead of secure hardware.)
 
 ## Adding to an existing app
 

@@ -87,10 +87,14 @@ async function readBodyBytes(body: BodyInit): Promise<Uint8Array> {
 }
 
 async function sha256B64Url(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
-  );
+  // Pass the Uint8Array directly. Earlier code sliced .buffer to escape any
+  // surrounding pool buffer; Node 22's stricter SubtleCrypto rejects that
+  // shape because the slice returns a generic ArrayBufferLike. A fresh
+  // Uint8Array copy gives the runtime a clean BufferSource without aliasing
+  // the input.
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const digest = await crypto.subtle.digest("SHA-256", copy);
   return base64url(new Uint8Array(digest));
 }
 

@@ -2,6 +2,27 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.9.1] — 2026-05-24
+
+### Fixed
+
+- **`wrapFetch` body-hash on Node 22.** `sha256B64Url` was passing a sliced
+  `ArrayBuffer` view to `crypto.subtle.digest`. Node 22's undici-derived
+  Web Crypto rejects that as `ERR_INVALID_ARG_TYPE`; Node 24 happened to
+  accept it. The CI matrix failure on Node 22 (two tests in
+  `src/client/index.test.ts`) is now fixed by passing a fresh `Uint8Array`
+  copy — a clean `BufferSource` every runtime accepts.
+
+### Changed
+
+- **README rewritten for evaluators.** Lead with TL;DR + "Why dbsc-toolkit"
+  + install + quick start before the long-form prose. New sections:
+  comparison table (plain cookies vs JWT vs native DBSC vs this), a "why
+  not just use JWT?" answer, a 30-second ASCII protocol diagram, and a
+  "who is this for?" / "not the right fit if" split. The substance is
+  unchanged; the order matches how a developer actually evaluates a
+  security library in 30 seconds.
+
 ## [2.9.0] — 2026-05-24
 
 Multi-subdomain binding. The last item on `ROADMAP.md` ships.
