@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for the interest. The project is small and the bar for contributions is concrete: it should make the toolkit work for one more real situation.
+Thanks for the interest. The project is small and the bar for contributions is concrete: a change should make the toolkit work for one more real situation, or it should close a real gap.
 
 ## Setup
 
@@ -12,25 +12,36 @@ npm run build
 npm test
 ```
 
-Requirements: Node.js 20 or 22.
+Requirements: Node.js 20, 22, or 24. The CI matrix runs Ubuntu / Windows / macOS × Node 20 / 22, so a fix that only works on one OS will be caught.
 
-## Working on the protocol
+## Where things live
 
-Most changes start in `src/core`. The core has no framework dependency — it operates on plain request/response shapes. Add or change behaviour there first, then surface it through the adapters.
+[HOW-IT-WORKS.md](./HOW-IT-WORKS.md) is the conceptual entry point. [docs/api-reference.md](./docs/api-reference.md) lists every public export. Most changes start in `src/core/` — the framework-free protocol layer that every adapter wraps.
 
-When you change a header name, cookie name, or anything on the wire, update:
-1. `src/core/protocol/headers.ts`
-2. Every adapter in `src/express`, `src/fastify`, `src/hono`, `src/nextjs`
-3. The example in `examples/express/src/server.js`
-4. README and CHANGELOG
+The shape is consistent: `src/core/protocol/` is native DBSC, `src/core/bound/` is the Web Crypto polyfill, `src/core/crypto/` is JWK/JWS handling, `src/storage/` is the three storage adapters, and `src/express|fastify|hono|nextjs/` are the framework wrappers. The client SDK is `src/client/`. Cookie scope helpers are `src/core/cookies/options.ts` (v2.9+ — single source of truth for the `__Host-` vs `__Secure-` prefix swap).
 
-## Verifying against a Chromium browser
+## What to update when
 
-Unit tests cover the protocol logic in isolation. They do not exercise a real browser. Before merging anything that touches the wire format, run the demo against any Chromium 145+ browser (Chrome, Edge, Brave, Opera):
+| You changed... | Also update |
+|---|---|
+| A header name or value | `src/core/protocol/headers.ts` + every adapter (`src/{express,fastify,hono,nextjs}/index.ts`) + `examples/express/src/server.js` + `docs/protocol.md` |
+| A cookie name or scope | `src/core/cookies/options.ts` + every adapter + `docs/api-reference.md` + the cookie-scope section of `docs/integration-recipes.md` |
+| A public type | `src/core/types.ts` + `docs/api-reference.md` |
+| A storage method signature | `src/core/types.ts` (the interface) + all three adapters in `src/storage/` + any custom-adapter guidance in `docs/adapters.md` |
+| Anything user-visible | `README.md` + `CHANGELOG.md` (new `## [X.Y.Z]` entry — see release flow below) |
 
-1. Deploy `examples/express` somewhere with HTTPS (Railway works).
-2. Click Login, wait a few seconds, click Check Session. `tier` must read `"dbsc"`.
-3. Inspect Network. The `/dbsc/registration` POST must carry `Secure-Session-Response` header with a non-empty JWS.
+The principle: docs aren't a separate deliverable. A PR that adds an export without touching `docs/api-reference.md` is incomplete.
+
+## Verifying against a real browser
+
+Unit tests cover protocol logic in isolation. They do not exercise a real browser, and DBSC's wire-format details have caught bugs that no unit test sees. Before merging anything that touches the wire format:
+
+1. Deploy `examples/express/` somewhere with HTTPS. The live demo runs on Render with Upstash Redis — that combination is the canonical setup. Railway and Fly work too. **Do not use `MemoryStorage` for this** — Render free tier spins down, the storage gets wiped, and Chromium loops registration; you'll waste an afternoon chasing a ghost. Set `REDIS_URL` to an Upstash connection string.
+2. Click Login. Wait ~1 second for native DBSC, ~3 seconds for the bound polyfill.
+3. Click Check Session. On Chromium 145+ Windows/macOS, `tier` reads `"dbsc"`. On Firefox/Safari, `tier` reads `"bound"`.
+4. Inspect Network. The `POST /dbsc/registration` must carry `Secure-Session-Response` with a non-empty JWS.
+
+The same verification flow is what catches regressions in the 401-vs-403 saga, the response-body shape, the `Sec-Secure-Session-Id` header read, and similar wire-format pitfalls — none of which the unit tests can fully exercise.
 
 ## Tests
 
@@ -38,24 +49,37 @@ Unit tests cover the protocol logic in isolation. They do not exercise a real br
 npm test
 ```
 
-Add a unit test for any new behaviour in `core`. Adapters are thin enough that a real-browser smoke test is more useful than a mocked one — but if you can fake a known JWS and add an integration test for an adapter, that is welcome.
+Vitest, 204 tests as of v2.9.4 (count grows). New behavior in `core` needs a unit test. Each adapter has a `bound-routes.test.ts` covering its state / registration / refresh / requireProof paths against a real server instance — if you add a new route to one adapter, add the test to the matching `bound-routes.test.ts` and mirror the route into the other three adapters too. The four adapters have stayed feature-parity since v2.0; do not break that.
+
+`examples/fastify/` and `examples/hono/` are minimal `curl`-testable demos (no UI). If you add a new public option to `createDbsc`, exercise it in at least one example.
 
 ## Pull requests
 
-- One change per PR.
-- Update CHANGELOG.md under a new entry.
+- One change per PR. Audit fixes that span multiple files for the same bug are one change.
+- Add a CHANGELOG entry under a new `## [X.Y.Z]` header (or under the active draft section if you're rolling up several fixes for one release). The text becomes the GitHub Release body verbatim — write it for end users.
 - Update the README only if user-visible API or setup changed.
-- If your change adds a new wire format detail, link the spec section.
+- If your change touches a wire format detail, link the W3C DBSC spec section.
+
+## Release flow
+
+The project ships via tag-driven release. Only the maintainer cuts releases, but it's useful to know how it works:
+
+1. Bump `package.json` to `X.Y.Z` and the three `examples/*/package.json` files to match.
+2. Add `## [X.Y.Z] — YYYY-MM-DD` to `CHANGELOG.md` — that text becomes the GitHub Release body.
+3. Commit "Release X.Y.Z". Push `main`. Tag `vX.Y.Z`. Push the tag.
+4. `.github/workflows/release.yml` runs `npm ci` → `npm run build` → `npm publish` → creates the GitHub Release.
+
+Semver rules: patch for a bug fix or doc-only change; minor for a new feature or adapter that's backwards-compatible; major for any change that breaks a documented API, removes an export, or moves the wire format. Never reuse a published version — npm permanently locks unpublished versions.
 
 ## Reporting bugs
 
 Open an issue with:
-- Chrome version
+- Browser name and version (e.g., Chrome 147 on Windows 11 TPM 2.0)
 - OS
 - The exact response headers your server sends on the registration trigger
-- The exact request Chrome sends back (or "Chrome made no request")
+- The exact request the browser sends back (or "browser made no request")
 
-Without those four, a DBSC bug is almost impossible to reproduce.
+Without those four, a DBSC bug is almost impossible to reproduce. The Network tab → Save All as HAR is the fastest way to attach this.
 
 ## Security
 
