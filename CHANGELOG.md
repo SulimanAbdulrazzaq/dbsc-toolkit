@@ -2,6 +2,19 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.9.6] — 2026-05-24
+
+### Changed
+
+- **Native DBSC support floor bumped from Chromium 145 to Chromium 146** across
+  every doc surface, JSDoc, and code comment. Chromium 145 shipped DBSC under
+  a flag; Chromium 146 was the first stable release with the protocol enabled
+  by default, which matches what every "is this supported here?" reader
+  actually wants to know. The runtime check is unchanged — the library has
+  never gated on a specific Chromium version, it just speaks the protocol the
+  browser speaks. So this is a pure correctness pass on documentation;
+  existing deployments need no action.
+
 ## [2.9.5] — 2026-05-24
 
 A second-pass audit release. The v2.9.4 audit cycle covered the core crypto
