@@ -54,6 +54,11 @@ export function detectAlgorithm(jwk: JsonWebKey): "ES256" | "RS256" {
 
 /** Bit length of the bytes a base64url string decodes to. JWK `n` is unpadded. */
 function base64urlBits(b64: string): number {
-  const len = b64.replace(/=+$/, "").length;
-  return Math.floor((len * 3) / 4) * 8;
+  // Strip trailing '=' padding without a regex — CodeQL flags `/=+$/` as a
+  // polynomial regex (quadratic on a pathological all-`=` input). The input
+  // here is an RSA modulus capped at a few hundred chars, so the regex was
+  // safe in practice, but a one-line linear scan is both safer and clearer.
+  let end = b64.length;
+  while (end > 0 && b64.charCodeAt(end - 1) === 0x3d /* '=' */) end--;
+  return Math.floor((end * 3) / 4) * 8;
 }

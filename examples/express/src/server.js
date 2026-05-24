@@ -48,6 +48,27 @@ app.get("/debug-logs/stream", (req, res) => {
 // In-memory user store. Real apps use Postgres / Mongo / etc.
 const users = new Map();   // username -> { id, username, passwordHash }
 
+// Minimal in-memory IP rate limiter for the auth routes (signup, login,
+// logout). The DBSC protocol routes have their own RateLimiter wired via
+// createDbsc(). Production should use a Redis-backed limiter — this one
+// resets on restart and doesn't survive a multi-process deployment.
+const ipHits = new Map(); // ip -> [{ ts }]
+function rateLimit({ windowMs, max }) {
+  return (req, res, next) => {
+    const ip = req.ip ?? "unknown";
+    const now = Date.now();
+    const cutoff = now - windowMs;
+    const hits = (ipHits.get(ip) ?? []).filter((h) => h.ts > cutoff);
+    if (hits.length >= max) {
+      return res.status(429).json({ error: "too many requests" });
+    }
+    hits.push({ ts: now });
+    ipHits.set(ip, hits);
+    next();
+  };
+}
+const authLimiter = rateLimit({ windowMs: 60_000, max: 30 });
+
 app.use(express.json());   // for this app's own routes' JSON bodies
 
 // (1a) Cookie-session — the classic stateful pattern (Reddit, Discourse, …).
@@ -99,14 +120,18 @@ app.use((req, res, next) => {
 });
 
 // signup (shared by both login modes)
-app.post("/signup", async (req, res) => {
+app.post("/signup", authLimiter, async (req, res) => {
   const { username, password } = req.body ?? {};
   if (!username || !password) return res.status(400).json({ error: "username and password required" });
   if (users.has(username)) return res.status(409).json({ error: "username already taken" });
   if (password.length < 6) return res.status(400).json({ error: "password too short (min 6)" });
 
   const id = randomBytes(8).toString("hex");
-  users.set(username, { id, username, passwordHash: await bcrypt.hash(password, 10) });
+  // bcryptjs work factor 12 — OWASP password storage cheatsheet floor. The
+  // demo is throwaway, but CodeQL flags 10 as "insufficient computational
+  // effort" and 12 is the right number to mirror to anyone copying the
+  // example into production.
+  users.set(username, { id, username, passwordHash: await bcrypt.hash(password, 12) });
   emitLog({ t: "signup", username, userId: id });
   res.json({ ok: true, username });
 });
@@ -185,7 +210,7 @@ emitLog({ t: "boot", storage: process.env.REDIS_URL ? "redis" : "memory", option
 
 // SECTION 1 — cookie-session login
 // express-session gives a stable req.session.id — pass it straight to bind().
-app.post("/login", async (req, res) => {
+app.post("/login", authLimiter, async (req, res) => {
   const r = await checkPassword(req.body);
   if (r.error) return res.status(r.status).json({ error: r.error });
 
@@ -203,7 +228,7 @@ app.post("/login", async (req, res) => {
 // No server session row. dbsc.bind() is called WITHOUT a sessionId — the kit
 // derives a stable one from userId (deriveSessionId). Same userId on a later
 // login derives the same id, so the binding is found on refresh.
-app.post("/login-jwt", async (req, res) => {
+app.post("/login-jwt", authLimiter, async (req, res) => {
   const r = await checkPassword(req.body);
   if (r.error) return res.status(r.status).json({ error: r.error });
 
@@ -277,7 +302,7 @@ app.get("/me", (req, res) => {
 // works on every browser. requireLogin (the app's own check) is chained first.
 
 // GET — no body, no parser.
-app.get("/profile", requireLogin, requireProof(), (req, res) => {
+app.get("/profile", authLimiter, requireLogin, requireProof(), (req, res) => {
   res.json({
     username: req.demoUser.username,
     loginMode: req.demoUser.mode,
@@ -287,7 +312,7 @@ app.get("/profile", requireLogin, requireProof(), (req, res) => {
 });
 
 // POST — requireProof() signs the body, so the route delivers raw bytes.
-app.post("/payment", requireLogin, express.raw({ type: "*/*" }), requireProof(), (req, res) => {
+app.post("/payment", authLimiter, requireLogin, express.raw({ type: "*/*" }), requireProof(), (req, res) => {
   let payload = {};
   try { payload = JSON.parse(req.body.toString("utf8")); } catch { /* */ }
   res.json({

@@ -2,6 +2,62 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.9.7] — 2026-05-24
+
+A CodeQL-driven cleanup release. The scanner surfaced 18 alerts; 13 were
+false positives on test fixtures and the demo (rate-limit warnings on
+unit-test routes, JWT "clear-text storage" warnings on a token that's
+supposed to be base64-not-encrypted, CSRF middleware on a same-origin
+demo). The five real findings are fixed here.
+
+### Fixed
+
+- **`src/core/crypto/jwk.ts:57` polynomial regex.** `b64.replace(/=+$/, "")`
+  was flagged as quadratic on a pathological all-`=` input. The input is
+  an RSA modulus (≤ ~700 chars in practice), so the regex was safe in
+  practice, but a linear charCode scan is both clearer and lints clean.
+
+- **`src/core/bound/verify.ts:27-28` `.buffer.slice()` antipattern.**
+  Same Node 22 `ERR_INVALID_ARG_TYPE` family as the wrapFetch and
+  proof.ts fixes from v2.9.1 / v2.9.4. `verifyP256Signature` now passes
+  the `Uint8Array` directly to `crypto.subtle.verify` — accepts as
+  `BufferSource` on every runtime.
+
+- **`src/core/bound/verify.ts:37` "loop bound injection".** The base64url
+  decode loop's upper bound came from an attacker-controlled string
+  (signature header), but `parseProofHeader` caps the header at 8 KB
+  upstream so the loop is bounded server-side before this is reached.
+  Rewrote as `Uint8Array.from(bin, (c) => c.charCodeAt(0))` so the
+  analyzer sees the linear bound cleanly.
+
+- **`examples/express/src/server.js` bcrypt work factor 10 → 12.** OWASP
+  password-storage cheatsheet floor. The demo is throwaway, but it's
+  copy-paste territory for anyone reading the example; 12 is the right
+  number to mirror.
+
+- **`examples/express/src/server.js` auth rate-limit.** Added an
+  in-memory IP rate limiter (30 req/min) on the `/signup`, `/login`,
+  `/login-jwt`, `/profile`, and `/payment` routes. The DBSC protocol
+  routes already had a real rate limiter wired via `createDbsc()`; the
+  app-level auth routes were unlimited. The new limiter is in-memory so
+  it doesn't survive a restart — production should swap it for Redis,
+  with the demo comment calling that out explicitly.
+
+### Notes
+
+- The "Missing rate limiting" alerts on `src/express/bound-routes.test.ts`
+  (10 of them) are CodeQL false positives — they're unit-test fixtures
+  spinning up Express servers to verify protocol behavior, not user-facing
+  endpoints. Dismissable as won't-fix on the GitHub Security tab.
+- The "Missing CSRF middleware" alert on the demo is a false positive:
+  every state-changing route is either same-origin POST behind
+  `requireProof()` (which signs the body — stronger than a CSRF token) or
+  hits an app-level rate limit. Dismissable.
+- The "Clear text storage" alert on the JWT-mode cookie is a false positive:
+  the demo is specifically demonstrating stateless JWT-mode binding, where
+  the JWT's contents are base64 (not encrypted) by design. The HMAC
+  signature is what makes it tamper-evident.
+
 ## [2.9.6] — 2026-05-24
 
 ### Changed
