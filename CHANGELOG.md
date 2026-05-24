@@ -2,6 +2,71 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.9.4] — 2026-05-24
+
+A four-bug correctness release surfaced by a full codebase audit. None
+break the fundamental session-binding guarantee, but Bug 2 silently
+disables body-hash verification on Node 22 for `requireProof()` POST
+routes — which is the kind of bug that erodes a security library's
+honesty if left unfixed.
+
+### Fixed
+
+- **Native registration + refresh now verify `challenge.sessionId === req.sessionId`.**
+  `src/core/protocol/registration.ts` and `refresh.ts` were the only two
+  spots in the codebase that did not bind a consumed challenge to the
+  session it was issued for. The bound-polyfill equivalents
+  (`src/core/bound/registration.ts:47`, `src/core/bound/refresh.ts:45`)
+  always did. The JTI mismatch check (`claims.jti !== req.expectedJti`)
+  was still there, so cross-session replay required the attacker to
+  control both JTIs simultaneously — but the asymmetry was a real
+  inconsistency. Both files now throw `JTI_MISMATCH` with
+  `"challenge does not belong to this session"` if the check fails.
+
+- **`sha256Base64Url` in `src/core/bound/proof.ts` no longer breaks on Node 22.**
+  This is the same `bytes.buffer.slice(byteOffset, byteOffset + byteLength)`
+  pattern that broke `wrapFetch` and was fixed for v2.9.1 — except v2.9.1
+  only fixed the client-side copy. The server-side body-hash path (used
+  by `requireProof({ signBody: true })`, which is the default in v2.8+)
+  still had the broken pattern. On Node 22, `express.raw()` / Fastify's
+  buffer parser hand the middleware a `Uint8Array` view into a larger
+  Buffer; `.buffer.slice()` on it produces a type Node 22's undici-based
+  SubtleCrypto rejects as `ERR_INVALID_ARG_TYPE`. Net effect: every POST
+  route guarded by `requireProof()` would silently fail body-hash
+  verification on Node 22 deployments. Fixed by passing a fresh
+  `Uint8Array` copy — a clean `BufferSource` on every Node version.
+
+- **`signMessage` in `src/client/index.ts` simplified.** Same
+  `.buffer.slice()` antipattern. `TextEncoder.encode()` already produces
+  a self-contained `Uint8Array`, so the slice was unnecessary. Now passes
+  the `Uint8Array` directly to `crypto.subtle.sign` — SubtleCrypto accepts
+  it as a `BufferSource` on every runtime, no juggling.
+
+- **`X-Server-Time` now set on `/dbsc-bound/challenge` in every adapter.**
+  Express, Fastify, Hono, and Next.js all emit `X-Server-Time` on the
+  state / registration / refresh routes — used by the client SDK's
+  `clockSync.recordServerTime()` to correct device clock drift. The
+  challenge route was the one bound endpoint missing it. First contact
+  for a client with a skewed clock now starts the sync immediately
+  instead of after the next round-trip. Also added to Next.js's
+  registration route (the only adapter that was also missing it there).
+
+### Verified, not changed
+
+The audit also surfaced several claims that turned out to be false on
+direct code reading — documented here so they don't get re-raised:
+
+- The `Set-Cookie` SameSite casing and `cookieAttributesString()`
+  output match byte-for-byte across all four adapters. No mismatch.
+- The pre-check + `consumeChallenge()` pattern is intentional — the
+  pre-check is a fast-fail before the expensive signature step; the
+  atomic `consumeChallenge()` (Redis Lua, Postgres row lock) is the
+  real gate. Not a race condition.
+- `/dbsc-bound/refresh` returning 401 on error is correct. The 403-only
+  rule applies to the native `/dbsc/refresh` (Chrome restarts only on
+  403). The bound refresh is driven by the JS SDK and reads the status
+  directly.
+
 ## [2.9.3] — 2026-05-24
 
 ### Changed

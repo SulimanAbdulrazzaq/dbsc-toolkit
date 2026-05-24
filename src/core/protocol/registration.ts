@@ -39,6 +39,12 @@ export async function handleRegistration(
   if (claims.jti !== req.expectedJti) {
     throw new DbscVerificationError(ErrorCodes.JTI_MISMATCH, "jti does not match challenge");
   }
+  if (challenge.sessionId !== req.sessionId) {
+    throw new DbscVerificationError(
+      ErrorCodes.JTI_MISMATCH,
+      "challenge does not belong to this session",
+    );
+  }
 
   const existingKey = await storage.getBoundKey(req.sessionId, "native");
   if (existingKey) {

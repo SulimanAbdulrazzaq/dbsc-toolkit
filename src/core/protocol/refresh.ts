@@ -37,6 +37,12 @@ export async function handleRefresh(
   if (Date.now() > challenge.expiresAt) {
     throw new DbscVerificationError(ErrorCodes.CHALLENGE_EXPIRED, "challenge expired");
   }
+  if (challenge.sessionId !== req.sessionId) {
+    throw new DbscVerificationError(
+      ErrorCodes.JTI_MISMATCH,
+      "challenge does not belong to this session",
+    );
+  }
 
   const token = req.secSessionResponseHeader.trim();
   try {

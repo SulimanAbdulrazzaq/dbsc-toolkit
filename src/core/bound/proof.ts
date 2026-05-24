@@ -124,10 +124,12 @@ export function parseProofHeader(s: string): { ts: number; sig: string; bh?: str
 }
 
 async function sha256Base64Url(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
-  );
+  // Fresh Uint8Array copy — Node 22's undici SubtleCrypto rejects sliced
+  // ArrayBuffer views as ERR_INVALID_ARG_TYPE. A self-contained Uint8Array
+  // is a clean BufferSource on every runtime (Node 20/22/24, browsers).
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const digest = await crypto.subtle.digest("SHA-256", copy);
   return base64UrlBytes(new Uint8Array(digest));
 }
 

@@ -405,29 +405,47 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
     }
 
     if (req.method === "GET" && url === boundChallengePath) {
+      const xServerTime = String(Date.now());
       const sid = readBoundSessionId();
-      if (!sid) return NextResponse.json({ error: "no session" }, { status: 403 });
+      if (!sid) {
+        const r = NextResponse.json({ error: "no session" }, { status: 403 });
+        r.headers.set("X-Server-Time", xServerTime);
+        return r;
+      }
       const session = await storage.getSession(sid);
-      if (!session) return NextResponse.json({ error: "no session" }, { status: 403 });
+      if (!session) {
+        const r = NextResponse.json({ error: "no session" }, { status: 403 });
+        r.headers.set("X-Server-Time", xServerTime);
+        return r;
+      }
       const challenge = await issueChallenge(sid, storage);
-      return NextResponse.json({ challenge: challenge.jti });
+      const r = NextResponse.json({ challenge: challenge.jti });
+      r.headers.set("X-Server-Time", xServerTime);
+      return r;
     }
 
     if (req.method === "POST" && url === boundRegistrationPath) {
+      const xServerTime = String(Date.now());
+      const withTime = (r: NextResponse): NextResponse => {
+        r.headers.set("X-Server-Time", xServerTime);
+        return r;
+      };
       const allowed = await rateLimiter.checkRegistration(ip);
-      if (!allowed) return NextResponse.json({ error: "rate limited" }, { status: 429 });
+      if (!allowed) return withTime(NextResponse.json({ error: "rate limited" }, { status: 429 }));
 
       const sid = readBoundSessionId();
-      if (!sid) return NextResponse.json({ error: "missing session cookie" }, { status: 400 });
+      if (!sid) return withTime(NextResponse.json({ error: "missing session cookie" }, { status: 400 }));
 
       let body: { publicKey?: JsonWebKey; signature?: string; challenge?: string };
       try {
         body = (await req.json()) ?? {};
       } catch {
-        return NextResponse.json({ error: "body must be JSON" }, { status: 400 });
+        return withTime(NextResponse.json({ error: "body must be JSON" }, { status: 400 }));
       }
       if (!body.publicKey || !body.signature || !body.challenge) {
-        return NextResponse.json({ error: "publicKey, signature, and challenge are required" }, { status: 400 });
+        return withTime(
+          NextResponse.json({ error: "publicKey, signature, and challenge are required" }, { status: 400 }),
+        );
       }
 
       try {
@@ -449,7 +467,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
           tier: "bound",
         });
         res.cookies.set(COOKIES.bound, sid, { ...cookieBase(scope), maxAge: boundCookieTtl / 1000 });
-        return res;
+        return withTime(res);
       } catch (err) {
         await rateLimiter.recordFailure(ip, sid);
         if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {
@@ -461,7 +479,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
             reason: err.code,
             ip,
           });
-          return NextResponse.json({ error: err.message }, { status: 400 });
+          return withTime(NextResponse.json({ error: err.message }, { status: 400 }));
         }
         throw err;
       }

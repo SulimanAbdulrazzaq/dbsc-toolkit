@@ -354,12 +354,11 @@ function scheduleRefresh(cfg: ResolvedOptions, intervalMs: number): void {
 }
 
 async function signMessage(privateKey: CryptoKey, message: string): Promise<string> {
+  // TextEncoder.encode() produces a self-contained Uint8Array. Pass it
+  // directly — SubtleCrypto accepts Uint8Array as a BufferSource on every
+  // runtime, no slice juggling needed.
   const data = new TextEncoder().encode(message);
-  const sig = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    privateKey,
-    data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer,
-  );
+  const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, privateKey, data);
   return base64urlEncode(new Uint8Array(sig));
 }
 

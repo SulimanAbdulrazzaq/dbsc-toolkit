@@ -384,6 +384,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
     }
 
     if (c.req.method === "GET" && url.pathname === boundChallengePath) {
+      c.header("X-Server-Time", String(Date.now()));
       const sid = readBoundSessionId();
       if (!sid) return c.json({ error: "no session" }, 403);
       const session = await storage.getSession(sid);

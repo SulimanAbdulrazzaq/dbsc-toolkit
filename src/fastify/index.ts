@@ -429,6 +429,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
   });
 
   fastify.get(boundChallengePath, async (req: FastifyRequest, reply: FastifyReply) => {
+    reply.header("X-Server-Time", String(Date.now()));
     const sessionId = readBoundSessionId(req);
     if (!sessionId) return reply.status(403).send({ error: "no session" });
     const session = await storage.getSession(sessionId);

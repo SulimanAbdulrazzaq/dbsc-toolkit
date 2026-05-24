@@ -452,6 +452,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
   }
 
   async function handleBoundChallengeRoute(req: Request, res: Response): Promise<void> {
+    res.setHeader("X-Server-Time", String(Date.now()));
     const sessionId = readBoundSessionId(req);
     if (!sessionId) {
       res.status(403).json({ error: "no session" });
