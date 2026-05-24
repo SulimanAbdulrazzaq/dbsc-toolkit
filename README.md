@@ -11,11 +11,27 @@
 >
 > Works with **Express · Fastify · Hono · Next.js · Redis · PostgreSQL**.
 
+## Contents
+
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Live demo](#live-demo)
+- [Why dbsc-toolkit](#why-dbsc-toolkit)
+- [Comparison](#comparison)
+- [Why not JWT?](#why-not-just-use-jwt)
+- [How it works](#how-it-works-the-30-second-version)
+- [Who is this for?](#who-is-this-for)
+- [Adding to an existing app](#adding-to-an-existing-app)
+- [Protect your routes](#protect-your-routes)
+- [Production checklist](#production-checklist)
+- [API](#subpath-imports)
+- [Going deeper](#going-deeper)
+
 ## Why dbsc-toolkit
 
 Native DBSC ships on Chrome 146+ for Windows users with a TPM. That's about a third of internet users. Every other DBSC implementation gives the rest of your users nothing — they remain on plain bearer cookies.
 
-This library is the **only** DBSC implementation that covers the other two-thirds via a Web Crypto polyfill. Same wire-level protection against cookie theft, same `requireProof()` guard server-side, key stored non-extractably in IndexedDB instead of a TPM. No biometric prompt, no user interaction, no checkbox.
+This library is among the first DBSC implementations to provide a Web Crypto fallback for browsers that don't support native DBSC. Same wire-level protection against cookie theft, same `requireProof()` guard server-side, key stored non-extractably in IndexedDB instead of a TPM. No biometric prompt, no user interaction, no checkbox.
 
 - ✅ **Native W3C DBSC** on Chromium 146+ (TPM / Secure Enclave / Android Keystore)
 - ✅ **Web Crypto polyfill** on Firefox, Safari, older Chromium — same protection, IndexedDB key
@@ -117,35 +133,12 @@ DBSC complements your existing auth (passwords, MFA, JWT/session cookies) — it
 ## How it works (the 30-second version)
 
 ```
-  Browser                                              Server
-  ───────                                              ──────
-   │  POST /login (username, password)                    │
-   │ ───────────────────────────────────────────────────▶ │
-   │                                                      │ verify password
-   │  200 + Secure-Session-Registration header            │
-   │ ◀─────────────────────────────────────────────────── │
-   │                                                      │
-   │ generate keypair                                     │
-   │ (TPM / Secure Enclave / IndexedDB)                   │
-   │                                                      │
-   │  POST /dbsc/registration                             │
-   │  Secure-Session-Response: <JWS containing pub key>   │
-   │ ───────────────────────────────────────────────────▶ │
-   │                                                      │ verify self-signature
-   │                                                      │ store sessionId → pubkey
-   │  200 + __Host-dbsc-session cookie (Max-Age 10 min)   │
-   │ ◀─────────────────────────────────────────────────── │
-   │                                                      │
-   │  every ~10 min, browser hits /dbsc/refresh           │
-   │  signing a fresh server challenge with the key       │
-   │ ───────────────────────────────────────────────────▶ │
-   │                                                      │ verify signature
-   │                                                      │ reissue cookie
-   │  200 + fresh __Host-dbsc-session                     │
-   │ ◀─────────────────────────────────────────────────── │
+Login → Key Registration → Cookie Issued → Challenge → Signature Verification → Session Refresh
 ```
 
-A copy of `__Host-dbsc-session` pasted into another browser has no matching key — the next refresh fails, the session demotes to `tier: "none"`, and `requireProof()` 403s every guarded request immediately (not on the next refresh cycle). Full walk-through with the exact wire format: [HOW-IT-WORKS.md](./HOW-IT-WORKS.md).
+On login the server responds with a `Secure-Session-Registration` header. The browser generates an ECDSA keypair in the TPM (Chrome) or IndexedDB (Firefox/Safari/polyfill), POSTs the public key, and gets back a short-lived session cookie. Every ~10 minutes the browser re-signs a fresh server challenge to renew the cookie. A copy of the cookie pasted into another device has no key — the next refresh fails and `requireProof()` 403s every guarded request immediately.
+
+Full wire-format walk-through: [HOW-IT-WORKS.md](./HOW-IT-WORKS.md).
 
 ## Who is this for?
 
@@ -219,6 +212,16 @@ There is deliberately **no tier-level argument**. A `dbsc`-only gate would lock 
 For apps with a stricter threat model (active MITM, log-spillage exposure), v2.8 also adds an optional **replay cache** that rejects a second arrival of the same proof bytes — pass `replayCache: new RedisReplayCache(redis)` to `createDbsc`. See [docs/per-request-signing.md](./docs/per-request-signing.md).
 
 The full threat boundary, the per-framework wiring (Fastify / Hono / Next.js), and the migration timeline for an existing app are in [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md) and [docs/per-request-signing.md](./docs/per-request-signing.md).
+
+## Production checklist
+
+- [ ] HTTPS enabled — DBSC requires `Secure` cookies; plain HTTP locks every user to `tier: "none"`
+- [ ] Redis or PostgreSQL storage — `MemoryStorage` is lost on restart; bound browsers loop registration
+- [ ] `requireProof()` on every authenticated route — read-only public routes need no guard
+- [ ] `wrapFetch({ signBody: true })` on the client side for those routes (already the default in v2.8+)
+- [ ] Replay cache enabled — `replayCache: new RedisReplayCache(redis)` in `createDbsc({...})`
+- [ ] `trust proxy` already set — `install()` sets it, but verify if you have your own app config overriding it
+- [ ] Polyfill script loaded — the `<script type="module">` tag; without it Firefox/Safari stay on `tier: "none"`
 
 ## Subpath imports
 

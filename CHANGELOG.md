@@ -2,6 +2,24 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.9.2] — 2026-05-24
+
+### Changed
+
+- **README polish.** Five improvements based on evaluator feedback:
+  - Removed the "only DBSC implementation" superlative — replaced with
+    "among the first to provide a Web Crypto fallback," which is accurate
+    without a claim that could expire.
+  - Added a **Contents** table of links at the top so readers can jump to
+    any section in a now-longer file.
+  - Condensed "How it works (the 30-second version)" from a full ASCII
+    sequence diagram to a six-step flow line and two short paragraphs.
+    The full wire-format diagram lives in HOW-IT-WORKS.md.
+  - Added a **Production checklist** section — seven actionable items
+    covering HTTPS, storage backend, route guarding, replay cache,
+    trust proxy, and the polyfill script tag.
+  - Screenshot / GIF deferred (placeholder to be added in a follow-up).
+
 ## [2.9.1] — 2026-05-24
 
 ### Fixed
