@@ -27,7 +27,7 @@ It does not protect against:
 - Malware with kernel-level access that can interface with the TPM directly. That is an OS-level concern, not a library-level one.
 - Phishing attacks that intercept the initial authentication step. The library binds an existing session — it does not authenticate the user.
 
-The `bound` tier defeats remote cookie theft (XSS, network capture, log leaks, paste-into-other-browser) but does not defeat infostealer malware reading the browser profile directory. The IndexedDB-stored key is `extractable: false` (JS cannot export it) but the encrypted key blob still lives on disk. Native DBSC keeps the private key inside TPM / Secure Enclave / Android Keystore, so it does defeat that threat.
+The `bound` tier defeats remote cookie theft (XSS, network capture, log leaks, paste-into-other-browser) but does not defeat infostealer malware reading the browser profile directory. The IndexedDB-stored key is `extractable: false` (JS cannot export it) but the encrypted key blob still lives on disk. Native DBSC keeps the private key inside TPM (Windows) or Secure Enclave (macOS), so it does defeat that threat.
 
 The normal route guard is `requireProof()` — it requires a bound device + a per-request proof and works on every browser. The **one exception**: if your threat model specifically includes on-device infostealer malware, a route can additionally require `tier === "dbsc"`. That is a deliberate trade-off — it excludes Firefox and Safari, which can only reach `tier: "bound"` — so reserve it for the rare route that genuinely needs hardware-key isolation, not as general routing advice.
 

@@ -4,7 +4,7 @@ Method: STRIDE. Scope: DBSC Toolkit server-side library.
 
 ## Assets
 
-- Session binding: the association between a session ID and a hardware-resident public key (TPM on Windows, Secure Enclave on Apple Silicon macOS, Keystore on Android)
+- Session binding: the association between a session ID and a hardware-resident public key (TPM on Windows, Secure Enclave on Apple Silicon macOS) or a non-extractable IndexedDB key (bound polyfill — every other browser)
 - Challenge confidentiality: challenges must be single-use and short-lived
 - Storage integrity: the key store must not be writable by untrusted parties
 
@@ -66,7 +66,7 @@ Mitigation: The library does not log JWKs or challenge values. The `onEvent` han
 **I2: Key material exfiltration from the browser profile (bound tier only)**
 The bound polyfill stores a non-extractable ECDSA private key in IndexedDB. The JavaScript API cannot export it, but the encrypted key blob lives on disk in the browser profile directory. Infostealer malware running as the victim can read the profile directory and (depending on the OS keystore protections) decrypt it.
 
-Mitigation: The normal guard is `requireProof()` (works on every browser). For the rare route that must additionally defeat *on-device infostealer malware*, require `tier === "dbsc"` on top — native DBSC keeps the private key inside TPM / Secure Enclave / Android Keystore where no on-device attacker can read it. This deliberately excludes Firefox and Safari (they reach only `tier: "bound"`), so it is an exception for hardware-isolation-critical routes, not general routing advice. The `bound` tier is honest about defending against remote cookie theft only.
+Mitigation: The normal guard is `requireProof()` (works on every browser). For the rare route that must additionally defeat *on-device infostealer malware*, require `tier === "dbsc"` on top — native DBSC keeps the private key inside TPM (Windows) or Secure Enclave (macOS) where no on-device attacker can read it. This deliberately excludes Firefox and Safari (they reach only `tier: "bound"`), so it is an exception for hardware-isolation-critical routes, not general routing advice. The `bound` tier is honest about defending against remote cookie theft only.
 
 ### Denial of Service
 

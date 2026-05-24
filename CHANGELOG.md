@@ -2,6 +2,27 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.9.3] — 2026-05-24
+
+### Changed
+
+- **Removed Android Keystore from all docs.** Native DBSC on Android has not
+  been verified and the Chromium implementation status on Android is unclear.
+  All user-facing copy now says "TPM (Windows) / Secure Enclave (macOS)" for
+  the `dbsc` tier. The `bound` polyfill is described as covering "every browser
+  with Web Crypto + IndexedDB" — which includes mobile — rather than calling
+  out Android Keystore as a native-DBSC destination.
+- **README: Quick Example** added at the very top (after the TL;DR blockquote,
+  before Contents). Two code blocks — `dbsc.bind()` in the login route and
+  `requireProof()` on a sensitive route — so an evaluator sees the API surface
+  in 10 lines before anything else.
+- **README: Security model section** added before "Going deeper". Explicit
+  list of what the library does and does not protect against, and the
+  distinction between the `bound` polyfill (remote theft only) and native
+  DBSC (also defeats on-device infostealer malware). Builds trust rather than
+  over-claiming.
+- **README: Contents** updated to include the new Security model link.
+
 ## [2.9.2] — 2026-05-24
 
 ### Changed

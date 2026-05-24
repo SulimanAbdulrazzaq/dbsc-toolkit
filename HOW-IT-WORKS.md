@@ -12,7 +12,9 @@ Session cookies are the soft spot of every web app. A logged-in user has a long-
 
 Every defense we've built around this is a workaround. SameSite cookies stop one class of CSRF. HttpOnly stops trivial XSS reads. Secure flag stops cleartext interception. None of these stop the case where the cookie value itself has been exfiltrated and replayed from a new device. The cookie is portable by design — that's what makes it a cookie.
 
-DBSC (Device Bound Session Credentials) breaks that portability. When a user logs in, the browser generates an EC P-256 keypair *inside the device's hardware key store* — TPM 2.0 on Windows, Secure Enclave on Apple Silicon macOS (M1, M2, M3, M4 and any future Apple Silicon), Android Keystore on Android. The public key gets sent to your server. The private key never leaves the hardware. Every few minutes the browser proves it still has the key by signing a fresh server-issued challenge. A copied cookie replayed from a different device cannot pass that proof — the attacker has no key. The session dies within one refresh cycle.
+DBSC (Device Bound Session Credentials) breaks that portability. When a user logs in, the browser generates an EC P-256 keypair *inside the device's hardware key store* — TPM 2.0 on Windows, Secure Enclave on Apple Silicon macOS (M1, M2, M3, M4 and any future Apple Silicon). The public key gets sent to your server. The private key never leaves the hardware. Every few minutes the browser proves it still has the key by signing a fresh server-issued challenge. A copied cookie replayed from a different device cannot pass that proof — the attacker has no key. The session dies within one refresh cycle.
+
+For browsers and devices without native DBSC support (Firefox, Safari, mobile), the Web Crypto polyfill provides the same session-binding guarantee using a non-extractable ECDSA key in IndexedDB. Approximately every browser with Web Crypto + IndexedDB support — which is all of them — can reach `tier: "bound"`.
 
 What DBSC does *not* protect against: malware running with kernel access on the user's own device, an attacker stealing the cookie *and* the live signing capability from the same physical machine, server-side compromise, or weak passwords. It's defense-in-depth, not a replacement for the rest of your security model.
 
@@ -173,7 +175,7 @@ The middleware does not interpose itself on your existing authentication. Your s
 
 | Tier | Achieved when | Key location | Defeats |
 |------|---------------|--------------|---------|
-| `dbsc` | Chromium 145+, hardware key store available, registration JWS verified | TPM / Secure Enclave / Android Keystore | Remote cookie theft **and** infostealer malware reading the browser profile |
+| `dbsc` | Chromium 145+ on Windows or macOS Apple Silicon, hardware key store available, registration JWS verified | TPM (Windows) / Secure Enclave (macOS) | Remote cookie theft **and** infostealer malware reading the browser profile |
 | `bound` | Browser ran the `initBoundDbsc()` polyfill, server verified the ECDSA signature | IndexedDB (non-extractable `CryptoKey`) | Remote cookie theft (XSS, network, logs, paste-to-other-browser). Does NOT defeat infostealer malware reading the browser profile. |
 | `none` | Nothing succeeded, or binding has gone stale | n/a | Nothing the cookie itself doesn't defeat |
 

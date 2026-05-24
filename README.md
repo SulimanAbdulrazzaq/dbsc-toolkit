@@ -7,9 +7,22 @@
 
 > **Stop stolen session cookies from being replayed on another device.**
 >
-> `dbsc-toolkit` implements W3C [Device Bound Session Credentials](https://www.w3.org/TR/dbsc/) on the server, and ships a Web Crypto polyfill so the same protection works on browsers that don't speak native DBSC yet. Native DBSC on Chromium 146+ Windows; the polyfill on every other browser. **One server, every browser, no user prompts.**
+> `dbsc-toolkit` implements W3C [Device Bound Session Credentials](https://www.w3.org/TR/dbsc/) on the server, and ships a Web Crypto polyfill so the same protection works on browsers that don't speak native DBSC yet. Native DBSC on Chromium 146+ (TPM / Secure Enclave); the polyfill on every other browser. **One server, every browser, no user prompts.**
 >
 > Works with **Express · Fastify · Hono · Next.js · Redis · PostgreSQL**.
+
+```ts
+// In your login route — one line to bind the session:
+app.post("/login", async (req, res) => {
+  await dbsc.bind(res, sessionId, { userId });
+  res.json({ ok: true });
+});
+
+// On any sensitive route — one guard:
+app.post("/payment", express.raw({ type: "*/*" }), requireProof(), paymentHandler);
+```
+
+That's it. The rest — key generation, protocol routes, cookie management, polyfill — is handled by the library.
 
 ## Contents
 
@@ -25,6 +38,7 @@
 - [Protect your routes](#protect-your-routes)
 - [Production checklist](#production-checklist)
 - [API](#subpath-imports)
+- [Security model](#security-model)
 - [Going deeper](#going-deeper)
 
 ## Why dbsc-toolkit
@@ -33,8 +47,8 @@ Native DBSC ships on Chrome 146+ for Windows users with a TPM. That's about a th
 
 This library is among the first DBSC implementations to provide a Web Crypto fallback for browsers that don't support native DBSC. Same wire-level protection against cookie theft, same `requireProof()` guard server-side, key stored non-extractably in IndexedDB instead of a TPM. No biometric prompt, no user interaction, no checkbox.
 
-- ✅ **Native W3C DBSC** on Chromium 146+ (TPM / Secure Enclave / Android Keystore)
-- ✅ **Web Crypto polyfill** on Firefox, Safari, older Chromium — same protection, IndexedDB key
+- ✅ **Native W3C DBSC** on Chromium 146+ (TPM on Windows, Secure Enclave on macOS)
+- ✅ **Web Crypto polyfill** on Firefox, Safari, mobile, older Chromium — same protection, IndexedDB key
 - ✅ **Express, Fastify, Hono, Next.js** adapters — all four ship in one package
 - ✅ **Memory, Redis, Postgres** storage — pick one, swap with one line
 - ✅ **`requireProof()`** per-request signature guard — works on every browser, body-hash defended against MITM
@@ -126,7 +140,7 @@ The native-DBSC column refers to a server that uses the spec without a polyfill 
 
 JWTs are still bearer tokens. Whoever has the bytes can replay them. Steal a JWT from a log line, an XSS, a leaked proxy header, a misconfigured intermediary — paste it into another machine and the server treats it as the legitimate user, exactly like a stolen cookie.
 
-DBSC pins the session to a cryptographic key that lives on the user's device (TPM, Secure Enclave, Android Keystore, or — under the polyfill — a non-extractable IndexedDB key). The token alone is no longer sufficient: the browser has to prove possession of the key on every refresh, and on every guarded request via `requireProof()`. The attacker's device has no key, so the replay fails and the session demotes within one cycle.
+DBSC pins the session to a cryptographic key that lives on the user's device (TPM on Windows, Secure Enclave on macOS, or — under the polyfill — a non-extractable IndexedDB key on every other browser). The token alone is no longer sufficient: the browser has to prove possession of the key on every refresh, and on every guarded request via `requireProof()`. The attacker's device has no key, so the replay fails and the session demotes within one cycle.
 
 DBSC complements your existing auth (passwords, MFA, JWT/session cookies) — it does not replace them. It closes the *replay-after-issue* gap that bearer tokens cannot.
 
@@ -243,7 +257,7 @@ Tree-shaking eliminates anything you don't import. Using Koa, Hapi, raw `http`, 
 
 | Tier | Mechanism | Protects against |
 |------|-----------|------------------|
-| `dbsc` | Native W3C DBSC, key in TPM / Secure Enclave / Android Keystore | Cookie theft (XSS, network, logs, paste-to-other-browser) **and** infostealer malware reading the browser profile |
+| `dbsc` | Native W3C DBSC, key in TPM (Windows) or Secure Enclave (macOS) | Cookie theft (XSS, network, logs, paste-to-other-browser) **and** infostealer malware reading the browser profile |
 | `bound` | Web Crypto polyfill, non-extractable ECDSA P-256 key in IndexedDB | Cookie theft. Does not defeat infostealer malware on the user's machine. |
 | `none` | No active / fresh binding | Nothing the cookie itself doesn't already do |
 
@@ -253,6 +267,23 @@ Tree-shaking eliminates anything you don't import. Using Koa, Hapi, raw `http`, 
 - **Anything authenticated?** → `requireProof()`. That's it.
 
 There is no third option, and **never gate a route on `tier === "dbsc"`** — that locks out every Firefox and Safari user (they can only reach `tier: "bound"`), and `requireProof()` already gives those browsers the same per-request guarantee via a signed proof. `requireProof()` is the one guard; it works on every browser. Read `res.locals.dbsc.tier` only if you want to *display* binding state in the UI — not to build a gate. Full guidance in [docs/security/best-practices.md](./docs/security/best-practices.md).
+
+## Security model
+
+`dbsc-toolkit` protects against:
+
+- Stolen session cookies replayed from another device
+- Stolen bearer tokens (same category — bearer == portable)
+- Cookie exfiltration via XSS, network capture, log leakage, or proxy leakage
+
+The Web Crypto polyfill (`tier: "bound"`) does **not** protect against:
+
+- Malware already running on the user's machine with access to the browser profile
+- Browser or OS compromise
+
+Native DBSC (`tier: "dbsc"`) provides stronger protection against local malware because the private key lives inside the TPM or Secure Enclave — software cannot extract it even with admin access. The polyfill key is non-extractable to JavaScript, but the encrypted blob lives on disk and a sufficiently privileged attacker can reach it.
+
+Neither tier is a substitute for HTTPS, input validation, strong passwords, or MFA.
 
 ## Going deeper
 
@@ -270,7 +301,7 @@ There is no third option, and **never gate a route on `tier === "dbsc"`** — th
 
 ## Status
 
-Verified end-to-end on Chrome 147 / Windows / TPM 2.0. Native DBSC supported on Chromium 145+ across Windows, macOS Apple Silicon, and Android. The bound polyfill works on every browser with Web Crypto + IndexedDB (Firefox, Safari, older Chromium). No third-party security audit yet. Production-readiness table and adoption guidance: [HOW-IT-WORKS.md#production-readiness](./HOW-IT-WORKS.md#production-readiness).
+Verified end-to-end on Chrome 147 / Windows / TPM 2.0. Native DBSC requires Chromium 145+ on Windows or macOS Apple Silicon. The bound polyfill works on every browser with Web Crypto + IndexedDB (Firefox, Safari, mobile browsers, older Chromium). No third-party security audit yet. Production-readiness table and adoption guidance: [HOW-IT-WORKS.md#production-readiness](./HOW-IT-WORKS.md#production-readiness).
 
 ## License
 

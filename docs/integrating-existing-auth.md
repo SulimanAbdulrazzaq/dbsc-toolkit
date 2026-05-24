@@ -7,7 +7,7 @@ Most production sites already have a working session story: a login route, a ses
 DBSC sits *beside* your auth. You do **not** touch: login logic, password verification, your session store, your `sid` cookie, your existing middleware. After integration your responses set **two** HttpOnly cookies:
 
 - Your existing session cookie (`sid`, `connect.sid`, …) — unchanged. Still drives your auth, still keyed to your user row.
-- `__Host-dbsc-session` — added by DBSC, same value as the session id you pass in. The browser refreshes it on its own with a hardware-key signature (TPM / Secure Enclave / Android Keystore).
+- `__Host-dbsc-session` — added by DBSC, same value as the session id you pass in. The browser refreshes it on its own with a hardware-key signature (TPM on Windows, Secure Enclave on macOS) or a polyfill signature (every other browser).
 
 Both travel on every request. Your middleware keeps working; the DBSC middleware adds `res.locals.dbsc` (Express) / `req.dbsc` (Fastify) / `c.get("dbsc")` (Hono) / `getDbscSession()` (Next.js). There is no session-store migration — DBSC uses the same id you already have.
 

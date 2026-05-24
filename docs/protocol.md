@@ -210,7 +210,7 @@ Failing any of these makes Chrome silently drop the cookie. The library uses `__
 
 ## Algorithm support
 
-ES256 and RS256 only. ES256 (EC P-256) is what Chromium's hardware key stores use (TPM on Windows, Secure Enclave on Apple Silicon macOS, Keystore on Android — all support EC P-256). RS256 is supported for software fallback or other browsers that may eventually implement DBSC with RSA-only hardware backends.
+ES256 and RS256 only. ES256 (EC P-256) is what Chromium's hardware key stores use (TPM on Windows, Secure Enclave on Apple Silicon macOS — both support EC P-256). RS256 is supported for software fallback or other browsers that may eventually implement DBSC with RSA-only hardware backends.
 
 The `validateJwk` core function rejects RSA keys under 2048 bits and any unsupported curves.
 
