@@ -2,6 +2,18 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.9.8] — 2026-05-25
+
+### Changed
+
+- **README tightened up.** Shorter, less marketing-flavored, fewer
+  superlatives. Softened the "every other DBSC implementation" claim
+  to "most other DBSC implementations focus on native browser support
+  only." Trimmed the JWT section. Replaced the bullet checkmarks
+  under "Why dbsc-toolkit" with prose. The Comparison table, version
+  references, TPM/Secure Enclave specifics, and the Render war story
+  in the failure-modes list are unchanged.
+
 ## [2.9.7] — 2026-05-24
 
 A CodeQL-driven cleanup release. The scanner surfaced 18 alerts; 13 were
