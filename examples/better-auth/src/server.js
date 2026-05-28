@@ -356,9 +356,10 @@ async function requireDbscProof(c, opts = {}) {
   const ctx = await auth.$context;
   const storage = createBetterAuthStorageAdapter(ctx.adapter, ctx.internalAdapter);
 
-  const bodyBytes = opts.signBody && c.req.method === "POST"
-    ? new Uint8Array(await c.req.arrayBuffer())
-    : undefined;
+  // boundFetch defaults to signBody: true on every request, including GETs
+  // (where the signed body is empty bytes). Always read the body and verify
+  // with signBody: true so the bh= field always matches.
+  const bodyBytes = new Uint8Array(await c.req.arrayBuffer());
 
   try {
     await verifyBoundProof(
@@ -367,7 +368,7 @@ async function requireDbscProof(c, opts = {}) {
         proofHeader,
         method: c.req.method,
         path: new URL(c.req.url).pathname,
-        signBody: !!opts.signBody,
+        signBody: true,
         bodyBytes,
       },
       storage,
