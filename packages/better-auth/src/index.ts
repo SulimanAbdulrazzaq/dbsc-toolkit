@@ -398,10 +398,16 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
               cookieName: names.bound,
             });
 
-            // Return headers — Better Auth merges these into the response
+            // Return headers — Better Auth merges these into the response.
+            // Chrome's DBSC engine requires the cookie referenced by `id="..."`
+            // to exist on this response (or already), otherwise it silently
+            // skips registration. Set BOTH cookies:
+            //   - __Host-dbsc-session: the bound cookie Chrome watches
+            //   - __Host-dbsc-reg: temp cookie our registration endpoint reads
             const headers = new Headers();
             headers.set(REGISTRATION_HEADER, regHeader);
             headers.set(LEGACY_REGISTRATION_HEADER, regHeader);
+            headers.append("Set-Cookie", sessionCookieHeader(sessionId));
             headers.append("Set-Cookie", regCookieHeader(sessionId));
 
             return { headers };
