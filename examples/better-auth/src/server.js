@@ -185,8 +185,8 @@ app.post("/api/auth/dbsc/refresh", async (c) => {
   }
 });
 
-// Better Auth handles everything else under /api/auth/** — sign-in/sign-up etc.
-app.on(["GET", "POST"], "/api/auth/**", async (c) => {
+// Better Auth handles everything else under /api/auth/* — sign-in/sign-up etc.
+app.all("/api/auth/:rest{.+}", async (c) => {
   const interestingHeaders = {};
   for (const [k, v] of c.req.raw.headers.entries()) {
     if (k.startsWith("sec-") || k.startsWith("secure-") || k === "cookie" || k === "user-agent") {
