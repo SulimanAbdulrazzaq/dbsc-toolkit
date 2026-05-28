@@ -58,7 +58,133 @@ app.get("/debug-logs/stream", (c) => {
   });
 });
 
-// Better Auth handles /api/auth/** — including the DBSC plugin endpoints.
+// DBSC native endpoints — handled in Hono directly to bypass Better Auth's
+// strict content-type validation. Chrome posts these without a body, which
+// Better Auth's createAuthEndpoint rejects with 415.
+import {
+  handleRegistration as dbscHandleRegistration,
+  handleRefresh as dbscHandleRefresh,
+  issueChallenge as dbscIssueChallenge,
+  buildChallengeHeader as dbscBuildChallengeHeader,
+  CHALLENGE_HEADER as DBSC_CHALLENGE_HEADER,
+  LEGACY_CHALLENGE_HEADER as DBSC_LEGACY_CHALLENGE_HEADER,
+} from "dbsc-toolkit";
+import { createBetterAuthStorageAdapter } from "@dbsc-toolkit/better-auth/internal";
+
+function parseCookieHeader(h) {
+  const r = {};
+  for (const p of (h ?? "").split(";")) {
+    const eq = p.indexOf("=");
+    if (eq === -1) continue;
+    r[p.slice(0, eq).trim()] = p.slice(eq + 1).trim();
+  }
+  return r;
+}
+
+async function getDbscStorage() {
+  const c = await auth.$context;
+  return createBetterAuthStorageAdapter(c.adapter, c.internalAdapter);
+}
+
+app.post("/api/auth/dbsc/registration", async (c) => {
+  console.log("[direct /dbsc/registration] HIT");
+  const store = await getDbscStorage();
+  const cookies = parseCookieHeader(c.req.header("cookie"));
+  const sessionId = cookies["__Host-dbsc-reg"] ?? "";
+  console.log("[direct /dbsc/registration] sessionId from cookie:", sessionId);
+
+  if (!sessionId) return c.json({ error: "missing session" }, 400);
+
+  const challenge = await store.getChallenge(sessionId);
+  console.log("[direct /dbsc/registration] challenge found:", !!challenge);
+  if (!challenge) return c.json({ error: "challenge not found" }, 400);
+
+  const responseHeader =
+    c.req.header("secure-session-response") ?? c.req.header("sec-session-response");
+  console.log("[direct /dbsc/registration] response header length:", responseHeader?.length);
+
+  try {
+    await dbscHandleRegistration(
+      { sessionId, secSessionResponseHeader: responseHeader, expectedJti: challenge.jti },
+      store,
+    );
+    console.log("[direct /dbsc/registration] SUCCESS — tier flipped to dbsc");
+
+    c.header(
+      "Set-Cookie",
+      `__Host-dbsc-session=${sessionId}; HttpOnly; Path=/; SameSite=Lax; Max-Age=600; Secure`,
+    );
+    return c.json({
+      session_identifier: sessionId,
+      refresh_url: "/api/auth/dbsc/refresh",
+      scope: { include_site: false },
+      credentials: [
+        {
+          type: "cookie",
+          name: "__Host-dbsc-session",
+          attributes: "Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=600",
+        },
+      ],
+    });
+  } catch (err) {
+    console.log("[direct /dbsc/registration] FAILED:", err?.code, err?.message);
+    return c.json({ error: String(err?.message ?? err) }, 400);
+  }
+});
+
+app.post("/api/auth/dbsc/refresh", async (c) => {
+  console.log("[direct /dbsc/refresh] HIT");
+  const store = await getDbscStorage();
+  const sessionId =
+    c.req.header("sec-secure-session-id") ?? c.req.header("secure-session-id") ?? "";
+
+  if (!sessionId) {
+    const ch = await dbscIssueChallenge("", store, 600_000);
+    c.header(DBSC_CHALLENGE_HEADER, dbscBuildChallengeHeader(ch.jti));
+    c.header(DBSC_LEGACY_CHALLENGE_HEADER, dbscBuildChallengeHeader(ch.jti));
+    return c.body(null, 403);
+  }
+
+  const responseHeader =
+    c.req.header("secure-session-response") ?? c.req.header("sec-session-response");
+  const challenge = await store.getChallenge(sessionId);
+
+  if (!challenge || !responseHeader) {
+    const ch = await dbscIssueChallenge(sessionId, store, 600_000);
+    c.header(DBSC_CHALLENGE_HEADER, dbscBuildChallengeHeader(ch.jti, sessionId));
+    c.header(DBSC_LEGACY_CHALLENGE_HEADER, dbscBuildChallengeHeader(ch.jti, sessionId));
+    return c.body(null, 403);
+  }
+
+  try {
+    await dbscHandleRefresh(
+      { sessionId, secSessionResponseHeader: responseHeader, expectedJti: challenge.jti },
+      store,
+    );
+    console.log("[direct /dbsc/refresh] SUCCESS");
+    c.header(
+      "Set-Cookie",
+      `__Host-dbsc-session=${sessionId}; HttpOnly; Path=/; SameSite=Lax; Max-Age=600; Secure`,
+    );
+    return c.json({
+      session_identifier: sessionId,
+      refresh_url: "/api/auth/dbsc/refresh",
+      scope: { include_site: false },
+      credentials: [
+        {
+          type: "cookie",
+          name: "__Host-dbsc-session",
+          attributes: "Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=600",
+        },
+      ],
+    });
+  } catch (err) {
+    console.log("[direct /dbsc/refresh] FAILED:", err?.code, err?.message);
+    return c.json({ error: String(err?.message ?? err) }, 400);
+  }
+});
+
+// Better Auth handles everything else under /api/auth/** — sign-in/sign-up etc.
 app.on(["GET", "POST"], "/api/auth/**", async (c) => {
   const interestingHeaders = {};
   for (const [k, v] of c.req.raw.headers.entries()) {
@@ -116,7 +242,6 @@ app.get("/api/me", async (c) => {
 
 // Protected route — checks Better Auth session + DBSC per-request proof.
 import { verifyBoundProof } from "dbsc-toolkit";
-import { createBetterAuthStorageAdapter } from "@dbsc-toolkit/better-auth/internal";
 
 async function requireDbscProof(c, opts = {}) {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
