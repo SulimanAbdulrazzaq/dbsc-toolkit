@@ -92,11 +92,14 @@ app.post("/api/auth/dbsc/registration", async (c) => {
   const store = await getDbscStorage();
   const cookies = parseCookieHeader(c.req.header("cookie"));
   const sessionId = cookies["__Host-dbsc-reg"] ?? "";
-  console.log("[direct /dbsc/registration] sessionId from cookie:", sessionId);
+  const expectedJti = cookies["__Host-dbsc-challenge"] ?? "";
+  console.log("[direct /dbsc/registration] sessionId:", sessionId, "jti:", expectedJti);
 
-  if (!sessionId) return c.json({ error: "missing session" }, 400);
+  if (!sessionId || !expectedJti) {
+    return c.json({ error: "missing session or challenge cookie" }, 400);
+  }
 
-  const challenge = await store.getChallenge(sessionId);
+  const challenge = await store.getChallenge(expectedJti);
   console.log("[direct /dbsc/registration] challenge found:", !!challenge);
   if (!challenge) return c.json({ error: "challenge not found" }, 400);
 
@@ -106,7 +109,7 @@ app.post("/api/auth/dbsc/registration", async (c) => {
 
   try {
     await dbscHandleRegistration(
-      { sessionId, secSessionResponseHeader: responseHeader, expectedJti: challenge.jti },
+      { sessionId, secSessionResponseHeader: responseHeader, expectedJti },
       store,
     );
     console.log("[direct /dbsc/registration] SUCCESS — tier flipped to dbsc");

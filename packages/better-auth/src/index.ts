@@ -120,6 +120,18 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
     ].join("; ");
   }
 
+  function challengeCookieHeader(jti: string): string {
+    return [
+      `${names.challenge}=${jti}`,
+      "HttpOnly",
+      "Path=/",
+      "SameSite=Lax",
+      `Max-Age=300`,
+      ...(secure ? ["Secure"] : []),
+      ...(cookieDomain ? [`Domain=${cookieDomain}`] : []),
+    ].join("; ");
+  }
+
   function sessionConfig(sessionId: string) {
     return {
       session_identifier: sessionId,
@@ -431,18 +443,23 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
             });
 
             // Return headers — Better Auth merges these into the response.
+            // Three cookies:
+            //   - __Host-dbsc-session: bound cookie Chrome watches
+            //   - __Host-dbsc-reg: carries sessionId to /dbsc/registration
+            //   - __Host-dbsc-challenge: carries jti to /dbsc/registration
             const headers = new Headers();
             headers.set(REGISTRATION_HEADER, regHeader);
             headers.set(LEGACY_REGISTRATION_HEADER, regHeader);
             headers.append("Set-Cookie", sessionCookieHeader(sessionId));
             headers.append("Set-Cookie", regCookieHeader(sessionId));
+            headers.append("Set-Cookie", challengeCookieHeader(jti));
 
             console.log("[dbsc after-hook] EMIT", JSON.stringify({
               path: ctx.path,
               sessionId,
               userId,
+              jti,
               regHeader,
-              cookies: [sessionCookieHeader(sessionId), regCookieHeader(sessionId)],
             }));
 
             return { headers };
