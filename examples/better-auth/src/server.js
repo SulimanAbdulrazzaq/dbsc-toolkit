@@ -54,6 +54,13 @@ app.get("/api/me", async (req, res) => {
   });
 });
 
+// Debug: log proof header arrival
+app.use("/api/profile", (req, _res, next) => {
+  console.log("[debug /api/profile] headers x-dbsc-bound-proof:", req.headers["x-dbsc-bound-proof"]?.slice(0, 60));
+  console.log("[debug /api/profile] res.locals.dbsc tier:", _res.locals.dbsc?.tier, "sessionId:", _res.locals.dbsc?.sessionId);
+  next();
+});
+
 app.get("/api/profile", dbsc.requireProof(), async (req, res) => {
   const session = await auth.api.getSession({ headers: new Headers(req.headers) });
   if (!session) return res.status(401).json({ error: "no session" });
