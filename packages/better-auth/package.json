@@ -1,0 +1,61 @@
+{
+  "name": "@dbsc-toolkit/better-auth",
+  "version": "0.1.0",
+  "description": "DBSC (Device Bound Session Credentials) plugin for Better Auth, powered by dbsc-toolkit.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./client": {
+      "import": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+    },
+    "./internal": {
+      "import": "./dist/internal.js",
+      "types": "./dist/internal.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rimraf dist"
+  },
+  "peerDependencies": {
+    "better-auth": ">=1.0.0",
+    "dbsc-toolkit": ">=2.9.0"
+  },
+  "devDependencies": {
+    "better-auth": "^1.2.0",
+    "dbsc-toolkit": "workspace:*",
+    "rimraf": "^6.0.0",
+    "typescript": "^6.0.0"
+  },
+  "keywords": [
+    "dbsc",
+    "device-bound-session-credentials",
+    "better-auth",
+    "session",
+    "security",
+    "tpm",
+    "cookies"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SulimanAbdulrazzaq/dbsc-toolkit.git",
+    "directory": "packages/better-auth"
+  },
+  "homepage": "https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/tree/main/packages/better-auth#readme",
+  "publishConfig": {
+    "access": "public"
+  }
+}

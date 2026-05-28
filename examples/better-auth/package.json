@@ -1,0 +1,19 @@
+{
+  "name": "dbsc-better-auth-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "@dbsc-toolkit/better-auth": "workspace:*",
+    "@hono/node-server": "^1.13.7",
+    "@libsql/client": "^0.14.0",
+    "better-auth": "^1.2.0",
+    "better-sqlite3": "^12.10.0",
+    "dbsc-toolkit": "workspace:*",
+    "hono": "^4.0.0"
+  }
+}
