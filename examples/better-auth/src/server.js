@@ -8,6 +8,16 @@ import { Hono } from "hono";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { auth } from "./auth.js";
+import {
+  handleRegistration as dbscHandleRegistration,
+  handleRefresh as dbscHandleRefresh,
+  issueChallenge as dbscIssueChallenge,
+  buildChallengeHeader as dbscBuildChallengeHeader,
+  verifyBoundProof,
+  CHALLENGE_HEADER as DBSC_CHALLENGE_HEADER,
+  LEGACY_CHALLENGE_HEADER as DBSC_LEGACY_CHALLENGE_HEADER,
+} from "dbsc-toolkit";
+import { createBetterAuthStorageAdapter } from "@dbsc-toolkit/better-auth/internal";
 
 const require = createRequire(import.meta.url);
 // Resolve dist/client/ from the published dbsc-toolkit package so we can serve
@@ -61,15 +71,6 @@ app.get("/debug-logs/stream", (c) => {
 // DBSC native endpoints — handled in Hono directly to bypass Better Auth's
 // strict content-type validation. Chrome posts these without a body, which
 // Better Auth's createAuthEndpoint rejects with 415.
-import {
-  handleRegistration as dbscHandleRegistration,
-  handleRefresh as dbscHandleRefresh,
-  issueChallenge as dbscIssueChallenge,
-  buildChallengeHeader as dbscBuildChallengeHeader,
-  CHALLENGE_HEADER as DBSC_CHALLENGE_HEADER,
-  LEGACY_CHALLENGE_HEADER as DBSC_LEGACY_CHALLENGE_HEADER,
-} from "dbsc-toolkit";
-import { createBetterAuthStorageAdapter } from "@dbsc-toolkit/better-auth/internal";
 
 function parseCookieHeader(h) {
   const r = {};
@@ -241,8 +242,6 @@ app.get("/api/me", async (c) => {
 });
 
 // Protected route — checks Better Auth session + DBSC per-request proof.
-import { verifyBoundProof } from "dbsc-toolkit";
-
 async function requireDbscProof(c, opts = {}) {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session) return { error: c.json({ error: "not authenticated" }, 401) };
