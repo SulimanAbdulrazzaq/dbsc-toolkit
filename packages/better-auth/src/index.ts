@@ -14,30 +14,25 @@
  *   })
  */
 import {
-  handleRegistration,
-  handleRefresh,
-  handleBoundRegistration,
-  handleBoundRefresh,
   issueChallenge,
   buildRegistrationHeader,
-  buildChallengeHeader,
   REGISTRATION_HEADER,
-  CHALLENGE_HEADER,
   LEGACY_REGISTRATION_HEADER,
-  LEGACY_CHALLENGE_HEADER,
   resolveCookieNames,
   type StorageAdapter,
   type AnyTelemetryEvent,
-  type ProofReplayCache,
-  type RateLimiter,
-  NoopRateLimiter,
-  NoopReplayCache,
-  emit,
 } from "dbsc-toolkit";
-import { createAuthEndpoint } from "better-auth/api";
 
-import { createBetterAuthStorageAdapter, type BetterAuthInternalAdapter } from "./adapter.js";
+import { createBetterAuthStorageAdapter } from "./adapter.js";
 import { dbscSchema } from "./schema.js";
+
+export { mountDbscRoutes, requireDbscProof } from "./mount.js";
+export type {
+  MountDbscRoutesOptions,
+  MountableApp,
+  AuthLike,
+  RequireDbscProofOptions,
+} from "./mount.js";
 
 export interface DbscPluginOptions {
   /**
@@ -51,22 +46,11 @@ export interface DbscPluginOptions {
   cookieDomain?: string;
   /** Bound cookie TTL in ms. Default: 600_000 (10 min) */
   sessionTtl?: number;
-  /** Replay cache for per-request proofs. Default: NoopReplayCache */
-  replayCache?: ProofReplayCache;
-  /** Rate limiter for registration/refresh endpoints. Default: NoopRateLimiter */
-  rateLimiter?: RateLimiter;
   /** Telemetry hook */
   onEvent?: (event: AnyTelemetryEvent) => void | Promise<void>;
 }
 
-// Plugin-relative paths — Better Auth prefixes these with basePath automatically
 const REGISTRATION_PATH = "/dbsc/registration";
-const REFRESH_PATH = "/dbsc/refresh";
-const BOUND_STATE_PATH = "/dbsc-bound/state";
-const BOUND_CHALLENGE_PATH = "/dbsc-bound/challenge";
-const BOUND_REGISTRATION_PATH = "/dbsc-bound/registration";
-const BOUND_REFRESH_PATH = "/dbsc-bound/refresh";
-
 const DEFAULT_SESSION_TTL = 600_000;
 const DEFAULT_BASE_PATH = "/api/auth";
 
@@ -76,9 +60,6 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
     cookieScope = "host",
     cookieDomain,
     sessionTtl = DEFAULT_SESSION_TTL,
-    replayCache = new NoopReplayCache(),
-    rateLimiter = new NoopRateLimiter(),
-    onEvent,
   } = opts;
 
   const secure = true;
@@ -86,15 +67,6 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
     ? { secure, cookieScope, cookieDomain }
     : { secure, cookieScope };
   const names = resolveCookieNames(scopeOpts);
-
-  let storage: StorageAdapter | null = null;
-
-  function getStorageFromCtx(ctx: any): StorageAdapter {
-    if (!storage) {
-      storage = createBetterAuthStorageAdapter(ctx.context.adapter, ctx.context.internalAdapter);
-    }
-    return storage;
-  }
 
   function regCookieHeader(sessionId: string): string {
     return [
@@ -132,246 +104,15 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
     ].join("; ");
   }
 
-  function sessionConfig(sessionId: string) {
-    return {
-      session_identifier: sessionId,
-      refresh_url: `${basePath}${REFRESH_PATH}`,
-      scope: { include_site: cookieScope === "site" },
-      credentials: [
-        {
-          type: "cookie",
-          name: names.bound,
-          attributes: [
-            "Path=/",
-            "Secure",
-            "HttpOnly",
-            "SameSite=Lax",
-            `Max-Age=${Math.floor(sessionTtl / 1000)}`,
-            ...(cookieDomain ? [`Domain=${cookieDomain}`] : []),
-          ].join("; "),
-        },
-      ],
-    };
-  }
-
   return {
     id: "dbsc-toolkit",
 
     schema: dbscSchema,
 
-    endpoints: {
-      // Native DBSC: Chrome POSTs the TPM-signed JWS here after key generation.
-      // Chrome sends an empty body — the JWS is in the Secure-Session-Response
-      // header — so we list every content-type Chrome might attach (often none).
-      dbscRegistration: createAuthEndpoint(
-        REGISTRATION_PATH,
-        {
-          method: "POST",
-          allowedMediaTypes: [
-            "application/json",
-            "application/x-www-form-urlencoded",
-            "text/plain",
-            "application/octet-stream",
-            "",
-          ],
-        },
-        async (ctx: any) => {
-          const store = getStorageFromCtx(ctx);
-          const cookies = parseCookies(ctx.request?.headers?.get?.("cookie") ?? "");
-          const sessionId = cookies[names.reg] ?? "";
-          const expectedJti = cookies[names.challenge] ?? "";
-          if (!sessionId || !expectedJti) {
-            return ctx.json({ error: "missing session or challenge cookie" }, { status: 400 });
-          }
-
-          const challenge = await store.getChallenge(expectedJti);
-          if (!challenge) {
-            return ctx.json({ error: "challenge not found" }, { status: 400 });
-          }
-
-          const responseHeader =
-            ctx.request?.headers?.get?.("secure-session-response") ??
-            ctx.request?.headers?.get?.("sec-session-response") ??
-            undefined;
-
-          try {
-            const result = await handleRegistration(
-              { sessionId, secSessionResponseHeader: responseHeader, expectedJti },
-              store,
-            );
-
-            emit(onEvent, {
-              type: "registration",
-              sessionId,
-              tier: "dbsc",
-              algorithm: result.boundKey.algorithm,
-              ip: getIp(ctx),
-              timestamp: Date.now(),
-            });
-
-            // Set the bound cookie and return the session config
-            ctx.setHeader("Set-Cookie", sessionCookieHeader(sessionId));
-            return ctx.json(sessionConfig(sessionId));
-          } catch (err) {
-            emit(onEvent, {
-              type: "verification_failure",
-              sessionId,
-              tier: "none",
-              reason: String(err),
-              ip: getIp(ctx),
-              timestamp: Date.now(),
-            });
-            return ctx.json({ error: "registration failed" }, { status: 400 });
-          }
-        },
-      ),
-
-      // Native DBSC: Chrome POSTs here when the bound cookie expires
-      dbscRefresh: createAuthEndpoint(
-        REFRESH_PATH,
-        {
-          method: "POST",
-          allowedMediaTypes: [
-            "application/json",
-            "application/x-www-form-urlencoded",
-            "text/plain",
-            "application/octet-stream",
-            "",
-          ],
-        },
-        async (ctx: any) => {
-          const store = getStorageFromCtx(ctx);
-          const sessionId =
-            ctx.request?.headers?.get?.("sec-secure-session-id") ??
-            ctx.request?.headers?.get?.("secure-session-id") ??
-            "";
-
-          if (!sessionId) {
-            const jti = await issueChallengeFor(store, "", sessionTtl);
-            ctx.setHeader(CHALLENGE_HEADER, buildChallengeHeader(jti));
-            ctx.setHeader(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(jti));
-            return ctx.json(null, { status: 403 });
-          }
-
-          const challenge = await store.getChallenge(sessionId);
-          const responseHeader =
-            ctx.request?.headers?.get?.("secure-session-response") ??
-            ctx.request?.headers?.get?.("sec-session-response") ??
-            undefined;
-
-          if (!challenge || !responseHeader) {
-            const jti = await issueChallengeFor(store, sessionId, sessionTtl);
-            ctx.setHeader(CHALLENGE_HEADER, buildChallengeHeader(jti, sessionId));
-            ctx.setHeader(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(jti, sessionId));
-            return ctx.json(null, { status: 403 });
-          }
-
-          try {
-            await handleRefresh(
-              { sessionId, secSessionResponseHeader: responseHeader, expectedJti: challenge.jti },
-              store,
-            );
-
-            emit(onEvent, {
-              type: "refresh",
-              sessionId,
-              tier: "dbsc",
-              ip: getIp(ctx),
-              timestamp: Date.now(),
-            });
-
-            ctx.setHeader("Set-Cookie", sessionCookieHeader(sessionId));
-            return ctx.json(sessionConfig(sessionId));
-          } catch (err) {
-            emit(onEvent, {
-              type: "verification_failure",
-              sessionId,
-              tier: "none",
-              reason: String(err),
-              ip: getIp(ctx),
-              timestamp: Date.now(),
-            });
-            return ctx.json({ error: "refresh failed" }, { status: 400 });
-          }
-        },
-      ),
-
-      // Polyfill: state check
-      dbscBoundState: createAuthEndpoint(
-        BOUND_STATE_PATH,
-        { method: "GET" },
-        async (ctx: any) => {
-          const store = getStorageFromCtx(ctx);
-          const cookies = parseCookies(ctx.request?.headers?.get?.("cookie") ?? "");
-          const sessionId = cookies[names.bound] ?? "";
-          if (!sessionId) return ctx.json({ phase: "unbound" });
-          const session = await store.getSession(sessionId);
-          if (!session) return ctx.json({ phase: "unbound" });
-          const key = await store.getBoundKey(sessionId, "bound");
-          return ctx.json({ phase: key ? "bound" : "unbound", tier: session.tier });
-        },
-      ),
-
-      // Polyfill: issue challenge
-      dbscBoundChallenge: createAuthEndpoint(
-        BOUND_CHALLENGE_PATH,
-        { method: "GET" },
-        async (ctx: any) => {
-          const store = getStorageFromCtx(ctx);
-          const cookies = parseCookies(ctx.request?.headers?.get?.("cookie") ?? "");
-          const sessionId = cookies[names.bound] ?? cookies[names.reg] ?? "";
-          if (!sessionId) return ctx.json({ error: "no session" }, { status: 400 });
-          const jti = await issueChallengeFor(store, sessionId, sessionTtl);
-          return ctx.json({ challenge: jti, sessionId, serverTime: Date.now() });
-        },
-      ),
-
-      // Polyfill: register the Web Crypto key
-      dbscBoundRegistration: createAuthEndpoint(
-        BOUND_REGISTRATION_PATH,
-        { method: "POST", allowedMediaTypes: ["application/json"] },
-        async (ctx: any) => {
-          const store = getStorageFromCtx(ctx);
-          const body = (await ctx.request?.json?.()) as Record<string, unknown>;
-          const sessionId = String(body?.["sessionId"] ?? "");
-          const publicKey = body?.["publicKey"] as JsonWebKey | undefined;
-          const signature = String(body?.["signature"] ?? "");
-          const expectedJti = String(body?.["challenge"] ?? "");
-          if (!sessionId || !publicKey || !signature || !expectedJti) {
-            return ctx.json({ error: "missing required fields" }, { status: 400 });
-          }
-          try {
-            await handleBoundRegistration({ sessionId, publicKey, signature, expectedJti }, store);
-            return ctx.json({ ok: true });
-          } catch (err) {
-            return ctx.json({ error: String(err) }, { status: 400 });
-          }
-        },
-      ),
-
-      // Polyfill: verify per-request proof
-      dbscBoundRefresh: createAuthEndpoint(
-        BOUND_REFRESH_PATH,
-        { method: "POST", allowedMediaTypes: ["application/json"] },
-        async (ctx: any) => {
-          const store = getStorageFromCtx(ctx);
-          const body = (await ctx.request?.json?.()) as Record<string, unknown>;
-          const sessionId = String(body?.["sessionId"] ?? "");
-          const signature = String(body?.["signature"] ?? "");
-          const expectedJti = String(body?.["challenge"] ?? "");
-          const timestamp = Number(body?.["timestamp"] ?? 0);
-          if (!sessionId || !signature || !expectedJti || !timestamp) {
-            return ctx.json({ error: "missing required fields" }, { status: 400 });
-          }
-          try {
-            await handleBoundRefresh({ sessionId, signature, expectedJti, timestamp }, store);
-            return ctx.json({ ok: true });
-          } catch (err) {
-            return ctx.json({ error: String(err) }, { status: 400 });
-          }
-        },
-      ),
-    },
+    // The DBSC protocol routes do NOT live inside the plugin — Better Auth's
+    // createAuthEndpoint refuses POSTs without a body (responds 415), and
+    // Chrome's registration request has the JWS in a header with no body.
+    // Use mountDbscRoutes(app, auth) on your Hono/Express app instead.
 
     hooks: {
       after: [
@@ -408,7 +149,10 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
 
             if (!sessionId || !userId) return empty;
 
-            const store = getStorageFromCtx(ctx);
+            const store = createBetterAuthStorageAdapter(
+              ctx.context.adapter,
+              ctx.context.internalAdapter,
+            );
             const now = Date.now();
 
             const existing = await store.getSession(sessionId);
@@ -449,36 +193,5 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
       ],
     },
   } satisfies object;
-}
-
-// Helpers
-
-async function issueChallengeFor(
-  store: StorageAdapter,
-  sessionId: string,
-  ttlMs: number,
-): Promise<string> {
-  const challenge = await issueChallenge(sessionId, store, ttlMs);
-  return challenge.jti;
-}
-
-function parseCookies(header: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const part of header.split(";")) {
-    const eq = part.indexOf("=");
-    if (eq === -1) continue;
-    const key = part.slice(0, eq).trim();
-    const value = part.slice(eq + 1).trim();
-    result[key] = value;
-  }
-  return result;
-}
-
-function getIp(ctx: any): string {
-  return (
-    ctx.request?.headers?.get?.("cf-connecting-ip") ??
-    ctx.request?.headers?.get?.("x-forwarded-for")?.split(",")[0]?.trim() ??
-    "unknown"
-  );
 }
 

@@ -8,18 +8,7 @@ import { Hono } from "hono";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { auth } from "./auth.js";
-import {
-  handleRegistration as dbscHandleRegistration,
-  handleRefresh as dbscHandleRefresh,
-  handleBoundRegistration as dbscHandleBoundRegistration,
-  handleBoundRefresh as dbscHandleBoundRefresh,
-  issueChallenge as dbscIssueChallenge,
-  buildChallengeHeader as dbscBuildChallengeHeader,
-  verifyBoundProof,
-  CHALLENGE_HEADER as DBSC_CHALLENGE_HEADER,
-  LEGACY_CHALLENGE_HEADER as DBSC_LEGACY_CHALLENGE_HEADER,
-} from "dbsc-toolkit";
-import { createBetterAuthStorageAdapter } from "@dbsc-toolkit/better-auth/internal";
+import { mountDbscRoutes, requireDbscProof } from "@dbsc-toolkit/better-auth";
 
 const require = createRequire(import.meta.url);
 // Resolve dist/client/ from the published dbsc-toolkit package so we can serve
@@ -70,213 +59,11 @@ app.get("/debug-logs/stream", (c) => {
   });
 });
 
-// DBSC native endpoints — handled in Hono directly to bypass Better Auth's
-// strict content-type validation. Chrome posts these without a body, which
-// Better Auth's createAuthEndpoint rejects with 415.
-
-function parseCookieHeader(h) {
-  const r = {};
-  for (const p of (h ?? "").split(";")) {
-    const eq = p.indexOf("=");
-    if (eq === -1) continue;
-    r[p.slice(0, eq).trim()] = p.slice(eq + 1).trim();
-  }
-  return r;
-}
-
-async function getDbscStorage() {
-  const c = await auth.$context;
-  return createBetterAuthStorageAdapter(c.adapter, c.internalAdapter);
-}
-
-// Polyfill (bound) routes — direct in Hono so we get full control over the
-// state response that the SDK needs to drive co-registration.
-app.get("/api/auth/dbsc-bound/state", async (c) => {
-  c.header("X-Server-Time", String(Date.now()));
-  const store = await getDbscStorage();
-  const cookies = parseCookieHeader(c.req.header("cookie"));
-  const sessionId = cookies["__Host-dbsc-session"] ?? cookies["__Host-dbsc-reg"] ?? "";
-
-  if (!sessionId) return c.json({ phase: "unbound", sessionId: null });
-
-  const session = await store.getSession(sessionId);
-  if (!session) return c.json({ phase: "unbound", sessionId: null });
-
-  const nativeKey = await store.getBoundKey(sessionId, "native");
-  const boundKey = await store.getBoundKey(sessionId, "bound");
-
-  if (!nativeKey && !boundKey) {
-    const ch = await dbscIssueChallenge(sessionId, store, 600_000);
-    return c.json({ phase: "needs-registration", sessionId, challenge: ch.jti });
-  }
-  if (nativeKey && !boundKey) {
-    // Native TPM key registered — SDK needs to co-register the polyfill key
-    // so requireProof() has something to verify on every request.
-    const ch = await dbscIssueChallenge(sessionId, store, 600_000);
-    return c.json({
-      phase: "needs-bound-registration",
-      sessionId,
-      tier: session.tier,
-      challenge: ch.jti,
-      refreshIntervalMs: 600_000,
-    });
-  }
-  return c.json({ phase: "bound", sessionId, tier: session.tier, refreshIntervalMs: 600_000 });
-});
-
-app.get("/api/auth/dbsc-bound/challenge", async (c) => {
-  c.header("X-Server-Time", String(Date.now()));
-  const store = await getDbscStorage();
-  const cookies = parseCookieHeader(c.req.header("cookie"));
-  const sessionId = cookies["__Host-dbsc-session"] ?? cookies["__Host-dbsc-reg"] ?? "";
-  if (!sessionId) return c.json({ error: "no session" }, 403);
-  const session = await store.getSession(sessionId);
-  if (!session) return c.json({ error: "no session" }, 403);
-  const ch = await dbscIssueChallenge(sessionId, store, 600_000);
-  return c.json({ challenge: ch.jti });
-});
-
-app.post("/api/auth/dbsc-bound/registration", async (c) => {
-  const store = await getDbscStorage();
-  const cookies = parseCookieHeader(c.req.header("cookie"));
-  const sessionId = cookies["__Host-dbsc-session"] ?? cookies["__Host-dbsc-reg"] ?? "";
-  if (!sessionId) return c.json({ error: "missing session" }, 400);
-  const body = await c.req.json();
-  try {
-    await dbscHandleBoundRegistration(
-      {
-        sessionId,
-        publicKey: body.publicKey,
-        signature: body.signature,
-        expectedJti: body.challenge,
-      },
-      store,
-    );
-    console.log("[dbsc] polyfill key stored for session", sessionId);
-    return c.json({ ok: true });
-  } catch (err) {
-    console.log("[dbsc] polyfill registration failed:", err?.code ?? err?.message);
-    return c.json({ error: String(err?.message ?? err) }, 400);
-  }
-});
-
-app.post("/api/auth/dbsc-bound/refresh", async (c) => {
-  const store = await getDbscStorage();
-  const cookies = parseCookieHeader(c.req.header("cookie"));
-  const sessionId = cookies["__Host-dbsc-session"] ?? cookies["__Host-dbsc-reg"] ?? "";
-  if (!sessionId) return c.json({ error: "missing session" }, 400);
-  const body = await c.req.json();
-  try {
-    await dbscHandleBoundRefresh(
-      {
-        sessionId,
-        signature: body.signature,
-        expectedJti: body.challenge,
-        timestamp: body.timestamp,
-      },
-      store,
-    );
-    return c.json({ ok: true });
-  } catch (err) {
-    return c.json({ error: String(err?.message ?? err) }, 400);
-  }
-});
-
-app.post("/api/auth/dbsc/registration", async (c) => {
-  const store = await getDbscStorage();
-  const cookies = parseCookieHeader(c.req.header("cookie"));
-  const sessionId = cookies["__Host-dbsc-reg"] ?? "";
-  const expectedJti = cookies["__Host-dbsc-challenge"] ?? "";
-
-  if (!sessionId || !expectedJti) {
-    return c.json({ error: "missing session or challenge cookie" }, 400);
-  }
-
-  const challenge = await store.getChallenge(expectedJti);
-  if (!challenge) return c.json({ error: "challenge not found" }, 400);
-
-  const responseHeader =
-    c.req.header("secure-session-response") ?? c.req.header("sec-session-response");
-
-  try {
-    await dbscHandleRegistration(
-      { sessionId, secSessionResponseHeader: responseHeader, expectedJti },
-      store,
-    );
-    console.log("[dbsc] tier flipped to dbsc for session", sessionId);
-
-    c.header(
-      "Set-Cookie",
-      `__Host-dbsc-session=${sessionId}; HttpOnly; Path=/; SameSite=Lax; Max-Age=600; Secure`,
-    );
-    return c.json({
-      session_identifier: sessionId,
-      refresh_url: "/api/auth/dbsc/refresh",
-      scope: { include_site: false },
-      credentials: [
-        {
-          type: "cookie",
-          name: "__Host-dbsc-session",
-          attributes: "Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=600",
-        },
-      ],
-    });
-  } catch (err) {
-    console.log("[dbsc] registration failed:", err?.code ?? err?.message);
-    return c.json({ error: String(err?.message ?? err) }, 400);
-  }
-});
-
-app.post("/api/auth/dbsc/refresh", async (c) => {
-  const store = await getDbscStorage();
-  const sessionId =
-    c.req.header("sec-secure-session-id") ?? c.req.header("secure-session-id") ?? "";
-
-  if (!sessionId) {
-    const ch = await dbscIssueChallenge("", store, 600_000);
-    c.header(DBSC_CHALLENGE_HEADER, dbscBuildChallengeHeader(ch.jti));
-    c.header(DBSC_LEGACY_CHALLENGE_HEADER, dbscBuildChallengeHeader(ch.jti));
-    return c.body(null, 403);
-  }
-
-  const responseHeader =
-    c.req.header("secure-session-response") ?? c.req.header("sec-session-response");
-  const challenge = await store.getChallenge(sessionId);
-
-  if (!challenge || !responseHeader) {
-    const ch = await dbscIssueChallenge(sessionId, store, 600_000);
-    c.header(DBSC_CHALLENGE_HEADER, dbscBuildChallengeHeader(ch.jti, sessionId));
-    c.header(DBSC_LEGACY_CHALLENGE_HEADER, dbscBuildChallengeHeader(ch.jti, sessionId));
-    return c.body(null, 403);
-  }
-
-  try {
-    await dbscHandleRefresh(
-      { sessionId, secSessionResponseHeader: responseHeader, expectedJti: challenge.jti },
-      store,
-    );
-    console.log("[dbsc] refresh OK for session", sessionId);
-    c.header(
-      "Set-Cookie",
-      `__Host-dbsc-session=${sessionId}; HttpOnly; Path=/; SameSite=Lax; Max-Age=600; Secure`,
-    );
-    return c.json({
-      session_identifier: sessionId,
-      refresh_url: "/api/auth/dbsc/refresh",
-      scope: { include_site: false },
-      credentials: [
-        {
-          type: "cookie",
-          name: "__Host-dbsc-session",
-          attributes: "Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=600",
-        },
-      ],
-    });
-  } catch (err) {
-    console.log("[dbsc] refresh failed:", err?.code ?? err?.message);
-    return c.json({ error: String(err?.message ?? err) }, 400);
-  }
-});
+// Mount DBSC protocol routes BEFORE the Better Auth catch-all so they win
+// the path match. The plugin can't host these endpoints itself — Better Auth's
+// createAuthEndpoint refuses POSTs without a body, and Chrome's DBSC
+// registration request has the JWS in a header with no body.
+mountDbscRoutes(app, auth, { basePath: "/api/auth" });
 
 // Better Auth handles everything else under /api/auth/* — sign-in/sign-up etc.
 app.all("/api/auth/:rest{.+}", async (c) => {
@@ -320,64 +107,31 @@ app.get("/api/me", async (c) => {
   });
 });
 
-// Protected route — checks Better Auth session + DBSC per-request proof.
-async function requireDbscProof(c, opts = {}) {
+// Protected routes — requireDbscProof verifies the X-Dbsc-Bound-Proof header
+// against the session's bound key, or returns 403.
+const dbscProof = requireDbscProof(auth);
+
+app.get("/api/profile", dbscProof, async (c) => {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  if (!session) return { error: c.json({ error: "not authenticated" }, 401) };
-
-  const proofHeader = c.req.header("x-dbsc-bound-proof");
-  if (!proofHeader) {
-    return { error: c.json({ error: "PROOF_MISSING", note: "X-Dbsc-Bound-Proof header required" }, 403) };
-  }
-
-  const ctx = await auth.$context;
-  const storage = createBetterAuthStorageAdapter(ctx.adapter, ctx.internalAdapter);
-
-  // boundFetch defaults to signBody: true on every request, including GETs
-  // (where the signed body is empty bytes). Always read the body and verify
-  // with signBody: true so the bh= field always matches.
-  const bodyBytes = new Uint8Array(await c.req.arrayBuffer());
-
-  try {
-    await verifyBoundProof(
-      {
-        sessionId: session.session.id,
-        proofHeader,
-        method: c.req.method,
-        path: new URL(c.req.url).pathname,
-        signBody: true,
-        bodyBytes,
-      },
-      storage,
-    );
-  } catch (err) {
-    return { error: c.json({ error: "PROOF_INVALID", reason: String(err?.code ?? err?.message ?? err) }, 403) };
-  }
-
-  return { session, bodyBytes };
-}
-
-app.get("/api/profile", async (c) => {
-  const r = await requireDbscProof(c);
-  if (r.error) return r.error;
   return c.json({
-    email: r.session.user.email,
-    name: r.session.user.name,
+    email: session.user.email,
+    name: session.user.name,
     securityLevel: "device-bound",
     note: "Reached only from the bound device — a stolen cookie replayed elsewhere returns 403.",
   });
 });
 
-app.post("/api/payment", async (c) => {
-  const r = await requireDbscProof(c, { signBody: true });
-  if (r.error) return r.error;
+app.post("/api/payment", dbscProof, async (c) => {
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  // requireDbscProof stashed the raw bytes under "dbscBody" since we consumed the body.
+  const bodyBytes = c.get("dbscBody") ?? new Uint8Array(0);
   let payload = {};
   try {
-    payload = JSON.parse(new TextDecoder().decode(r.bodyBytes));
+    payload = JSON.parse(new TextDecoder().decode(bodyBytes));
   } catch { /* */ }
   return c.json({
     ok: true,
-    user: r.session.user.email,
+    user: session.user.email,
     received: payload,
     note: "Body hash verified by the proof — an MITM cannot change the amount after signing.",
   });
