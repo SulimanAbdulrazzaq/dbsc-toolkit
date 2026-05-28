@@ -54,13 +54,6 @@ app.get("/api/me", async (req, res) => {
   });
 });
 
-// Debug: log proof header arrival
-app.use("/api/profile", (req, _res, next) => {
-  console.log("[debug /api/profile] headers x-dbsc-bound-proof:", req.headers["x-dbsc-bound-proof"]?.slice(0, 60));
-  console.log("[debug /api/profile] res.locals.dbsc tier:", _res.locals.dbsc?.tier, "sessionId:", _res.locals.dbsc?.sessionId);
-  next();
-});
-
 app.get("/api/profile", dbsc.requireProof(), async (req, res) => {
   const session = await auth.api.getSession({ headers: new Headers(req.headers) });
   if (!session) return res.status(401).json({ error: "no session" });
@@ -174,16 +167,30 @@ async function plainFetch(method, path, body) {
   return { method, path, status: r.status, body: parsed };
 }
 
+async function reinitDbsc() {
+  if (typeof window.initDbsc !== 'function') return;
+  try {
+    const outcome = await window.initDbsc();
+    console.log('[dbsc] re-init outcome', outcome);
+  } catch (err) {
+    console.error('[dbsc] re-init failed', err);
+  }
+}
+
 document.getElementById('signup-btn').onclick = async () => {
-  show(await plainFetch('POST', '/api/auth/sign-up/email', {
+  const r = await plainFetch('POST', '/api/auth/sign-up/email', {
     email: val('email'), password: document.getElementById('password').value, name: val('name') || 'Demo',
-  }));
+  });
+  show(r);
+  if (r.status === 200) await reinitDbsc();
 };
 
 document.getElementById('login-btn').onclick = async () => {
-  show(await plainFetch('POST', '/api/auth/sign-in/email', {
+  const r = await plainFetch('POST', '/api/auth/sign-in/email', {
     email: val('email'), password: document.getElementById('password').value,
-  }));
+  });
+  show(r);
+  if (r.status === 200) await reinitDbsc();
 };
 
 document.getElementById('me-btn').onclick = async () => show(await plainFetch('GET', '/api/me'));
