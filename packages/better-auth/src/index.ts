@@ -176,25 +176,15 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
           ],
         },
         async (ctx: any) => {
-          const allHeaders: Record<string, string> = {};
-          ctx.request?.headers?.forEach?.((v: string, k: string) => { allHeaders[k] = v; });
-          console.log("[dbsc/registration] HIT", JSON.stringify({
-            method: ctx.request?.method,
-            headers: allHeaders,
-            hasResponseHeader: !!(allHeaders["secure-session-response"] || allHeaders["sec-session-response"]),
-          }));
-
           const store = getStorageFromCtx(ctx);
           const cookies = parseCookies(ctx.request?.headers?.get?.("cookie") ?? "");
-          console.log("[dbsc/registration] cookies:", Object.keys(cookies), "regCookieName:", names.reg);
           const sessionId = cookies[names.reg] ?? "";
-          if (!sessionId) {
-            console.log("[dbsc/registration] FAIL: no session id in cookies");
-            return ctx.json({ error: "missing session" }, { status: 400 });
+          const expectedJti = cookies[names.challenge] ?? "";
+          if (!sessionId || !expectedJti) {
+            return ctx.json({ error: "missing session or challenge cookie" }, { status: 400 });
           }
 
-          const challenge = await store.getChallenge(sessionId);
-          console.log("[dbsc/registration] sessionId:", sessionId, "challenge found:", !!challenge);
+          const challenge = await store.getChallenge(expectedJti);
           if (!challenge) {
             return ctx.json({ error: "challenge not found" }, { status: 400 });
           }
@@ -203,11 +193,10 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
             ctx.request?.headers?.get?.("secure-session-response") ??
             ctx.request?.headers?.get?.("sec-session-response") ??
             undefined;
-          console.log("[dbsc/registration] responseHeader present:", !!responseHeader, "length:", responseHeader?.length);
 
           try {
             const result = await handleRegistration(
-              { sessionId, secSessionResponseHeader: responseHeader, expectedJti: challenge.jti },
+              { sessionId, secSessionResponseHeader: responseHeader, expectedJti },
               store,
             );
 
@@ -453,14 +442,6 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
             headers.append("Set-Cookie", sessionCookieHeader(sessionId));
             headers.append("Set-Cookie", regCookieHeader(sessionId));
             headers.append("Set-Cookie", challengeCookieHeader(jti));
-
-            console.log("[dbsc after-hook] EMIT", JSON.stringify({
-              path: ctx.path,
-              sessionId,
-              userId,
-              jti,
-              regHeader,
-            }));
 
             return { headers };
           },

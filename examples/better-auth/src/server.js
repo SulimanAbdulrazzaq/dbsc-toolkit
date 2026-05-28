@@ -137,7 +137,6 @@ app.get("/api/auth/dbsc-bound/challenge", async (c) => {
 });
 
 app.post("/api/auth/dbsc-bound/registration", async (c) => {
-  console.log("[direct /dbsc-bound/registration] HIT");
   const store = await getDbscStorage();
   const cookies = parseCookieHeader(c.req.header("cookie"));
   const sessionId = cookies["__Host-dbsc-session"] ?? cookies["__Host-dbsc-reg"] ?? "";
@@ -153,10 +152,10 @@ app.post("/api/auth/dbsc-bound/registration", async (c) => {
       },
       store,
     );
-    console.log("[direct /dbsc-bound/registration] SUCCESS — polyfill key stored");
+    console.log("[dbsc] polyfill key stored for session", sessionId);
     return c.json({ ok: true });
   } catch (err) {
-    console.log("[direct /dbsc-bound/registration] FAILED:", err?.code, err?.message);
+    console.log("[dbsc] polyfill registration failed:", err?.code ?? err?.message);
     return c.json({ error: String(err?.message ?? err) }, 400);
   }
 });
@@ -184,31 +183,27 @@ app.post("/api/auth/dbsc-bound/refresh", async (c) => {
 });
 
 app.post("/api/auth/dbsc/registration", async (c) => {
-  console.log("[direct /dbsc/registration] HIT");
   const store = await getDbscStorage();
   const cookies = parseCookieHeader(c.req.header("cookie"));
   const sessionId = cookies["__Host-dbsc-reg"] ?? "";
   const expectedJti = cookies["__Host-dbsc-challenge"] ?? "";
-  console.log("[direct /dbsc/registration] sessionId:", sessionId, "jti:", expectedJti);
 
   if (!sessionId || !expectedJti) {
     return c.json({ error: "missing session or challenge cookie" }, 400);
   }
 
   const challenge = await store.getChallenge(expectedJti);
-  console.log("[direct /dbsc/registration] challenge found:", !!challenge);
   if (!challenge) return c.json({ error: "challenge not found" }, 400);
 
   const responseHeader =
     c.req.header("secure-session-response") ?? c.req.header("sec-session-response");
-  console.log("[direct /dbsc/registration] response header length:", responseHeader?.length);
 
   try {
     await dbscHandleRegistration(
       { sessionId, secSessionResponseHeader: responseHeader, expectedJti },
       store,
     );
-    console.log("[direct /dbsc/registration] SUCCESS — tier flipped to dbsc");
+    console.log("[dbsc] tier flipped to dbsc for session", sessionId);
 
     c.header(
       "Set-Cookie",
@@ -227,13 +222,12 @@ app.post("/api/auth/dbsc/registration", async (c) => {
       ],
     });
   } catch (err) {
-    console.log("[direct /dbsc/registration] FAILED:", err?.code, err?.message);
+    console.log("[dbsc] registration failed:", err?.code ?? err?.message);
     return c.json({ error: String(err?.message ?? err) }, 400);
   }
 });
 
 app.post("/api/auth/dbsc/refresh", async (c) => {
-  console.log("[direct /dbsc/refresh] HIT");
   const store = await getDbscStorage();
   const sessionId =
     c.req.header("sec-secure-session-id") ?? c.req.header("secure-session-id") ?? "";
@@ -261,7 +255,7 @@ app.post("/api/auth/dbsc/refresh", async (c) => {
       { sessionId, secSessionResponseHeader: responseHeader, expectedJti: challenge.jti },
       store,
     );
-    console.log("[direct /dbsc/refresh] SUCCESS");
+    console.log("[dbsc] refresh OK for session", sessionId);
     c.header(
       "Set-Cookie",
       `__Host-dbsc-session=${sessionId}; HttpOnly; Path=/; SameSite=Lax; Max-Age=600; Secure`,
@@ -279,30 +273,16 @@ app.post("/api/auth/dbsc/refresh", async (c) => {
       ],
     });
   } catch (err) {
-    console.log("[direct /dbsc/refresh] FAILED:", err?.code, err?.message);
+    console.log("[dbsc] refresh failed:", err?.code ?? err?.message);
     return c.json({ error: String(err?.message ?? err) }, 400);
   }
 });
 
 // Better Auth handles everything else under /api/auth/* — sign-in/sign-up etc.
 app.all("/api/auth/:rest{.+}", async (c) => {
-  const interestingHeaders = {};
-  for (const [k, v] of c.req.raw.headers.entries()) {
-    if (k.startsWith("sec-") || k.startsWith("secure-") || k === "cookie" || k === "user-agent") {
-      interestingHeaders[k] = v;
-    }
-  }
-  console.log(`[REQ] ${c.req.method} ${c.req.path}`, JSON.stringify(interestingHeaders));
-  emitLog({ t: "req", method: c.req.method, path: c.req.path, headers: interestingHeaders });
+  emitLog({ t: "req", method: c.req.method, path: c.req.path });
   const res = await auth.handler(c.req.raw);
-  const resHeaders = {};
-  for (const [k, v] of res.headers.entries()) {
-    if (k.startsWith("sec-") || k.startsWith("secure-") || k === "set-cookie") {
-      resHeaders[k] = v;
-    }
-  }
-  console.log(`[RES] ${c.req.method} ${c.req.path} → ${res.status}`, JSON.stringify(resHeaders));
-  emitLog({ t: "res", method: c.req.method, path: c.req.path, status: res.status, headers: resHeaders });
+  emitLog({ t: "res", method: c.req.method, path: c.req.path, status: res.status });
   return res;
 });
 
@@ -346,9 +326,6 @@ async function requireDbscProof(c, opts = {}) {
   if (!session) return { error: c.json({ error: "not authenticated" }, 401) };
 
   const proofHeader = c.req.header("x-dbsc-bound-proof");
-  console.log("[requireDbscProof] header present:", !!proofHeader, "value:", proofHeader?.slice(0, 80));
-  console.log("[requireDbscProof] sessionId:", session.session.id, "method:", c.req.method, "path:", new URL(c.req.url).pathname);
-
   if (!proofHeader) {
     return { error: c.json({ error: "PROOF_MISSING", note: "X-Dbsc-Bound-Proof header required" }, 403) };
   }
@@ -373,9 +350,7 @@ async function requireDbscProof(c, opts = {}) {
       },
       storage,
     );
-    console.log("[requireDbscProof] OK");
   } catch (err) {
-    console.log("[requireDbscProof] FAIL:", err?.code, err?.message);
     return { error: c.json({ error: "PROOF_INVALID", reason: String(err?.code ?? err?.message ?? err) }, 403) };
   }
 
