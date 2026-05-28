@@ -77,13 +77,33 @@ app.get("/profile", dbsc.requireProof(), async (req, res) => {
 <script src="/dbsc-client/init.js" type="module"></script>
 ```
 
-The shim auto-points the polyfill SDK at the right paths and exposes `window.boundFetch`. Use it on calls to any guarded route:
+The shim auto-points the polyfill SDK at the right paths and exposes:
+
+- `window.boundFetch` — `fetch` that signs the request with the polyfill key
+- `window.initDbsc()` — re-runs the SDK so it observes a newly issued session
+- `window.clearBoundKey()` — wipes the IndexedDB polyfill key on sign-out
+
+Use `boundFetch` on calls to any guarded route:
 
 ```js
 const r = await boundFetch("/profile", { credentials: "include" })
 ```
 
-Total user changes: **2 imports, 3 lines of server code, 1 script tag, 1 fetch wrapper.**
+**One catch**: the shim probes `/dbsc-bound/state` once on page load. A
+logged-out visitor resolves to `unbound` and the SDK returns without storing a
+polyfill key. Call `window.initDbsc()` after a fresh sign-in / sign-up so the
+SDK observes the session Better Auth just issued:
+
+```js
+const r = await fetch("/api/auth/sign-in/email", { … })
+if (r.ok) await window.initDbsc()
+```
+
+Skipping this leaves `boundFetch` short-circuiting to plain `fetch` without the
+proof header — guarded routes return 403.
+
+Total user changes: **2 imports, 3 lines of server code, 1 script tag, 1
+`initDbsc()` call after sign-in.**
 
 ## How the flow runs
 
