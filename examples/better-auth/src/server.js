@@ -346,6 +346,9 @@ async function requireDbscProof(c, opts = {}) {
   if (!session) return { error: c.json({ error: "not authenticated" }, 401) };
 
   const proofHeader = c.req.header("x-dbsc-bound-proof");
+  console.log("[requireDbscProof] header present:", !!proofHeader, "value:", proofHeader?.slice(0, 80));
+  console.log("[requireDbscProof] sessionId:", session.session.id, "method:", c.req.method, "path:", new URL(c.req.url).pathname);
+
   if (!proofHeader) {
     return { error: c.json({ error: "PROOF_MISSING", note: "X-Dbsc-Bound-Proof header required" }, 403) };
   }
@@ -369,7 +372,9 @@ async function requireDbscProof(c, opts = {}) {
       },
       storage,
     );
+    console.log("[requireDbscProof] OK");
   } catch (err) {
+    console.log("[requireDbscProof] FAIL:", err?.code, err?.message);
     return { error: c.json({ error: "PROOF_INVALID", reason: String(err?.code ?? err?.message ?? err) }, 403) };
   }
 
