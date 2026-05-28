@@ -9,11 +9,10 @@
   },
   "dependencies": {
     "@dbsc-toolkit/better-auth": "workspace:*",
-    "@hono/node-server": "^1.13.7",
-    "@libsql/client": "^0.14.0",
     "better-auth": "^1.2.0",
     "better-sqlite3": "^12.10.0",
+    "cookie-parser": "^1.4.7",
     "dbsc-toolkit": "workspace:*",
-    "hono": "^4.0.0"
+    "express": "^5.2.1"
   }
 }

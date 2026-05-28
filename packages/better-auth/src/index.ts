@@ -26,14 +26,6 @@ import {
 import { createBetterAuthStorageAdapter } from "./adapter.js";
 import { dbscSchema } from "./schema.js";
 
-export { mountDbscRoutes, requireDbscProof } from "./mount.js";
-export type {
-  MountDbscRoutesOptions,
-  MountableApp,
-  AuthLike,
-  RequireDbscProofOptions,
-} from "./mount.js";
-
 export interface DbscPluginOptions {
   /**
    * The base path where Better Auth is mounted. Default: "/api/auth".

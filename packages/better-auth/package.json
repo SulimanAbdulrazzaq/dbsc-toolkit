@@ -11,6 +11,10 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
+    "./express": {
+      "import": "./dist/express.js",
+      "types": "./dist/express.d.ts"
+    },
     "./client": {
       "import": "./dist/client.js",
       "types": "./dist/client.d.ts"
@@ -32,11 +36,19 @@
   },
   "peerDependencies": {
     "better-auth": ">=1.0.0",
-    "dbsc-toolkit": ">=2.9.0"
+    "dbsc-toolkit": ">=2.9.0",
+    "express": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "express": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "better-auth": "^1.2.0",
     "dbsc-toolkit": "workspace:*",
+    "express": "^5.2.1",
     "rimraf": "^6.0.0",
     "typescript": "^6.0.0"
   },

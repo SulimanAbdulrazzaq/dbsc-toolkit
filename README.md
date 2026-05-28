@@ -217,21 +217,30 @@ Full walk-through with `autoBind`, per-route policy, and the migration timeline:
 
 ### Using Better Auth?
 
-Install [@dbsc-toolkit/better-auth](./packages/better-auth/) — a thin plugin that wires DBSC into Better Auth's session lifecycle. Sessions from every sign-in method (email, OAuth, magic link, passkey) get bound automatically:
+Install [@dbsc-toolkit/better-auth](./packages/better-auth/) — sessions from every sign-in method (email, OAuth, magic link, passkey) get bound automatically:
 
 ```ts
+// auth.ts
 import { betterAuth } from "better-auth"
 import { dbsc } from "@dbsc-toolkit/better-auth"
-import { mountDbscRoutes, requireDbscProof } from "@dbsc-toolkit/better-auth"
 
 export const auth = betterAuth({
   plugins: [dbsc()],
 })
+```
 
-// In your Hono app:
-mountDbscRoutes(app, auth)
-app.all("/api/auth/:rest{.+}", (c) => auth.handler(c.req.raw))
-app.get("/api/profile", requireDbscProof(auth), profileHandler)
+```ts
+// server.ts
+import { dbscExpress } from "@dbsc-toolkit/better-auth/express"
+
+const dbsc = dbscExpress(auth)
+dbsc.install(app)                              // mounts /dbsc/*, /dbsc-bound/*, /dbsc-client/*
+app.all("/api/auth/*splat", toNodeHandler(auth))
+app.get("/profile", dbsc.requireProof(), profileHandler)
+```
+
+```html
+<script src="/dbsc-client/init.js" type="module"></script>
 ```
 
 Live demo: <https://dbsc-better-auth-demo.onrender.com/>. Full docs in the [package README](./packages/better-auth/README.md).
