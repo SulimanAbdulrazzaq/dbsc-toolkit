@@ -153,14 +153,25 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
         REGISTRATION_PATH,
         { method: "POST" },
         async (ctx: any) => {
+          const allHeaders: Record<string, string> = {};
+          ctx.request?.headers?.forEach?.((v: string, k: string) => { allHeaders[k] = v; });
+          console.log("[dbsc/registration] HIT", JSON.stringify({
+            method: ctx.request?.method,
+            headers: allHeaders,
+            hasResponseHeader: !!(allHeaders["secure-session-response"] || allHeaders["sec-session-response"]),
+          }));
+
           const store = getStorageFromCtx(ctx);
           const cookies = parseCookies(ctx.request?.headers?.get?.("cookie") ?? "");
+          console.log("[dbsc/registration] cookies:", Object.keys(cookies), "regCookieName:", names.reg);
           const sessionId = cookies[names.reg] ?? "";
           if (!sessionId) {
+            console.log("[dbsc/registration] FAIL: no session id in cookies");
             return ctx.json({ error: "missing session" }, { status: 400 });
           }
 
           const challenge = await store.getChallenge(sessionId);
+          console.log("[dbsc/registration] sessionId:", sessionId, "challenge found:", !!challenge);
           if (!challenge) {
             return ctx.json({ error: "challenge not found" }, { status: 400 });
           }
@@ -169,6 +180,7 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
             ctx.request?.headers?.get?.("secure-session-response") ??
             ctx.request?.headers?.get?.("sec-session-response") ??
             undefined;
+          console.log("[dbsc/registration] responseHeader present:", !!responseHeader, "length:", responseHeader?.length);
 
           try {
             const result = await handleRegistration(
@@ -399,16 +411,19 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
             });
 
             // Return headers — Better Auth merges these into the response.
-            // Chrome's DBSC engine requires the cookie referenced by `id="..."`
-            // to exist on this response (or already), otherwise it silently
-            // skips registration. Set BOTH cookies:
-            //   - __Host-dbsc-session: the bound cookie Chrome watches
-            //   - __Host-dbsc-reg: temp cookie our registration endpoint reads
             const headers = new Headers();
             headers.set(REGISTRATION_HEADER, regHeader);
             headers.set(LEGACY_REGISTRATION_HEADER, regHeader);
             headers.append("Set-Cookie", sessionCookieHeader(sessionId));
             headers.append("Set-Cookie", regCookieHeader(sessionId));
+
+            console.log("[dbsc after-hook] EMIT", JSON.stringify({
+              path: ctx.path,
+              sessionId,
+              userId,
+              regHeader,
+              cookies: [sessionCookieHeader(sessionId), regCookieHeader(sessionId)],
+            }));
 
             return { headers };
           },

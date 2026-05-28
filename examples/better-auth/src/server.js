@@ -60,9 +60,23 @@ app.get("/debug-logs/stream", (c) => {
 
 // Better Auth handles /api/auth/** — including the DBSC plugin endpoints.
 app.on(["GET", "POST"], "/api/auth/**", async (c) => {
-  emitLog({ t: "req", method: c.req.method, path: c.req.path });
+  const interestingHeaders = {};
+  for (const [k, v] of c.req.raw.headers.entries()) {
+    if (k.startsWith("sec-") || k.startsWith("secure-") || k === "cookie" || k === "user-agent") {
+      interestingHeaders[k] = v;
+    }
+  }
+  console.log(`[REQ] ${c.req.method} ${c.req.path}`, JSON.stringify(interestingHeaders));
+  emitLog({ t: "req", method: c.req.method, path: c.req.path, headers: interestingHeaders });
   const res = await auth.handler(c.req.raw);
-  emitLog({ t: "res", method: c.req.method, path: c.req.path, status: res.status });
+  const resHeaders = {};
+  for (const [k, v] of res.headers.entries()) {
+    if (k.startsWith("sec-") || k.startsWith("secure-") || k === "set-cookie") {
+      resHeaders[k] = v;
+    }
+  }
+  console.log(`[RES] ${c.req.method} ${c.req.path} → ${res.status}`, JSON.stringify(resHeaders));
+  emitLog({ t: "res", method: c.req.method, path: c.req.path, status: res.status, headers: resHeaders });
   return res;
 });
 
