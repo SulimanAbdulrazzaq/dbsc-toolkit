@@ -148,10 +148,12 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
     schema: dbscSchema,
 
     endpoints: {
-      // Native DBSC: Chrome POSTs the TPM-signed JWS here after key generation
+      // Native DBSC: Chrome POSTs the TPM-signed JWS here after key generation.
+      // Chrome sends an empty body — the JWS is in the Secure-Session-Response
+      // header — so we must accept any content-type (or none).
       dbscRegistration: createAuthEndpoint(
         REGISTRATION_PATH,
-        { method: "POST" },
+        { method: "POST", metadata: { allowedMediaTypes: ["*/*"] } },
         async (ctx: any) => {
           const allHeaders: Record<string, string> = {};
           ctx.request?.headers?.forEach?.((v: string, k: string) => { allHeaders[k] = v; });
@@ -217,7 +219,7 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
       // Native DBSC: Chrome POSTs here when the bound cookie expires
       dbscRefresh: createAuthEndpoint(
         REFRESH_PATH,
-        { method: "POST" },
+        { method: "POST", metadata: { allowedMediaTypes: ["*/*"] } },
         async (ctx: any) => {
           const store = getStorageFromCtx(ctx);
           const sessionId =
@@ -308,7 +310,7 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
       // Polyfill: register the Web Crypto key
       dbscBoundRegistration: createAuthEndpoint(
         BOUND_REGISTRATION_PATH,
-        { method: "POST" },
+        { method: "POST", metadata: { allowedMediaTypes: ["application/json"] } },
         async (ctx: any) => {
           const store = getStorageFromCtx(ctx);
           const body = (await ctx.request?.json?.()) as Record<string, unknown>;
@@ -331,7 +333,7 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
       // Polyfill: verify per-request proof
       dbscBoundRefresh: createAuthEndpoint(
         BOUND_REFRESH_PATH,
-        { method: "POST" },
+        { method: "POST", metadata: { allowedMediaTypes: ["application/json"] } },
         async (ctx: any) => {
           const store = getStorageFromCtx(ctx);
           const body = (await ctx.request?.json?.()) as Record<string, unknown>;
