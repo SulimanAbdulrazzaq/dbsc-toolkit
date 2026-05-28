@@ -11,6 +11,8 @@ import { auth } from "./auth.js";
 import {
   handleRegistration as dbscHandleRegistration,
   handleRefresh as dbscHandleRefresh,
+  handleBoundRegistration as dbscHandleBoundRegistration,
+  handleBoundRefresh as dbscHandleBoundRefresh,
   issueChallenge as dbscIssueChallenge,
   buildChallengeHeader as dbscBuildChallengeHeader,
   verifyBoundProof,
@@ -86,6 +88,100 @@ async function getDbscStorage() {
   const c = await auth.$context;
   return createBetterAuthStorageAdapter(c.adapter, c.internalAdapter);
 }
+
+// Polyfill (bound) routes — direct in Hono so we get full control over the
+// state response that the SDK needs to drive co-registration.
+app.get("/api/auth/dbsc-bound/state", async (c) => {
+  c.header("X-Server-Time", String(Date.now()));
+  const store = await getDbscStorage();
+  const cookies = parseCookieHeader(c.req.header("cookie"));
+  const sessionId = cookies["__Host-dbsc-session"] ?? cookies["__Host-dbsc-reg"] ?? "";
+
+  if (!sessionId) return c.json({ phase: "unbound", sessionId: null });
+
+  const session = await store.getSession(sessionId);
+  if (!session) return c.json({ phase: "unbound", sessionId: null });
+
+  const nativeKey = await store.getBoundKey(sessionId, "native");
+  const boundKey = await store.getBoundKey(sessionId, "bound");
+
+  if (!nativeKey && !boundKey) {
+    const ch = await dbscIssueChallenge(sessionId, store, 600_000);
+    return c.json({ phase: "needs-registration", sessionId, challenge: ch.jti });
+  }
+  if (nativeKey && !boundKey) {
+    // Native TPM key registered — SDK needs to co-register the polyfill key
+    // so requireProof() has something to verify on every request.
+    const ch = await dbscIssueChallenge(sessionId, store, 600_000);
+    return c.json({
+      phase: "needs-bound-registration",
+      sessionId,
+      tier: session.tier,
+      challenge: ch.jti,
+      refreshIntervalMs: 600_000,
+    });
+  }
+  return c.json({ phase: "bound", sessionId, tier: session.tier, refreshIntervalMs: 600_000 });
+});
+
+app.get("/api/auth/dbsc-bound/challenge", async (c) => {
+  c.header("X-Server-Time", String(Date.now()));
+  const store = await getDbscStorage();
+  const cookies = parseCookieHeader(c.req.header("cookie"));
+  const sessionId = cookies["__Host-dbsc-session"] ?? cookies["__Host-dbsc-reg"] ?? "";
+  if (!sessionId) return c.json({ error: "no session" }, 403);
+  const session = await store.getSession(sessionId);
+  if (!session) return c.json({ error: "no session" }, 403);
+  const ch = await dbscIssueChallenge(sessionId, store, 600_000);
+  return c.json({ challenge: ch.jti });
+});
+
+app.post("/api/auth/dbsc-bound/registration", async (c) => {
+  console.log("[direct /dbsc-bound/registration] HIT");
+  const store = await getDbscStorage();
+  const cookies = parseCookieHeader(c.req.header("cookie"));
+  const sessionId = cookies["__Host-dbsc-session"] ?? cookies["__Host-dbsc-reg"] ?? "";
+  if (!sessionId) return c.json({ error: "missing session" }, 400);
+  const body = await c.req.json();
+  try {
+    await dbscHandleBoundRegistration(
+      {
+        sessionId,
+        publicKey: body.publicKey,
+        signature: body.signature,
+        expectedJti: body.challenge,
+      },
+      store,
+    );
+    console.log("[direct /dbsc-bound/registration] SUCCESS — polyfill key stored");
+    return c.json({ ok: true });
+  } catch (err) {
+    console.log("[direct /dbsc-bound/registration] FAILED:", err?.code, err?.message);
+    return c.json({ error: String(err?.message ?? err) }, 400);
+  }
+});
+
+app.post("/api/auth/dbsc-bound/refresh", async (c) => {
+  const store = await getDbscStorage();
+  const cookies = parseCookieHeader(c.req.header("cookie"));
+  const sessionId = cookies["__Host-dbsc-session"] ?? cookies["__Host-dbsc-reg"] ?? "";
+  if (!sessionId) return c.json({ error: "missing session" }, 400);
+  const body = await c.req.json();
+  try {
+    await dbscHandleBoundRefresh(
+      {
+        sessionId,
+        signature: body.signature,
+        expectedJti: body.challenge,
+        timestamp: body.timestamp,
+      },
+      store,
+    );
+    return c.json({ ok: true });
+  } catch (err) {
+    return c.json({ error: String(err?.message ?? err) }, 400);
+  }
+});
 
 app.post("/api/auth/dbsc/registration", async (c) => {
   console.log("[direct /dbsc/registration] HIT");
