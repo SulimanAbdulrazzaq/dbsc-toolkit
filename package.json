@@ -93,6 +93,7 @@
   },
   "devDependencies": {
     "@fastify/cookie": "^11.0.2",
+    "fastify-plugin": "^5.0.1",
     "@types/express": "^5.0.6",
     "@types/node": "^20.0.0",
     "@types/pg": "^8.0.0",
