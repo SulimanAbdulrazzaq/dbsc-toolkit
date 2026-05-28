@@ -116,11 +116,14 @@ Without the script those browsers stay on `tier: "none"`. Chromium 146+ doesn't 
 
 Walk-through: [docs/getting-started.md](./docs/getting-started.md).
 
-## Live demo
+## Live demos
 
-<https://dbsc-toolkit.onrender.com/>
+| URL | Stack | Source |
+|---|---|---|
+| <https://dbsc-toolkit.onrender.com/> | Express + raw `dbsc-toolkit` | [examples/express/](./examples/express/) |
+| <https://dbsc-better-auth-demo.onrender.com/> | Hono + Better Auth + `@dbsc-toolkit/better-auth` | [examples/better-auth/](./examples/better-auth/) |
 
-Sign up, log in, click **Check session**. Chromium 146+ lands on `tier: "dbsc"` within a second; Firefox/Safari land on `tier: "bound"` within ~3 seconds. The demo uses a 60-second bound-cookie TTL so refresh fires fast — open DevTools Network and watch. Source: [examples/express/](./examples/express/).
+Sign up, log in, click **Check session**. Chromium 145+ lands on `tier: "dbsc"` within a second; Firefox/Safari land on `tier: "bound"` within ~3 seconds. Open DevTools Network and watch the binding flow.
 
 ## Comparison
 
@@ -211,6 +214,27 @@ app.post("/logout", async (req, res) => {
 **App split across subdomains?** (`app.example.com` + `api.example.com`) Default `__Host-` cookies are origin-locked — proxy `/dbsc/*` and `/dbsc-bound/*` through one origin if you can; that's the strongest setting. If a same-origin layout isn't workable, v2.9.0+ exposes `cookieScope: "site"` + `cookieDomain: "example.com"` on `createDbsc({...})`, switching the binding cookies to `__Secure-` with a `Domain` attribute. The validator throws at construction time if either is wrong — misconfiguration is loud, not silent. Trade-off and concrete recipe: [docs/integration-recipes.md#multi-subdomain-apps-cookiescope-site](./docs/integration-recipes.md#multi-subdomain-apps-cookiescope-site).
 
 Full walk-through with `autoBind`, per-route policy, and the migration timeline: [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md).
+
+### Using Better Auth?
+
+Install [@dbsc-toolkit/better-auth](./packages/better-auth/) — a thin plugin that wires DBSC into Better Auth's session lifecycle. Sessions from every sign-in method (email, OAuth, magic link, passkey) get bound automatically:
+
+```ts
+import { betterAuth } from "better-auth"
+import { dbsc } from "@dbsc-toolkit/better-auth"
+import { mountDbscRoutes, requireDbscProof } from "@dbsc-toolkit/better-auth"
+
+export const auth = betterAuth({
+  plugins: [dbsc()],
+})
+
+// In your Hono app:
+mountDbscRoutes(app, auth)
+app.all("/api/auth/:rest{.+}", (c) => auth.handler(c.req.raw))
+app.get("/api/profile", requireDbscProof(auth), profileHandler)
+```
+
+Live demo: <https://dbsc-better-auth-demo.onrender.com/>. Full docs in the [package README](./packages/better-auth/README.md).
 
 ## Protect your routes
 
