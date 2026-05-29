@@ -1,53 +1,58 @@
 # @dbsc-toolkit/better-auth
 
-Device Bound Session Credentials (DBSC) for [Better Auth](https://better-auth.com), powered by [dbsc-toolkit](https://github.com/SulimanAbdulrazzaq/dbsc-toolkit).
+Device Bound Session Credentials for [Better Auth](https://better-auth.com).
 
-On Chromium 145+ (Chrome, Edge, Brave, Opera, Arc), sessions are bound to a hardware key in the TPM or Secure Enclave. Stolen cookies cannot be replayed — the refresh requires a signature from the device's private key. On Firefox, Safari, and older Chromium, the same protection is provided via a non-extractable Web Crypto key stored in IndexedDB.
+A session cookie gets stolen. Today the attacker pastes it into their own browser and they're your user. Cookie HttpOnly didn't matter. Cookie Secure didn't matter. Refresh tokens didn't matter.
 
-**Live demo:** [dbsc-better-auth-demo.onrender.com](https://dbsc-better-auth-demo.onrender.com)
+With DBSC the session is tied to a private key the browser generates inside the device at sign-in. The cookie is still stealable. But the refresh request needs a signature from the key, and the attacker on another machine has nothing to sign with. The replay 403s.
 
-## Setup (Express)
+Live demo: [dbsc-better-auth-demo.onrender.com](https://dbsc-better-auth-demo.onrender.com). The page has a "Simulate stolen cookie" button that fires a bare fetch with the bound-session cookie attached and no proof header. It comes back 403 `PROOF_MISSING`. That's the whole point of the library, in one button.
 
-### 1. Install
+Chromium 145+ does this with a key in the TPM or Secure Enclave. Firefox, Safari, and older Chromium use a Web Crypto polyfill key in IndexedDB with `extractable: false`. Same `requireProof()` guard either way.
+
+## Install
 
 ```sh
 npm install @dbsc-toolkit/better-auth dbsc-toolkit
 ```
 
-`better-auth` and `express` are peer deps — already in your project.
+`better-auth` and `express` you already have.
 
-### 2. Add the plugin to Better Auth
+## Setup
+
+The integration is mostly four blocks. Two in `auth.ts`, two in `server.ts`.
+
+### auth.ts
 
 ```ts
-// auth.ts
 import { betterAuth } from "better-auth"
 import { dbsc } from "@dbsc-toolkit/better-auth"
 
 export const auth = betterAuth({
   database: db,
   emailAndPassword: { enabled: true },
-  plugins: [dbsc()],                      // ← add this
+  plugins: [dbsc()],
 })
 ```
 
-Run migrations to create the `dbscSession` + `dbscBoundKey` tables:
+Then run migrations so Better Auth creates the two new tables (`dbscSession`, `dbscBoundKey`):
 
 ```sh
 npx @better-auth/cli migrate
 ```
 
-### 3. Wire the Express adapter
+### server.ts
 
 ```ts
-// server.ts
 import express from "express"
+import cookieParser from "cookie-parser"
 import { toNodeHandler } from "better-auth/node"
 import { dbscExpress } from "@dbsc-toolkit/better-auth/express"
 import { auth } from "./auth.js"
 
 const app = express()
+app.use(cookieParser())
 
-// DBSC routes BEFORE Better Auth's catch-all (toNodeHandler swallows /api/auth/*).
 const dbsc = dbscExpress(auth)
 dbsc.install(app)
 
@@ -55,13 +60,9 @@ app.all("/api/auth/*splat", toNodeHandler(auth))
 app.use(express.json())
 ```
 
-That's the whole server setup. `dbsc.install(app)` mounts:
+The order is load-bearing. `dbsc.install(app)` has to come before the Better Auth catch-all, otherwise `toNodeHandler` swallows `/api/auth/dbsc/*` and Chrome's registration POST 404s. I burned 30 minutes on this the first time. Don't do what I did.
 
-- `POST /api/auth/dbsc/registration` + `POST /api/auth/dbsc/refresh` — native TPM flow
-- `GET /api/auth/dbsc-bound/*` — polyfill flow for Firefox / Safari / older Chromium
-- `GET /dbsc-client/*` — the browser SDK and the auto-init shim
-
-### 4. Guard routes that need per-request proof
+### Guarded routes
 
 ```ts
 app.get("/profile", dbsc.requireProof(), async (req, res) => {
@@ -71,98 +72,102 @@ app.get("/profile", dbsc.requireProof(), async (req, res) => {
 })
 ```
 
-### 5. One line on the frontend
+`requireProof()` is a regular Express middleware. Drop it in front of any route a stolen cookie shouldn't reach. Unguarded routes are unaffected.
+
+POST handlers that take a body need `express.raw({ type: "*/*" })` in front of `requireProof()` so the body bytes survive for the signature check:
+
+```ts
+app.post("/payment", express.raw({ type: "*/*" }), dbsc.requireProof(), payHandler)
+```
+
+### Frontend
+
+One tag in your HTML:
 
 ```html
 <script src="/dbsc-client/init.js" type="module"></script>
 ```
 
-The shim auto-points the polyfill SDK at the right paths and exposes:
+The shim loads the polyfill SDK, points it at the right paths, and exposes three things on `window`:
 
-- `window.boundFetch` — `fetch` that signs the request with the polyfill key
-- `window.initDbsc()` — re-runs the SDK so it observes a newly issued session
-- `window.clearBoundKey()` — wipes the IndexedDB polyfill key on sign-out
+- `boundFetch` is a `fetch` that signs the request with the polyfill key
+- `initDbsc()` re-runs the SDK after a fresh sign-in
+- `clearBoundKey()` wipes the polyfill key, call on sign-out
 
-Use `boundFetch` on calls to any guarded route:
+The catch (worth knowing once and never again): the shim runs once on page load. A logged-out visitor lands on `phase: "unbound"`, the SDK returns without storing a key, and `boundFetch` falls back to plain `fetch`. After a fresh sign-in you have to call `initDbsc()` so the SDK observes the session Better Auth just issued:
+
+```js
+const r = await fetch("/api/auth/sign-in/email", { ... })
+if (r.ok) await window.initDbsc()
+```
+
+After that, swap `fetch` for `boundFetch` on calls to guarded routes:
 
 ```js
 const r = await boundFetch("/profile", { credentials: "include" })
 ```
 
-**One catch**: the shim probes `/dbsc-bound/state` once on page load. A
-logged-out visitor resolves to `unbound` and the SDK returns without storing a
-polyfill key. Call `window.initDbsc()` after a fresh sign-in / sign-up so the
-SDK observes the session Better Auth just issued:
+## What's actually happening
 
-```js
-const r = await fetch("/api/auth/sign-in/email", { … })
-if (r.ok) await window.initDbsc()
-```
+When the user signs in, the plugin's `after` hook attaches `Secure-Session-Registration` and three short-lived cookies to the response. Chrome 145+ sees the registration header, generates an ES256 keypair in the TPM, and POSTs a self-signed JWS to `/api/auth/dbsc/registration` on its own — no app code involved. The Express adapter verifies, stores the public JWK, flips the session's `tier` to `"dbsc"`.
 
-Skipping this leaves `boundFetch` short-circuiting to plain `fetch` without the
-proof header — guarded routes return 403.
+In parallel, the init shim hits `/api/auth/dbsc-bound/state`. On a Chromium session that already has a TPM key, the response says `needs-bound-registration` and the SDK co-registers a polyfill Web Crypto key. This second key is what `requireProof()` actually verifies on every request, because the TPM key can't sign request-scoped messages from JavaScript.
 
-Total user changes: **2 imports, 3 lines of server code, 1 script tag, 1
-`initDbsc()` call after sign-in.**
+On Firefox and Safari there's no native step. The SDK registers the polyfill key directly and that's the only key in play.
 
-## How the flow runs
+From then on, `boundFetch` builds a `ts=…;sig=…;bh=…` proof for every call (`bh` is the SHA-256 of the request body, which is what closes the MITM-modifies-body gap). `requireProof()` verifies the signature against the stored public key, checks the path and method match, checks the body hash, checks the timestamp window, optionally checks a replay cache.
 
-1. User signs in → the `dbsc()` plugin's after-hook fires `Secure-Session-Registration` + three cookies
-2. Chromium 145+ signs the challenge with its TPM key and POSTs to `/api/auth/dbsc/registration`
-3. The Express adapter verifies, stores the public JWK, flips `tier` to `"dbsc"`
-4. The init shim's `initBoundDbsc()` polls `/api/auth/dbsc-bound/state` and co-registers a Web Crypto key (so per-request proofs work everywhere)
-5. `boundFetch` signs every guarded request; `requireProof()` rejects unsigned or replayed requests
+## Tier model
 
-The private key never leaves the device. A stolen `__Host-dbsc-session` cookie is useless without it.
+Every session row carries a `tier`:
+
+`"dbsc"` is the Chromium 145+ native binding, key in TPM 2.0 (Windows) or Secure Enclave (Apple) or Android Keystore.
+
+`"bound"` is the polyfill, key in IndexedDB with `extractable: false`.
+
+`"none"` is the transient state between sign-in and the registration POST completing. Usually under a second.
+
+`requireProof()` accepts both `dbsc` and `bound`. The per-request signature is what gates the route, not where the key lives. The point of distinguishing the two tiers is telemetry: an `onEvent` hook receives `tier_change` events when a session moves between them.
 
 ## Options
 
 ```ts
-// In auth.ts
+// auth.ts
 dbsc({
-  basePath: "/api/auth",            // must match the basePath you give Better Auth
-  cookieScope: "host",              // "host" (__Host-) or "site" (__Secure- + Domain)
-  cookieDomain: "example.com",      // required when cookieScope is "site"
-  sessionTtl: 600_000,              // bound cookie TTL in ms (default 10 min)
-  onEvent: (e) => log(e),           // telemetry for registration / refresh / failures
+  basePath: "/api/auth",         // match betterAuth({ basePath })
+  cookieScope: "host",           // "host" (__Host-) or "site" (__Secure- + Domain)
+  cookieDomain: "example.com",   // required when cookieScope is "site"
+  sessionTtl: 600_000,           // bound cookie TTL, ms. default 10 min
+  onEvent: (e) => log(e),
 })
 
-// In server.ts
+// server.ts
 dbscExpress(auth, {
-  basePath: "/api/auth",            // match dbsc({ basePath })
-  secure: true,                     // set false on bare-http localhost
-  clientPath: "/dbsc-client",       // SDK mount; false to skip
-  replayCache: new RedisReplayCache(redis),  // optional, for requireProof()
+  basePath: "/api/auth",
+  secure: true,                  // set false on bare-http localhost only
+  clientPath: "/dbsc-client",    // SDK mount; false to skip serving
+  replayCache: new RedisReplayCache(redis),
 })
 ```
 
-## Database tables
+## Database
 
-The plugin adds two tables via Better Auth's `schema` field:
+Two new tables, both added through Better Auth's `schema` field so they get migrated with everything else:
 
-| Table | Purpose |
-|---|---|
-| `dbscSession` | Tracks binding state (`tier`, `lastRefreshAt`) per session |
-| `dbscBoundKey` | Stores the public JWK for native (TPM) and polyfill (IndexedDB) keys |
+`dbscSession` is one row per Better Auth session, tracking `tier` and `lastRefreshAt`.
 
-Challenges live in Better Auth's existing `verification` table — `consumeVerificationValue` is its atomic primitive, which is what the storage adapter uses for replay-safe consume.
+`dbscBoundKey` is one row per `(sessionId, kind)` where `kind` is `native` (TPM) or `bound` (polyfill). The JWK is stored as JSON.
 
-## Tier model
-
-| Tier | Meaning |
-|---|---|
-| `"dbsc"` | TPM/Secure Enclave bound — Chromium 145+ |
-| `"bound"` | Web Crypto polyfill — Firefox, Safari, older Chromium |
-| `"none"` | Session created but registration not complete (transient) |
+Challenges live in Better Auth's existing `verification` table. The adapter uses `internalAdapter.consumeVerificationValue` because that's the only atomic single-use primitive Better Auth exposes, and DBSC challenges have to be single-use under concurrent registration attempts.
 
 ## Subpath exports
 
 | Import | When you need it |
 |---|---|
 | `@dbsc-toolkit/better-auth` | The `dbsc()` plugin for `betterAuth({ plugins })` |
-| `@dbsc-toolkit/better-auth/express` | The `dbscExpress(auth)` kit for Express apps |
-| `@dbsc-toolkit/better-auth/internal` | `createBetterAuthStorageAdapter` for advanced framework wiring |
+| `@dbsc-toolkit/better-auth/express` | `dbscExpress(auth)` for Express apps |
+| `@dbsc-toolkit/better-auth/internal` | `createBetterAuthStorageAdapter` for wiring DBSC into other runtimes (Hono, Fastify, Workers) |
 
 ## License
 
-Apache-2.0 — same as dbsc-toolkit.
+Apache-2.0.
