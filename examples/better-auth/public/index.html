@@ -84,6 +84,10 @@
 
 <h2>What DBSC defends against</h2>
 
+<p class="lede" style="margin-bottom: 0.8rem;">
+  Only the routes you put <code>dbsc.requireProof()</code> in front of demand the proof header. In this demo that's <code>/api/profile</code> and <code>/api/payment</code> — your real app decides its own list (typically: payments, admin actions, password change, email change, 2FA enroll). Routes without the guard, like <code>/api/me</code>, accept the bare cookie like any normal app.
+</p>
+
 <div class="card">
   <h3>The legit request</h3>
   <p>Your bound device signs a per-request proof. <code>requireProof()</code> verifies it, then the route runs.</p>
@@ -109,6 +113,7 @@
 <h2>Session control</h2>
 <button id="me-btn">Check session (/api/me)</button>
 <button id="logout-btn">Sign out</button>
+<button id="clear-btn">Clear everything (cookies + IndexedDB)</button>
 
 <p class="footnote">
   This is the live demo for <a href="https://www.npmjs.com/package/@dbsc-toolkit/better-auth">@dbsc-toolkit/better-auth</a>.
@@ -282,6 +287,35 @@ $("logout-btn").onclick = async () => {
   show(r);
   if (typeof window.clearBoundKey === "function") await window.clearBoundKey().catch(() => {});
   setTier("unbound", "—", "Signed out. Key cleared from IndexedDB.");
+};
+
+$("clear-btn").onclick = async () => {
+  clearExplain();
+  const cleared = { cookies: [], indexedDB: false, signOut: false };
+
+  // 1. Sign out via Better Auth (clears the auth session cookie server-side).
+  try {
+    await plainFetch("POST", "/api/auth/sign-out");
+    cleared.signOut = true;
+  } catch { /* */ }
+
+  // 2. Wipe every cookie this origin has set, including __Host- DBSC cookies.
+  //    __Host- cookies need the same Path/Secure attributes to clear cleanly.
+  for (const c of document.cookie.split(";")) {
+    const name = c.split("=")[0].trim();
+    if (!name) continue;
+    cleared.cookies.push(name);
+    document.cookie = name + "=; Path=/; Max-Age=0; SameSite=Lax";
+    document.cookie = name + "=; Path=/; Max-Age=0; SameSite=Lax; Secure";
+  }
+
+  // 3. Drop the polyfill key from IndexedDB.
+  if (typeof window.clearBoundKey === "function") {
+    try { await window.clearBoundKey(); cleared.indexedDB = true; } catch { /* */ }
+  }
+
+  show({ cleared, note: "Reload the page if anything looks stuck — server-side rows for the old session may still exist until they expire." });
+  setTier("unbound", "—", "Cleared. Sign up fresh to start over.");
 };
 
 (async function init() {

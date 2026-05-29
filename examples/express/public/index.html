@@ -91,6 +91,10 @@
 
 <h2>What DBSC defends against</h2>
 
+<p class="lede" style="margin-bottom: 0.8rem;">
+  Only the routes you put <code>requireProof()</code> in front of demand the proof header. In this demo that's <code>/profile</code> and <code>/payment</code> — your real app decides its own list (typically: payments, admin actions, password change, email change, 2FA enroll). Routes without the guard, like <code>/me</code>, accept the bare cookie like any normal app.
+</p>
+
 <div class="card">
   <h3>The legit request</h3>
   <p>Your bound device signs a per-request proof. <code>requireProof()</code> verifies it, then the route runs.</p>
@@ -122,6 +126,7 @@
 <h2>Session control</h2>
 <button id="me-btn">Check session (/me)</button>
 <button id="logout-btn">Sign out</button>
+<button id="clear-btn">Clear everything (cookies + IndexedDB)</button>
 
 <details class="advanced">
   <summary>Advanced — config, rate limit, cookie scope</summary>
@@ -351,6 +356,34 @@ $("logout-btn").onclick = async () => {
   show(r);
   if (typeof window.clearBoundKey === "function") await window.clearBoundKey().catch(() => {});
   setTier("unbound", "—", "Signed out. Key cleared from IndexedDB.");
+};
+
+$("clear-btn").onclick = async () => {
+  clearExplain();
+  const cleared = { cookies: [], indexedDB: false, serverState: false };
+
+  // 1. Server-side: drop DBSC binding + sweep all session rows.
+  try {
+    await plainFetch("POST", "/clear-cookies");
+    cleared.serverState = true;
+  } catch { /* */ }
+
+  // 2. Client-side: wipe every cookie this origin owns.
+  for (const c of document.cookie.split(";")) {
+    const name = c.split("=")[0].trim();
+    if (!name) continue;
+    cleared.cookies.push(name);
+    document.cookie = name + "=; Path=/; Max-Age=0; SameSite=Lax";
+    document.cookie = name + "=; Path=/; Max-Age=0; SameSite=Lax; Secure";
+  }
+
+  // 3. Drop the polyfill key from IndexedDB.
+  if (typeof window.clearBoundKey === "function") {
+    try { await window.clearBoundKey(); cleared.indexedDB = true; } catch { /* */ }
+  }
+
+  show({ cleared, note: "Cookies wiped, IndexedDB key dropped, server-side binding revoked. Reload if anything looks stuck." });
+  setTier("unbound", "—", "Cleared. Sign in fresh to start over.");
 };
 
 (async function init() {
