@@ -121,7 +121,7 @@ From then on, `boundFetch` builds a `ts=…;sig=…;bh=…` proof for every call
 
 Every session row carries a `tier`:
 
-`"dbsc"` is the Chromium 145+ native binding, key in TPM 2.0 (Windows) or Secure Enclave (Apple) or Android Keystore.
+`"dbsc"` is the Chromium 145+ native binding, key in TPM 2.0 (Windows) or Secure Enclave (Apple Silicon macOS).
 
 `"bound"` is the polyfill, key in IndexedDB with `extractable: false`.
 
