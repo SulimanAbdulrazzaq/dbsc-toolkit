@@ -116,12 +116,11 @@
   Powered by <a href="https://better-auth.com">Better Auth</a> + <code>dbsc-toolkit</code>.
 </p>
 
-<script type="module">
-  import { initBoundDbsc, wrapFetch, clearBoundKey } from "/dbsc-client/index.js";
-  window.clearBoundKey = clearBoundKey;
-  window.boundFetch = wrapFetch({ signBody: true });
-  window.initBoundDbsc = (opts = {}) => initBoundDbsc({ nativeProbeWindowMs: 8000, ...opts });
-</script>
+<!-- init.js is the plugin's auto-generated shim. It imports the SDK, points it
+     at /api/auth/dbsc-bound/*, and exposes window.initDbsc / boundFetch /
+     clearBoundKey. Loading the shim (instead of importing the SDK directly)
+     is what wires the paths to the configured basePath. -->
+<script src="/dbsc-client/init.js" type="module"></script>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -190,10 +189,10 @@ async function plainFetch(method, path, body, extraHeaders) {
 }
 
 async function reinitDbsc() {
-  if (typeof window.initBoundDbsc !== "function") return;
+  if (typeof window.initDbsc !== "function") return;
   setTier("none", "binding…", "Generating a key and registering it with the server.");
   try {
-    const outcome = await window.initBoundDbsc();
+    const outcome = await window.initDbsc();
     setTierFromOutcome(outcome);
   } catch (err) {
     setTier("none", "error", String(err && err.message || err));
@@ -286,10 +285,10 @@ $("logout-btn").onclick = async () => {
 };
 
 (async function init() {
-  if (typeof window.initBoundDbsc !== "function") return;
+  if (typeof window.initDbsc !== "function") return;
   setTier("none", "checking…", "Looking for an existing binding for this browser.");
   try {
-    const outcome = await window.initBoundDbsc();
+    const outcome = await window.initDbsc();
     setTierFromOutcome(outcome);
   } catch (err) {
     setTier("none", "error", String(err && err.message || err));
