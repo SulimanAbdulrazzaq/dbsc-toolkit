@@ -13,7 +13,7 @@ Sessions bound via the polyfill carry `tier: "bound"`. They share storage, cooki
 | Network capture / TLS-stripping proxy | Defeated | Defeated |
 | Server log leak that captured the cookie | Defeated | Defeated |
 | Cookie pasted into a different browser on a different machine | Defeated within one refresh cycle | Defeated within one refresh cycle |
-| Infostealer malware reading the browser profile directory | Defeated (key never leaves TPM / Secure Enclave / Keystore) | **Vulnerable**. The encrypted key blob is on disk; the OS keystore protects it but malware running as the victim can usually decrypt |
+| Infostealer malware reading the browser profile directory | Defeated (key never leaves TPM / Secure Enclave) | **Vulnerable**. The encrypted key blob is on disk; the OS keystore protects it but malware running as the victim can usually decrypt |
 | Malware running inside the browser process (rogue extension, browser RCE) | Vulnerable | Vulnerable |
 
 The single row that matters: infostealer malware. For every realistic cookie-theft attack, the normal guard — `requireProof()`, which works on every browser — is sufficient. The **one exception** is infostealer malware: if your threat model specifically includes RedLine / Vidar / similar credential stealers, a route can additionally require `tier === "dbsc"`. That deliberately excludes Firefox and Safari (they can only reach `tier: "bound"`), so use it only on the rare route that genuinely needs hardware-key isolation — not as the default.
