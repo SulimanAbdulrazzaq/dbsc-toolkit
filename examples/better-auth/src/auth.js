@@ -2,7 +2,7 @@ import { betterAuth } from "better-auth";
 import { dbsc } from "@dbsc-toolkit/better-auth";
 import Database from "better-sqlite3";
 
-const db = new Database(":memory:");
+const db = new Database(process.env.DB_PATH ?? "./demo.sqlite");
 
 export const auth = betterAuth({
   database: db,

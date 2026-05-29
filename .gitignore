@@ -7,6 +7,8 @@ dist/
 !.env.example
 coverage/
 .nyc_output/
+*.sqlite
+*.sqlite-journal
 
 *.log
 npm-debug.log*

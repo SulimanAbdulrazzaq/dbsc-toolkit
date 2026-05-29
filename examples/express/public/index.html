@@ -1,0 +1,368 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>DBSC Toolkit — demo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --ink: #1a1d24;
+    --muted: #5a6170;
+    --line: #e1e4ea;
+    --bg-soft: #f6f7f9;
+    --accent: #2b3a55;
+    --ok: #1e7a3f;
+    --ok-bg: #e7f4ec;
+    --warn: #8a5b00;
+    --warn-bg: #fff3cd;
+    --bad: #a3231b;
+    --bad-bg: #fde2e1;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, system-ui, "Segoe UI", sans-serif; max-width: 780px; margin: 2rem auto; padding: 0 1rem; color: var(--ink); line-height: 1.5; }
+  h1 { margin: 0 0 0.2rem; font-size: 1.7rem; }
+  h2 { margin-top: 2.4rem; font-size: 1.15rem; }
+  .lede { color: var(--muted); font-size: 0.95rem; margin-bottom: 1.4rem; }
+  .browser-badge { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.6rem; border-radius: 4px; background: var(--bg-soft); border: 1px solid var(--line); font-size: 0.82rem; color: var(--muted); margin-bottom: 0.8rem; }
+  .browser-badge strong { color: var(--ink); }
+  .storage-badge { display: inline-block; padding: 0.3rem 0.6rem; border-radius: 4px; font-size: 0.82rem; margin-left: 0.4rem; }
+  .storage-badge.persistent { background: var(--ok-bg); color: #143a22; border: 1px solid #b6dcc3; }
+  .storage-badge.ephemeral { background: var(--warn-bg); color: var(--warn); border: 1px solid #f0d68a; }
+  .tier-banner { padding: 1rem 1.2rem; border-radius: 8px; margin: 1rem 0 2rem; border: 1px solid var(--line); background: var(--bg-soft); }
+  .tier-banner.dbsc { background: var(--ok-bg); border-color: #b6dcc3; }
+  .tier-banner.bound { background: #eef3fb; border-color: #c8d4e8; }
+  .tier-banner.none { background: var(--warn-bg); border-color: #f0d68a; }
+  .tier-banner.unbound { background: var(--bg-soft); }
+  .tier-banner .tier-label { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .tier-banner .tier-value { font-size: 1.4rem; font-weight: 700; margin: 0.15rem 0; }
+  .tier-banner.dbsc .tier-value { color: var(--ok); }
+  .tier-banner.bound .tier-value { color: #2b3a55; }
+  .tier-banner.none .tier-value { color: var(--warn); }
+  .tier-banner p { margin: 0; font-size: 0.9rem; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.1rem; margin: 0.8rem 0; }
+  .card h3 { margin: 0 0 0.4rem; font-size: 1rem; }
+  .card p { margin: 0 0 0.7rem; color: var(--muted); font-size: 0.88rem; }
+  input { padding: 0.5rem 0.6rem; margin: 0 0.3rem 0.4rem 0; font-size: 0.95rem; border: 1px solid var(--line); border-radius: 4px; width: 200px; max-width: 100%; }
+  button { padding: 0.5rem 0.95rem; font-size: 0.9rem; cursor: pointer; border: 1px solid var(--line); background: white; border-radius: 4px; margin: 0 0.3rem 0.4rem 0; font-weight: 500; }
+  button:hover { background: var(--bg-soft); }
+  button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  button.primary:hover { background: #1f2c43; }
+  button.attack { border-color: #d4a3a0; color: var(--bad); }
+  button.attack:hover { background: var(--bad-bg); }
+  .explain { font-size: 0.88rem; padding: 0.75rem 0.9rem; border-radius: 6px; margin: 0.5rem 0; line-height: 1.45; }
+  .explain.ok { background: var(--ok-bg); color: #143a22; border-left: 3px solid var(--ok); }
+  .explain.bad { background: var(--bad-bg); color: #6a1611; border-left: 3px solid var(--bad); }
+  .explain.info { background: var(--bg-soft); color: var(--ink); border-left: 3px solid var(--accent); }
+  pre { background: #0e1320; color: #e3e8f0; padding: 0.85rem 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.78rem; margin: 0.5rem 0; }
+  .advanced { margin-top: 1rem; }
+  .advanced summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; padding: 0.4rem 0; }
+  .advanced summary:hover { color: var(--ink); }
+  .footnote { color: var(--muted); font-size: 0.83rem; margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+  .footnote a { color: var(--accent); }
+  code { background: var(--bg-soft); padding: 0.08rem 0.3rem; border-radius: 3px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<h1>DBSC Toolkit</h1>
+<p class="lede">A stolen session cookie pasted into another browser used to work. Today it gets a 403 — because the refresh, and every guarded request, needs a signature from a key that never left your device.</p>
+
+<div>
+  <span class="browser-badge" id="browser-badge">Detecting browser…</span>
+  <span class="storage-badge" id="storage-badge">checking storage…</span>
+</div>
+
+<h2>Try it</h2>
+
+<div class="card">
+  <h3>1. Sign up, then sign in</h3>
+  <p>The cookie-session mode — <code>express-session</code> issues the id, <code>dbsc.bind()</code> binds it. <a href="/jwt.html">JWT mode is over here</a>.</p>
+  <input type="text" id="username" placeholder="username" autocomplete="username">
+  <input type="password" id="password" placeholder="password (min 6)" autocomplete="current-password">
+  <br>
+  <button id="signup-btn">Sign up</button>
+  <button id="login-btn" class="primary">Sign in</button>
+</div>
+
+<div class="tier-banner unbound" id="tier-banner">
+  <div class="tier-label">Binding tier</div>
+  <div class="tier-value" id="tier-value">— sign in to start —</div>
+  <p id="tier-explain">After sign-in, the kit binds your session to a device-resident key. The tier shown here tells you which kind.</p>
+</div>
+
+<h2>What DBSC defends against</h2>
+
+<div class="card">
+  <h3>The legit request</h3>
+  <p>Your bound device signs a per-request proof. <code>requireProof()</code> verifies it, then the route runs.</p>
+  <button id="profile-btn" class="primary">GET /profile (signed)</button>
+  <button id="pay-btn" class="primary">POST /payment (signed body)</button>
+</div>
+
+<div class="card">
+  <h3>The stolen cookie</h3>
+  <p>An attacker exfiltrates the session cookie and pastes it into their browser. They have the cookie. They don't have the key.</p>
+  <button id="theft-btn" class="attack">Send bare fetch (no proof)</button>
+</div>
+
+<div class="card">
+  <h3>The tampered body</h3>
+  <p>An MITM sees the signed <code>{amount: 1}</code> and tries to rewrite it to <code>{amount: 1000}</code> mid-flight. The proof signs the body hash too.</p>
+  <button id="tamper-btn" class="attack">Replay proof with different body</button>
+</div>
+
+<div class="card">
+  <h3>The replayed request</h3>
+  <p>An attacker captures one valid signed request off the wire and tries to send it again. The optional replay cache (v2.8+) rejects the second arrival.</p>
+  <button id="replay-btn" class="attack">Send identical request twice</button>
+</div>
+
+<div id="explain"></div>
+<pre id="out">(output appears here)</pre>
+
+<h2>Session control</h2>
+<button id="me-btn">Check session (/me)</button>
+<button id="logout-btn">Sign out</button>
+
+<details class="advanced">
+  <summary>Advanced — config, rate limit, cookie scope</summary>
+  <div style="padding: 0.5rem 0;">
+    <button id="config-btn">Show active createDbsc options</button>
+    <button id="rl-btn">Trip the rate limiter (15× POST /dbsc/refresh)</button>
+    <button id="scope-btn">Inspect cookieScope wire shape</button>
+    <button id="interceptor-btn">Install fetch interceptor → bare fetch /profile</button>
+  </div>
+</details>
+
+<p class="footnote">
+  Live demo for <a href="https://www.npmjs.com/package/dbsc-toolkit">dbsc-toolkit</a>.
+  Source: <a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit">github.com/SulimanAbdulrazzaq/dbsc-toolkit</a>.
+  This page uses cookie-session login; <a href="/jwt.html">JWT mode is on a separate page</a>.
+</p>
+
+<script type="module">
+  import { initBoundDbsc, wrapFetch, clearBoundKey } from "/dbsc-client/index.js";
+  window.clearBoundKey = clearBoundKey;
+  window.boundFetch = wrapFetch({ signBody: true });
+  // 8s probe window — Render cold starts can push native registration past
+  // the 5s default, which would let the polyfill win on a TPM-capable browser.
+  window.initBoundDbsc = (opts = {}) => initBoundDbsc({ nativeProbeWindowMs: 8000, ...opts });
+</script>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const val = (id) => $(id).value.trim();
+
+function detectBrowser() {
+  const ua = navigator.userAgent;
+  const isEdge = /Edg\//.test(ua);
+  const isChrome = /Chrome\//.test(ua) && !isEdge;
+  const isFirefox = /Firefox\//.test(ua);
+  const isSafari = /Safari\//.test(ua) && !/Chrome\//.test(ua);
+  if (isChrome || isEdge) return { name: isEdge ? "Edge" : "Chrome", expect: "dbsc", note: "native TPM / Secure Enclave binding" };
+  if (isFirefox) return { name: "Firefox", expect: "bound", note: "Web Crypto polyfill" };
+  if (isSafari) return { name: "Safari", expect: "bound", note: "Web Crypto polyfill" };
+  return { name: "Browser", expect: "bound", note: "polyfill fallback" };
+}
+
+(function showBrowserBadge() {
+  const b = detectBrowser();
+  $("browser-badge").innerHTML = `<strong>${b.name}</strong> &middot; expected tier: <code>${b.expect}</code> &middot; ${b.note}`;
+})();
+
+async function showStorageBadge() {
+  try {
+    const r = await fetch("/config");
+    const c = await r.json();
+    const el = $("storage-badge");
+    if (c.storage === "redis") {
+      el.className = "storage-badge persistent";
+      el.textContent = "Storage: Redis — survives restarts";
+    } else {
+      el.className = "storage-badge ephemeral";
+      el.textContent = "Storage: in-memory — wipes on restart (set REDIS_URL for persistence)";
+    }
+  } catch { /* */ }
+}
+showStorageBadge();
+
+function setTier(state, label, explain) {
+  $("tier-banner").className = "tier-banner " + state;
+  $("tier-value").textContent = label;
+  $("tier-explain").textContent = explain;
+}
+
+const TIER_COPY = {
+  dbsc: ["dbsc", "Hardware-bound. The private key lives in your TPM (Windows) or Secure Enclave (Apple Silicon macOS). JavaScript can't touch it; neither can malware that's not running as you."],
+  bound: ["bound", "Software-bound via Web Crypto. The private key sits in IndexedDB with extractable=false, so even XSS can't export it. Works on Firefox, Safari, and Chromium without TPM."],
+};
+
+function setTierFromOutcome(o) {
+  if (!o) return setTier("unbound", "—", "SDK returned no outcome.");
+  if (o.phase === "native-dbsc") return setTier("dbsc", ...TIER_COPY.dbsc);
+  if (o.phase === "polyfill-bound") return setTier("bound", ...TIER_COPY.bound);
+  if (o.phase === "unbound") return setTier("unbound", "unbound", "Sign in to start a binding.");
+  if (o.phase === "error") return setTier("none", "error", "SDK error: " + o.error);
+  setTier("unbound", "—", "Unknown outcome.");
+}
+
+function show(data) {
+  $("out").textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+}
+
+function explain(kind, text) {
+  $("explain").innerHTML = `<div class="explain ${kind}">${text}</div>`;
+}
+
+function clearExplain() { $("explain").innerHTML = ""; }
+
+async function plainFetch(method, path, body, extraHeaders) {
+  const headers = extraHeaders ? { ...extraHeaders } : (body ? { "Content-Type": "application/json" } : {});
+  const r = await fetch(path, {
+    method,
+    headers,
+    body: body ? (typeof body === "string" ? body : JSON.stringify(body)) : undefined,
+    credentials: "include",
+  });
+  const text = await r.text();
+  let parsed; try { parsed = JSON.parse(text); } catch { parsed = text; }
+  return { method, path, status: r.status, body: parsed };
+}
+
+async function reinitDbsc() {
+  if (typeof window.initBoundDbsc !== "function") return;
+  setTier("none", "binding…", "Generating a key and registering it with the server.");
+  try {
+    const outcome = await window.initBoundDbsc();
+    setTierFromOutcome(outcome);
+  } catch (err) {
+    setTier("none", "error", String(err && err.message || err));
+  }
+}
+
+$("signup-btn").onclick = async () => {
+  clearExplain();
+  const r = await plainFetch("POST", "/signup", { username: val("username"), password: $("password").value });
+  show(r);
+};
+
+$("login-btn").onclick = async () => {
+  clearExplain();
+  const r = await plainFetch("POST", "/login", { username: val("username"), password: $("password").value });
+  show(r);
+  if (r.status === 200) await reinitDbsc();
+};
+
+$("me-btn").onclick = async () => { clearExplain(); show(await plainFetch("GET", "/me")); };
+
+$("profile-btn").onclick = async () => {
+  if (typeof window.boundFetch !== "function") return show({ error: "SDK not loaded yet" });
+  const r = await window.boundFetch("/profile", { method: "GET", credentials: "include" });
+  const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
+  show({ method: "GET", path: "/profile", status: r.status, body: b });
+  if (r.status === 200) explain("ok", "The signed proof header verified against your bound key. <code>requireProof()</code> let the request through.");
+  else explain("bad", "Proof check failed — see body for the reason code.");
+};
+
+$("pay-btn").onclick = async () => {
+  if (typeof window.boundFetch !== "function") return show({ error: "SDK not loaded yet" });
+  const r = await window.boundFetch("/payment", {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: JSON.stringify({ amount: 1, to: "merchant" }),
+    credentials: "include",
+  });
+  const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
+  show({ method: "POST", path: "/payment", status: r.status, body: b });
+  if (r.status === 200) explain("ok", "Body hash signed into the proof, verified server-side. An MITM rewriting the amount would have failed the check.");
+};
+
+$("theft-btn").onclick = async () => {
+  const r = await plainFetch("GET", "/profile");
+  show(r);
+  if (r.status === 403) explain("ok", "<strong>Defended.</strong> The cookie reached the server but no proof header was sent — <code>requireProof()</code> returned 403 <code>PROOF_MISSING</code>. This is what a stolen cookie pasted into a different browser sees.");
+  else if (r.status === 401) explain("info", "Sign in first, then click this button.");
+  else explain("bad", "Unexpected status. Check the body.");
+};
+
+$("tamper-btn").onclick = async () => {
+  const { wrapFetch } = await import("/dbsc-client/index.js");
+  let capturedProof = null;
+  const capture = async (_input, init = {}) => {
+    capturedProof = new Headers(init.headers || {}).get("X-Dbsc-Bound-Proof");
+    return new Response(null, { status: 200 });
+  };
+  await wrapFetch({ fetch: capture, signBody: true })("/payment", {
+    method: "POST", headers: { "Content-Type": "application/octet-stream" },
+    body: JSON.stringify({ amount: 1, to: "merchant" }),
+  });
+  if (!capturedProof) return show({ error: "no proof captured — sign in first" });
+  const r = await plainFetch("POST", "/payment",
+    JSON.stringify({ amount: 1000, to: "attacker" }),
+    { "Content-Type": "application/octet-stream", "X-Dbsc-Bound-Proof": capturedProof },
+  );
+  show({ ...r, path: "/payment (tampered body)" });
+  if (r.status === 403) explain("ok", "<strong>Defended.</strong> The proof was signed for <code>{amount:1}</code>. Body sent was <code>{amount:1000}</code>. Server hashed the received body, compared against the hash in the proof, mismatch → 403.");
+  else explain("bad", "Server accepted the tampered body. Body signing isn't working.");
+};
+
+$("replay-btn").onclick = async () => {
+  const { wrapFetch } = await import("/dbsc-client/index.js");
+  let capturedProof = null;
+  const capture = async (_input, init = {}) => {
+    capturedProof = new Headers(init.headers || {}).get("X-Dbsc-Bound-Proof");
+    return new Response(null, { status: 200 });
+  };
+  await wrapFetch({ fetch: capture })("/profile", { method: "GET" });
+  if (!capturedProof) return show({ error: "no proof captured — sign in first" });
+  const first = await plainFetch("GET", "/profile", null, { "X-Dbsc-Bound-Proof": capturedProof });
+  const second = await plainFetch("GET", "/profile", null, { "X-Dbsc-Bound-Proof": capturedProof });
+  show({ path: "/profile, same proof replayed twice", first: { status: first.status, body: first.body }, second: { status: second.status, body: second.body } });
+  if (second.status === 403) explain("ok", "<strong>Defended.</strong> The replay cache (v2.8+) recorded the first proof. The second arrival of the same proof bytes returned 403 <code>PROOF_REPLAY</code>.");
+  else explain("info", "The first request succeeded. The second succeeded too — replay cache is off, or the v2.8 cache isn't wired here.");
+};
+
+$("interceptor-btn").onclick = async () => {
+  const { installFetchInterceptor } = await import("/dbsc-client/index.js");
+  try {
+    const uninstall = installFetchInterceptor({ pathPrefixes: ["/profile", "/payment"] });
+    const r = await fetch("/profile", { credentials: "include" });
+    const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
+    uninstall();
+    show({ note: "interceptor installed → bare fetch /profile → signed automatically", status: r.status, body: b });
+    if (r.status === 200) explain("ok", "<code>installFetchInterceptor</code> swapped <code>globalThis.fetch</code> for the matching paths. A bare <code>fetch('/profile')</code> got signed without changing the call site.");
+  } catch (err) {
+    show({ error: "installFetchInterceptor threw", message: String(err) });
+  }
+};
+
+$("config-btn").onclick = async () => show(await plainFetch("GET", "/config"));
+$("scope-btn").onclick = async () => show(await plainFetch("GET", "/cookie-scope"));
+$("rl-btn").onclick = async () => {
+  const results = await Promise.all(
+    Array.from({ length: 15 }, () => fetch("/dbsc/refresh", { method: "POST", credentials: "include" }).then((r) => r.status)),
+  );
+  const counts = results.reduce((m, s) => (m[s] = (m[s] || 0) + 1, m), {});
+  show({ path: "15× POST /dbsc/refresh", statusCounts: counts });
+};
+
+$("logout-btn").onclick = async () => {
+  clearExplain();
+  const r = await plainFetch("POST", "/logout");
+  show(r);
+  if (typeof window.clearBoundKey === "function") await window.clearBoundKey().catch(() => {});
+  setTier("unbound", "—", "Signed out. Key cleared from IndexedDB.");
+};
+
+(async function init() {
+  if (typeof window.initBoundDbsc !== "function") return;
+  setTier("none", "checking…", "Looking for an existing binding for this browser.");
+  try {
+    const outcome = await window.initBoundDbsc();
+    setTierFromOutcome(outcome);
+  } catch (err) {
+    setTier("none", "error", String(err && err.message || err));
+  }
+})();
+</script>
+</body>
+</html>

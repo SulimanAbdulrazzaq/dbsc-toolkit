@@ -1,0 +1,88 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>DBSC Toolkit — JWT mode</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #1a1d24; line-height: 1.5; }
+  h1 { margin: 0 0 0.2rem; font-size: 1.5rem; }
+  p.lede { color: #5a6170; font-size: 0.95rem; }
+  .card { border: 1px solid #e1e4ea; border-radius: 8px; padding: 1rem 1.1rem; margin: 0.8rem 0; }
+  input { padding: 0.5rem 0.6rem; margin: 0 0.3rem 0.4rem 0; font-size: 0.95rem; border: 1px solid #e1e4ea; border-radius: 4px; width: 200px; max-width: 100%; }
+  button { padding: 0.5rem 0.95rem; font-size: 0.9rem; cursor: pointer; border: 1px solid #e1e4ea; background: white; border-radius: 4px; margin: 0 0.3rem 0.4rem 0; font-weight: 500; }
+  button.primary { background: #2b3a55; color: white; border-color: #2b3a55; }
+  pre { background: #0e1320; color: #e3e8f0; padding: 0.85rem 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.78rem; }
+  code { background: #f6f7f9; padding: 0.08rem 0.3rem; border-radius: 3px; font-size: 0.85em; }
+  a { color: #2b3a55; }
+</style>
+</head>
+<body>
+<h1>DBSC Toolkit — JWT mode</h1>
+<p class="lede">Stateless login: signed cookie, no server session row (NextAuth-JWT / iron-session / Lucia shape). <code>dbsc.bind(res, { userId })</code> is called with no id — the kit derives a stable one with <code>deriveSessionId</code> so refresh finds the same binding.</p>
+
+<p><a href="/">← back to the cookie-session demo</a></p>
+
+<div class="card">
+  <input type="text" id="username" placeholder="username" autocomplete="username">
+  <input type="password" id="password" placeholder="password" autocomplete="current-password">
+  <br>
+  <button id="login-btn" class="primary">Sign in (JWT mode)</button>
+  <button id="me-btn">Check session (/me)</button>
+  <button id="profile-btn">GET /profile (signed)</button>
+  <button id="logout-btn">Sign out</button>
+</div>
+
+<pre id="out">(output appears here)</pre>
+
+<script type="module">
+  import { initBoundDbsc, wrapFetch, clearBoundKey } from "/dbsc-client/index.js";
+  window.clearBoundKey = clearBoundKey;
+  window.boundFetch = wrapFetch({ signBody: true });
+  window.initBoundDbsc = (opts = {}) => initBoundDbsc({ nativeProbeWindowMs: 8000, ...opts });
+</script>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const show = (d) => $("out").textContent = typeof d === "string" ? d : JSON.stringify(d, null, 2);
+
+async function plainFetch(method, path, body) {
+  const r = await fetch(path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+    credentials: "include",
+  });
+  const text = await r.text();
+  let parsed; try { parsed = JSON.parse(text); } catch { parsed = text; }
+  return { method, path, status: r.status, body: parsed };
+}
+
+$("login-btn").onclick = async () => {
+  const r = await plainFetch("POST", "/login-jwt", {
+    username: $("username").value.trim(),
+    password: $("password").value,
+  });
+  show(r);
+  if (r.status === 200 && typeof window.initBoundDbsc === "function") {
+    const outcome = await window.initBoundDbsc();
+    console.log("[bound-sdk outcome]", outcome);
+  }
+};
+
+$("me-btn").onclick = async () => show(await plainFetch("GET", "/me"));
+
+$("profile-btn").onclick = async () => {
+  if (typeof window.boundFetch !== "function") return show({ error: "SDK not loaded yet" });
+  const r = await window.boundFetch("/profile", { method: "GET", credentials: "include" });
+  const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
+  show({ method: "GET", path: "/profile", status: r.status, body: b });
+};
+
+$("logout-btn").onclick = async () => {
+  show(await plainFetch("POST", "/logout"));
+  if (typeof window.clearBoundKey === "function") await window.clearBoundKey().catch(() => {});
+};
+</script>
+</body>
+</html>

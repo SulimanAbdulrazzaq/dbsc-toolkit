@@ -1,26 +1,31 @@
 // DBSC + Better Auth demo (Express).
-// Whole integration is 3 lines after the plugin is added to auth.ts:
+//
+// User-facing setup is three blocks after the plugin is added to auth.ts:
 //   const dbsc = dbscExpress(auth)
 //   dbsc.install(app)
-//   app.get("/profile", dbsc.requireProof(), handler)
+//   app.get("/route", dbsc.requireProof(), handler)
 
 import express from "express";
 import cookieParser from "cookie-parser";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { toNodeHandler } from "better-auth/node";
 import { dbscExpress } from "@dbsc-toolkit/better-auth/express";
 import { auth } from "./auth.js";
 
 const app = express();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const publicDir = path.resolve(__dirname, "..", "public");
 
-// Run Better Auth migrations on startup. The dbsc() plugin adds dbscSession
-// and dbscBoundKey tables to the auto-generated schema.
+// Run Better Auth migrations once at startup. dbsc() adds dbscSession and
+// dbscBoundKey to the auto-generated schema — fail fast if migration fails.
 const authCtx = await auth.$context;
 await authCtx.runMigrations();
 
 app.use(cookieParser());
 
-// Mount DBSC routes BEFORE the Better Auth catch-all. Otherwise toNodeHandler
-// swallows /api/auth/dbsc/* before our middleware sees it.
+// Mount DBSC routes BEFORE the Better Auth catch-all. toNodeHandler swallows
+// every /api/auth/* path, so the DBSC routes have to land first.
 const dbsc = dbscExpress(auth);
 dbsc.install(app);
 
@@ -28,32 +33,28 @@ dbsc.install(app);
 app.all("/api/auth/*splat", toNodeHandler(auth));
 app.use(express.json());
 
-// ── App routes ─────────────────────────────────────────────────────
-
+// /api/me — session view, no DBSC proof required. Reads the dbscSession row
+// directly through the Better Auth adapter so the UI can show the live tier.
 app.get("/api/me", async (req, res) => {
   const session = await auth.api.getSession({ headers: new Headers(req.headers) });
   if (!session) return res.status(401).json({ authenticated: false });
 
-  // Read DBSC tier for the UI badge.
-  let tier = "none";
-  try {
-    const ctx = await auth.$context;
-    const row = await ctx.adapter.findOne({
-      model: "dbscSession",
-      where: [{ field: "id", value: session.session.id }],
-    });
-    if (row?.tier) tier = row.tier;
-  } catch { /* table not yet migrated */ }
+  const row = await authCtx.adapter.findOne({
+    model: "dbscSession",
+    where: [{ field: "id", value: session.session.id }],
+  });
 
-  return res.json({
+  res.json({
     authenticated: true,
     email: session.user.email,
     name: session.user.name,
     sessionId: session.session.id,
-    tier,
+    tier: row?.tier ?? "none",
   });
 });
 
+// /api/profile — gated. A request without a valid X-Dbsc-Bound-Proof header
+// gets 403 PROOF_MISSING before this handler runs.
 app.get("/api/profile", dbsc.requireProof(), async (req, res) => {
   const session = await auth.api.getSession({ headers: new Headers(req.headers) });
   if (!session) return res.status(401).json({ error: "no session" });
@@ -65,6 +66,8 @@ app.get("/api/profile", dbsc.requireProof(), async (req, res) => {
   });
 });
 
+// /api/payment — gated + body hash verified. express.raw delivers the body
+// bytes to requireProof() so the hash in the proof header can be checked.
 app.post(
   "/api/payment",
   express.raw({ type: "*/*" }),
@@ -73,9 +76,7 @@ app.post(
     const session = await auth.api.getSession({ headers: new Headers(req.headers) });
     if (!session) return res.status(401).json({ error: "no session" });
     let payload = {};
-    try {
-      payload = JSON.parse(req.body.toString("utf8"));
-    } catch { /* */ }
+    try { payload = JSON.parse(req.body.toString("utf8")); } catch { /* */ }
     res.json({
       ok: true,
       user: session.user.email,
@@ -85,141 +86,10 @@ app.post(
   },
 );
 
-// ── HTML UI ────────────────────────────────────────────────────────
-
-app.get("/", (_req, res) => {
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.send(HTML);
-});
+// Static HTML — the demo UI.
+app.use(express.static(publicDir));
 
 const PORT = Number(process.env.PORT ?? 3000);
 app.listen(PORT, () => {
   console.log(`Running on http://localhost:${PORT}`);
 });
-
-const HTML = `<!doctype html>
-<html>
-<head>
-<title>DBSC + Better Auth — demo</title>
-<style>
-  body { font-family: -apple-system, system-ui, sans-serif; max-width: 820px; margin: 2rem auto; padding: 0 1rem; color: #222; }
-  h1 { margin-bottom: 0.2rem; }
-  h2 { margin-top: 2rem; border-bottom: 2px solid #2b3a55; padding-bottom: 0.3rem; }
-  .sub { color: #666; font-size: 0.9rem; }
-  .card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 0.75rem 1rem; margin: 0.6rem 0; }
-  input { padding: 0.4rem; margin-right: 0.4rem; font-size: 0.95rem; }
-  button { margin: 0 0.4rem 0.5rem 0; padding: 0.45rem 0.9rem; font-size: 0.9rem; cursor: pointer; }
-  button.primary { background: #2b3a55; color: #fff; border: none; border-radius: 4px; }
-  pre { background: #f4f4f4; padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-size: 0.82rem; }
-</style>
-</head>
-<body>
-<h1>DBSC + Better Auth — demo</h1>
-<p class="sub">
-  Better Auth handles sign-in. The <code>@dbsc-toolkit/better-auth</code> plugin
-  issues <code>Secure-Session-Registration</code>. Chromium 145+ binds the
-  session to the TPM; Firefox / Safari use the Web Crypto polyfill.
-</p>
-
-<h2>1. Sign up / Sign in</h2>
-<div class="card">
-  <input type="email" id="email" placeholder="email" autocomplete="username">
-  <input type="password" id="password" placeholder="password (min 8)" autocomplete="current-password">
-  <input type="text" id="name" placeholder="name (signup only)">
-  <br>
-  <button id="signup-btn">Sign up</button>
-  <button id="login-btn" class="primary">Sign in</button>
-</div>
-
-<h2>2. Session + protected routes</h2>
-<p class="sub">
-  <code>/api/me</code> reads the Better Auth session (no DBSC required).
-  <code>/api/profile</code> + <code>/api/payment</code> require a per-request
-  proof from the bound device.
-</p>
-<button id="me-btn">Check session</button>
-<button id="profile-btn" class="primary">GET /api/profile (proof)</button>
-<button id="pay-btn" class="primary">POST /api/payment (proof + signed body)</button>
-<button id="theft-btn">Simulate stolen cookie (bare fetch)</button>
-
-<h2>3. Session control</h2>
-<button id="logout-btn">Sign out</button>
-
-<pre id="out">(output appears here)</pre>
-
-<!-- One-line browser init. The shim auto-points the SDK at /api/auth/* paths
-     and exposes window.boundFetch. -->
-<script src="/dbsc-client/init.js" type="module"></script>
-
-<script>
-function show(o) { document.getElementById('out').textContent = typeof o === 'string' ? o : JSON.stringify(o, null, 2); }
-const val = (id) => document.getElementById(id).value.trim();
-
-async function plainFetch(method, path, body) {
-  const r = await fetch(path, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined,
-    credentials: 'include',
-  });
-  const text = await r.text();
-  let parsed; try { parsed = JSON.parse(text); } catch { parsed = text; }
-  return { method, path, status: r.status, body: parsed };
-}
-
-async function reinitDbsc() {
-  if (typeof window.initDbsc !== 'function') return;
-  try {
-    const outcome = await window.initDbsc();
-    console.log('[dbsc] re-init outcome', outcome);
-  } catch (err) {
-    console.error('[dbsc] re-init failed', err);
-  }
-}
-
-document.getElementById('signup-btn').onclick = async () => {
-  const r = await plainFetch('POST', '/api/auth/sign-up/email', {
-    email: val('email'), password: document.getElementById('password').value, name: val('name') || 'Demo',
-  });
-  show(r);
-  if (r.status === 200) await reinitDbsc();
-};
-
-document.getElementById('login-btn').onclick = async () => {
-  const r = await plainFetch('POST', '/api/auth/sign-in/email', {
-    email: val('email'), password: document.getElementById('password').value,
-  });
-  show(r);
-  if (r.status === 200) await reinitDbsc();
-};
-
-document.getElementById('me-btn').onclick = async () => show(await plainFetch('GET', '/api/me'));
-
-document.getElementById('profile-btn').onclick = async () => {
-  if (typeof window.boundFetch !== 'function') return show({ error: 'SDK not loaded yet — wait a moment and retry' });
-  const r = await window.boundFetch('/api/profile', { method: 'GET', credentials: 'include' });
-  const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
-  show({ method: 'GET', path: '/api/profile', status: r.status, body: b });
-};
-
-document.getElementById('pay-btn').onclick = async () => {
-  if (typeof window.boundFetch !== 'function') return show({ error: 'SDK not loaded yet' });
-  const r = await window.boundFetch('/api/payment', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/octet-stream' },
-    body: JSON.stringify({ amount: 1, to: 'merchant' }),
-    credentials: 'include',
-  });
-  const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
-  show({ method: 'POST', path: '/api/payment', status: r.status, body: b });
-};
-
-document.getElementById('theft-btn').onclick = async () => show(await plainFetch('GET', '/api/profile'));
-
-document.getElementById('logout-btn').onclick = async () => {
-  show(await plainFetch('POST', '/api/auth/sign-out'));
-  if (typeof window.clearBoundKey === 'function') await window.clearBoundKey().catch(() => {});
-};
-</script>
-</body>
-</html>`;
