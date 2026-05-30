@@ -20,7 +20,9 @@ npm install @dbsc-toolkit/better-auth dbsc-toolkit
 
 ## Setup
 
-The integration is mostly four blocks. Two in `auth.ts`, two in `server.ts`.
+One line in `auth.ts`, one line in `server.ts`. That's the whole integration.
+
+It's split across the two files you already have for a reason, not for ceremony. `dbsc()` declares the database schema and the post-login hook — and Better Auth only accepts those at `betterAuth()` construction time, so it has to live in `auth.ts`. `dbscExpress()` mounts the protocol routes and the route guard, which need the Express `app` object, so it has to live in `server.ts`. Neither can do the other's job; together they're two lines.
 
 ### auth.ts
 
@@ -131,24 +133,77 @@ Every session row carries a `tier`:
 
 ## Options
 
-```ts
-// auth.ts
-dbsc({
-  basePath: "/api/auth",         // match betterAuth({ basePath })
-  cookieScope: "host",           // "host" (__Host-) or "site" (__Secure- + Domain)
-  cookieDomain: "example.com",   // required when cookieScope is "site"
-  sessionTtl: 600_000,           // bound cookie TTL, ms. default 10 min
-  onEvent: (e) => log(e),
-})
+The plugin splits across two factories. `dbsc()` goes in `auth.ts` and owns
+the after-hook + schema. `dbscExpress()` goes in `server.ts` and owns the
+protocol routes + the route guard.
 
+### `dbsc()` — the plugin factory
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `basePath` | `string` | `"/api/auth"` | Must match `betterAuth({ basePath })`. The registration header points Chrome at `${basePath}/dbsc/registration`. |
+| `cookieScope` | `"host" \| "site"` | `"host"` | `host` → `__Host-` cookies, no Domain. `site` → `__Secure-` + Domain. |
+| `cookieDomain` | `string` | — | Required when `cookieScope` is `"site"`. |
+| `cookieTtl` | `number` | `600_000` | Max-Age (ms) for the cookies the after-hook writes. |
+| `onEvent` | `(e) => void` | — | Telemetry hook for registration / refresh / failures. |
+
+`sessionTtl` here is a deprecated alias for `cookieTtl` — it still works, removed in 0.3.0. (Unrelated to `dbscExpress`'s `sessionTtl` below, which is the storage session lifetime — same name, different layer, an artifact of the underlying `dbsc-toolkit` naming.)
+
+### `dbscExpress()` — the Express kit
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `basePath` | `string` | `"/api/auth"` | Must match the `dbsc({ basePath })` above. |
+| `secure` | `boolean` | `true` | `__Host-`/`__Secure-` prefixes + Secure flag. Set `false` on bare-http localhost. |
+| `clientPath` | `string \| false` | `"/dbsc-client"` | Where the polyfill SDK + init shim mount. `false` skips serving. |
+| `cookieScope` | `"host" \| "site"` | `"host"` | Same as the plugin's. |
+| `cookieDomain` | `string` | — | Required when `cookieScope` is `"site"`. |
+| `boundCookieTtl` | `number` | `600_000` | Bound cookie lifetime — how often the session re-signs a refresh. The knob you reach for most. |
+| `refreshGraceMs` | `number` | `30_000` | Grace after the bound cookie expires before the tier drops to `none`. |
+| `sessionTtl` | `number` | `24h` | Lifetime of the session **row** in storage (its `expiresAt`). Not a cookie. |
+| `registrationCookieTtl` | `number` | `24h` | TTL of the short-lived `__Host-dbsc-reg` cookie used only during registration. |
+| `trustProxy` | `boolean` | `true` | Whether `install()` sets Express `trust proxy`. |
+| `replayCache` | `ProofReplayCache` | no-op | Rejects a replayed proof (v2.8+). |
+| `rateLimiter` | `RateLimiter` | no-op | Guards the `/dbsc/*` routes. |
+| `onEvent` | `(e) => void` | — | Telemetry hook. |
+
+```ts
 // server.ts
-dbscExpress(auth, {
+const dbsc = dbscExpress(auth, {
   basePath: "/api/auth",
-  secure: true,                  // set false on bare-http localhost only
-  clientPath: "/dbsc-client",    // SDK mount; false to skip serving
+  boundCookieTtl: 60_000,
+  refreshGraceMs: 30_000,
   replayCache: new RedisReplayCache(redis),
 })
 ```
+
+The six protocol paths (`/dbsc/registration`, `/dbsc/refresh`, the four
+`/dbsc-bound/*` routes) are derived from `basePath` and intentionally not
+configurable — they have to match what the after-hook advertises, or Chrome's
+registration POST 404s.
+
+### Per-route proof tuning
+
+`dbsc.requireProof()` takes the same options the core guard takes, so you can
+vary strictness per route:
+
+```ts
+// Tighten the freshness window on a payment.
+app.post("/api/payment",
+  express.raw({ type: "*/*" }),
+  dbsc.requireProof({ timestampWindowMs: 30_000 }),
+  payHandler,
+)
+
+// Relax on a low-risk read where a bound cookie is enough.
+app.get("/api/feed",
+  dbsc.requireProof({ allowDbscWithoutProof: true }),
+  feedHandler,
+)
+```
+
+Options: `timestampWindowMs` (default 5 min), `allowDbscWithoutProof` (default
+`false`), `signBody`, and a per-route `replayCache` override.
 
 ## Database
 

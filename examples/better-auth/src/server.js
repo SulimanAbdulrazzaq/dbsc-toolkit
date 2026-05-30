@@ -68,10 +68,12 @@ app.get("/api/profile", dbsc.requireProof(), async (req, res) => {
 
 // /api/payment — gated + body hash verified. express.raw delivers the body
 // bytes to requireProof() so the hash in the proof header can be checked.
+// requireProof() takes per-route options — here a 30s freshness window
+// instead of the 5-min default, tightening replay tolerance for a payment.
 app.post(
   "/api/payment",
   express.raw({ type: "*/*" }),
-  dbsc.requireProof(),
+  dbsc.requireProof({ timestampWindowMs: 30_000 }),
   async (req, res) => {
     const session = await auth.api.getSession({ headers: new Headers(req.headers) });
     if (!session) return res.status(401).json({ error: "no session" });

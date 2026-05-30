@@ -36,14 +36,16 @@ export interface DbscPluginOptions {
   cookieScope?: "host" | "site";
   /** Required when cookieScope is "site". E.g. "example.com" */
   cookieDomain?: string;
-  /** Bound cookie TTL in ms. Default: 600_000 (10 min) */
+  /** Max-Age (ms) for the cookies the after-hook writes. Default: 600_000 (10 min). */
+  cookieTtl?: number;
+  /** @deprecated alias for cookieTtl — removed in 0.3.0 */
   sessionTtl?: number;
   /** Telemetry hook */
   onEvent?: (event: AnyTelemetryEvent) => void | Promise<void>;
 }
 
 const REGISTRATION_PATH = "/dbsc/registration";
-const DEFAULT_SESSION_TTL = 600_000;
+const DEFAULT_COOKIE_TTL = 600_000;
 const DEFAULT_BASE_PATH = "/api/auth";
 
 export function dbsc(opts: DbscPluginOptions = {}): object {
@@ -51,8 +53,9 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
     basePath = DEFAULT_BASE_PATH,
     cookieScope = "host",
     cookieDomain,
-    sessionTtl = DEFAULT_SESSION_TTL,
   } = opts;
+  // cookieTtl is the canonical name; sessionTtl is a deprecated alias.
+  const cookieTtl = opts.cookieTtl ?? opts.sessionTtl ?? DEFAULT_COOKIE_TTL;
 
   const secure = true;
   const scopeOpts = cookieDomain
@@ -66,7 +69,7 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
       "HttpOnly",
       "Path=/",
       "SameSite=Lax",
-      `Max-Age=${Math.floor(sessionTtl / 1000)}`,
+      `Max-Age=${Math.floor(cookieTtl / 1000)}`,
       ...(secure ? ["Secure"] : []),
       ...(cookieDomain ? [`Domain=${cookieDomain}`] : []),
     ].join("; ");
@@ -78,7 +81,7 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
       "HttpOnly",
       "Path=/",
       "SameSite=Lax",
-      `Max-Age=${Math.floor(sessionTtl / 1000)}`,
+      `Max-Age=${Math.floor(cookieTtl / 1000)}`,
       ...(secure ? ["Secure"] : []),
       ...(cookieDomain ? [`Domain=${cookieDomain}`] : []),
     ].join("; ");
@@ -154,12 +157,12 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
                 userId,
                 tier: "none",
                 createdAt: now,
-                expiresAt: now + sessionTtl,
+                expiresAt: now + cookieTtl,
                 lastRefreshAt: now,
               });
             }
 
-            const { jti } = await issueChallenge(sessionId, store, sessionTtl);
+            const { jti } = await issueChallenge(sessionId, store, cookieTtl);
 
             const regHeader = buildRegistrationHeader({
               registrationPath: `${basePath}${REGISTRATION_PATH}`,

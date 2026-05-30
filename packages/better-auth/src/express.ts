@@ -24,6 +24,7 @@ import {
   type AnyTelemetryEvent,
   type ProofReplayCache,
   type RateLimiter,
+  type RequireProofOptions,
 } from "dbsc-toolkit";
 
 import { createBetterAuthStorageAdapter } from "./adapter.js";
@@ -47,8 +48,16 @@ export interface DbscExpressOptions {
   cookieDomain?: string;
   /** Use `Secure` cookies + `__Host-`/`__Secure-` prefixes. Default true. Set false on bare-http localhost. */
   secure?: boolean;
-  /** Bound cookie TTL (ms). Default 600_000 (10 min). */
+  /** Lifetime (ms) of the session row in storage — its `expiresAt`. Default 24h. */
   sessionTtl?: number;
+  /** Bound cookie lifetime / refresh cadence (ms). Default 600_000 (10 min). */
+  boundCookieTtl?: number;
+  /** Grace window after the bound cookie expires before the tier drops to none (ms). Default 30_000. */
+  refreshGraceMs?: number;
+  /** TTL (ms) of the `__Host-dbsc-reg` cookie used during registration. Default 24h. */
+  registrationCookieTtl?: number;
+  /** Let install() set Express `trust proxy`. Default true. */
+  trustProxy?: boolean;
   /** Replay cache for per-request proofs. Default no-op. */
   replayCache?: ProofReplayCache;
   /** Rate limiter for /dbsc/* routes. Default no-op. */
@@ -115,8 +124,13 @@ export interface DbscExpressKit {
   install(app: Express): Express;
   /** Raw middleware for manual mounting (skips install()'s static SDK + init shim). */
   middleware(): RequestHandler;
-  /** Route guard that verifies the X-Dbsc-Bound-Proof header. 403 on missing/invalid. */
-  requireProof(): RequestHandler;
+  /**
+   * Route guard that verifies the X-Dbsc-Bound-Proof header. 403 on
+   * missing/invalid. Accepts per-route overrides: `timestampWindowMs`
+   * (tighten the freshness window), `allowDbscWithoutProof` (relax the
+   * proof requirement on a low-risk route), `signBody`, `replayCache`.
+   */
+  requireProof(opts?: RequireProofOptions): RequestHandler;
 }
 
 /**
@@ -162,6 +176,10 @@ export function dbscExpress(auth: AuthLike, opts: DbscExpressOptions = {}): Dbsc
     ...(opts.cookieScope !== undefined && { cookieScope: opts.cookieScope }),
     ...(opts.cookieDomain !== undefined && { cookieDomain: opts.cookieDomain }),
     ...(opts.sessionTtl !== undefined && { sessionTtl: opts.sessionTtl }),
+    ...(opts.boundCookieTtl !== undefined && { boundCookieTtl: opts.boundCookieTtl }),
+    ...(opts.refreshGraceMs !== undefined && { refreshGraceMs: opts.refreshGraceMs }),
+    ...(opts.registrationCookieTtl !== undefined && { registrationCookieTtl: opts.registrationCookieTtl }),
+    ...(opts.trustProxy !== undefined && { trustProxy: opts.trustProxy }),
     ...(opts.replayCache !== undefined && { replayCache: opts.replayCache }),
     ...(opts.rateLimiter !== undefined && { rateLimiter: opts.rateLimiter }),
     ...(opts.onEvent !== undefined && { onEvent: opts.onEvent }),
@@ -188,8 +206,8 @@ export function dbscExpress(auth: AuthLike, opts: DbscExpressOptions = {}): Dbsc
   return {
     install,
     middleware: kit.middleware,
-    requireProof(): RequestHandler {
-      return kit.requireProof();
+    requireProof(proofOpts?: RequireProofOptions): RequestHandler {
+      return kit.requireProof(proofOpts);
     },
   };
 }
