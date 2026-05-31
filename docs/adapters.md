@@ -137,7 +137,7 @@ The kit's `getSession` / `requireProof` carry storage from the config — nothin
 
 ## Writing your own adapter
 
-The four shipped adapters cover the major frameworks. For Koa, Hapi, raw `http`, Bun's built-in server, Deno's `Deno.serve`, or anything else — call the core functions directly. There is no API restriction.
+The core is framework-agnostic — bring your own framework. The four shipped adapters cover the major frameworks, but they're thin wrappers over the same core functions, which take plain data and a `StorageAdapter` and assume nothing about the HTTP layer. For Koa, Hapi, raw `http`, Bun's built-in server, Deno's `Deno.serve`, a custom session layer, or anything else — call the core functions directly. There is no API restriction.
 
 ### What an adapter does
 

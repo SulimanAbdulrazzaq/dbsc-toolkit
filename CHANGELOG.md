@@ -2,6 +2,19 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.9.9] — 2026-05-31
+
+### Changed
+
+- **Surfaced the framework-agnostic core in the README.** Added a "Not on
+  Express?" section to the quick start showing the core handlers
+  (`handleRegistration`, `verifyBoundProof`, `issueChallenge`,
+  `buildRegistrationHeader`, the `StorageAdapter` interface) imported straight
+  from `dbsc-toolkit`, with a link to the raw-`http` example in
+  `docs/adapters.md`. The signal that the core works without any framework
+  adapter was previously near the bottom of the README; it now sits on the
+  first screen. Docs only — no code changed.
+
 ## [2.9.8] — 2026-05-25
 
 ### Changed

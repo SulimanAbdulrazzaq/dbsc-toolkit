@@ -116,6 +116,24 @@ Without the script those browsers stay on `tier: "none"`. Chromium 146+ doesn't 
 
 Walk-through: [docs/getting-started.md](./docs/getting-started.md).
 
+### Not on Express?
+
+`createDbsc()` is the Express convenience layer. The protocol itself — native DBSC, the polyfill, per-request proof verification — lives in a framework-agnostic core that takes plain data and a `StorageAdapter`, nothing else. The Express, Fastify, Hono, and Next.js adapters are thin wrappers over it. If you're on a different runtime (or wiring DBSC into your own framework's session layer), import the core handlers directly:
+
+```ts
+import {
+  handleRegistration,   // POST /dbsc/registration
+  handleRefresh,        // POST /dbsc/refresh
+  handleBoundRegistration, handleBoundRefresh,   // the polyfill routes
+  verifyBoundProof,     // your requireProof() equivalent
+  issueChallenge,
+  buildRegistrationHeader,
+  type StorageAdapter,  // the only interface you implement
+} from "dbsc-toolkit";
+```
+
+These are the same functions every shipped adapter calls. A complete raw-`http` integration built on them — both protocol surfaces, every header and cookie detail — is in [docs/adapters.md](./docs/adapters.md#writing-your-own-adapter).
+
 ## Live demos
 
 | URL | Stack | Source |
