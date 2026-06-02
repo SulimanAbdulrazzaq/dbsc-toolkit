@@ -1,49 +1,63 @@
 // DBSC + Better Auth demo (Express).
 //
-// User-facing setup is three blocks after the plugin is added to auth.ts:
-//   const dbsc = dbscExpress(auth)
-//   dbsc.install(app)
-//   app.get("/route", dbsc.requireProof(), handler)
+// The whole DBSC integration is one line in auth.ts: plugins: [dbsc()].
+// The plugin mounts its own protocol routes through Better Auth's router, so
+// this works on every framework. The only Express-specific piece is reading the
+// per-request tier for requireProof() on guarded routes — that's the
+// dbsc-toolkit/express middleware below.
 
 import express from "express";
 import cookieParser from "cookie-parser";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { toNodeHandler } from "better-auth/node";
-import { dbscExpress } from "@dbsc-toolkit/better-auth/express";
+import { createRequire } from "node:module";
+import { dbsc as dbscMiddleware, requireProof } from "dbsc-toolkit/express";
+import { createBetterAuthStorageAdapter } from "@dbsc-toolkit/better-auth/internal";
 import { auth } from "./auth.js";
 
 const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "..", "public");
 
+// The polyfill SDK bundle ships in dbsc-toolkit/dist/client. The plugin serves
+// the init.js shim itself, but the SDK files are static assets — serve them.
+const require = createRequire(import.meta.url);
+const clientDir = path.join(path.dirname(require.resolve("dbsc-toolkit/package.json")), "dist", "client");
+
 // Run Better Auth migrations once at startup. dbsc() adds dbscSession and
 // dbscBoundKey to the auto-generated schema — fail fast if migration fails.
 const authCtx = await auth.$context;
 await authCtx.runMigrations();
 
+// The DBSC storage bridge over Better Auth's DB, for the guard middleware.
+const storage = createBetterAuthStorageAdapter(authCtx.adapter, authCtx.internalAdapter);
+
 app.use(cookieParser());
 
-// Mount DBSC routes BEFORE the Better Auth catch-all. toNodeHandler swallows
-// every /api/auth/* path, so the DBSC routes have to land first.
-const dbsc = dbscExpress(auth);
-dbsc.install(app);
+// Serve the polyfill SDK bundle so the init shim can import it.
+app.use("/dbsc-client", express.static(clientDir));
 
-// Better Auth handler — keep BEFORE express.json() per Better Auth docs.
+// Better Auth handler — the dbsc() plugin's protocol routes (/api/auth/dbsc/*,
+// /api/auth/dbsc-bound/*, /api/auth/dbsc-client/init.js) are served through it.
 app.all("/api/auth/*splat", toNodeHandler(auth));
 app.use(express.json());
 
-// /api/me — session view, no DBSC proof required. Reads the dbscSession row
-// directly through the Better Auth adapter so the UI can show the live tier.
+// dbsc-toolkit/express middleware — reads the bound cookie and sets the
+// per-request tier on res.locals.dbsc so requireProof() can gate routes. It
+// does NOT mount the protocol routes here (the plugin already did); it only
+// needs storage to look up the session tier. Match basePath so cookie names
+// line up.
+app.use(dbscMiddleware({ storage, secure: true }));
+
+// /api/me — session view, no DBSC proof required.
 app.get("/api/me", async (req, res) => {
   const session = await auth.api.getSession({ headers: new Headers(req.headers) });
   if (!session) return res.status(401).json({ authenticated: false });
-
   const row = await authCtx.adapter.findOne({
     model: "dbscSession",
     where: [{ field: "id", value: session.session.id }],
   });
-
   res.json({
     authenticated: true,
     email: session.user.email,
@@ -53,9 +67,8 @@ app.get("/api/me", async (req, res) => {
   });
 });
 
-// /api/profile — gated. A request without a valid X-Dbsc-Bound-Proof header
-// gets 403 PROOF_MISSING before this handler runs.
-app.get("/api/profile", dbsc.requireProof(), async (req, res) => {
+// /api/profile — gated. No valid proof → 403 before the handler runs.
+app.get("/api/profile", requireProof(), async (req, res) => {
   const session = await auth.api.getSession({ headers: new Headers(req.headers) });
   if (!session) return res.status(401).json({ error: "no session" });
   res.json({
@@ -66,14 +79,11 @@ app.get("/api/profile", dbsc.requireProof(), async (req, res) => {
   });
 });
 
-// /api/payment — gated + body hash verified. express.raw delivers the body
-// bytes to requireProof() so the hash in the proof header can be checked.
-// requireProof() takes per-route options — here a 30s freshness window
-// instead of the 5-min default, tightening replay tolerance for a payment.
+// /api/payment — gated + body hash verified (30s freshness window).
 app.post(
   "/api/payment",
   express.raw({ type: "*/*" }),
-  dbsc.requireProof({ timestampWindowMs: 30_000 }),
+  requireProof({ timestampWindowMs: 30_000 }),
   async (req, res) => {
     const session = await auth.api.getSession({ headers: new Headers(req.headers) });
     if (!session) return res.status(401).json({ error: "no session" });

@@ -1,6 +1,6 @@
 {
   "name": "@dbsc-toolkit/better-auth",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "DBSC (Device Bound Session Credentials) plugin for Better Auth, powered by dbsc-toolkit.",
   "license": "Apache-2.0",
   "type": "module",
@@ -10,10 +10,6 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
-    },
-    "./express": {
-      "import": "./dist/express.js",
-      "types": "./dist/express.d.ts"
     },
     "./client": {
       "import": "./dist/client.js",
@@ -36,19 +32,11 @@
   },
   "peerDependencies": {
     "better-auth": ">=1.0.0",
-    "dbsc-toolkit": ">=2.9.0",
-    "express": ">=5.0.0"
-  },
-  "peerDependenciesMeta": {
-    "express": {
-      "optional": true
-    }
+    "dbsc-toolkit": ">=2.9.0"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
     "better-auth": "^1.2.0",
     "dbsc-toolkit": "workspace:*",
-    "express": "^5.2.1",
     "rimraf": "^6.0.0",
     "typescript": "^6.0.0"
   },

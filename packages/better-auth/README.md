@@ -1,6 +1,6 @@
 # @dbsc-toolkit/better-auth
 
-Device Bound Session Credentials for [Better Auth](https://better-auth.com).
+Device Bound Session Credentials for [Better Auth](https://better-auth.com). One plugin line — `plugins: [dbsc()]` — works on every Better Auth runtime (Express, Fastify, Hono, Next.js, SvelteKit, Node…). The protocol routes mount through Better Auth's own router, so there's no framework-specific setup.
 
 A session cookie gets stolen. Today the attacker pastes it into their own browser and they're your user. Cookie HttpOnly didn't matter. Cookie Secure didn't matter. Refresh tokens didn't matter.
 
@@ -16,15 +16,11 @@ Chromium 145+ does this with a key in the TPM or Secure Enclave. Firefox, Safari
 npm install @dbsc-toolkit/better-auth dbsc-toolkit
 ```
 
-`better-auth` and `express` you already have.
-
 ## Setup
 
-One line in `auth.ts`, one line in `server.ts`. That's the whole integration.
+### 1. Add the plugin (`auth.ts`)
 
-It's split across the two files you already have for a reason, not for ceremony. `dbsc()` declares the database schema and the post-login hook — and Better Auth only accepts those at `betterAuth()` construction time, so it has to live in `auth.ts`. `dbscExpress()` mounts the protocol routes and the route guard, which need the Express `app` object, so it has to live in `server.ts`. Neither can do the other's job; together they're two lines.
-
-### auth.ts
+`dbsc()` mounts the DBSC protocol routes (`/dbsc/registration`, `/dbsc/refresh`, the `/dbsc-bound/*` endpoints, and the browser init shim) through Better Auth's own router, and adds a post-sign-in hook that issues the `Secure-Session-Registration` header. Because it rides Better Auth's router, it works on every runtime with no framework-specific mounting.
 
 ```ts
 import { betterAuth } from "better-auth"
@@ -37,66 +33,68 @@ export const auth = betterAuth({
 })
 ```
 
-Then run migrations so Better Auth creates the two new tables (`dbscSession`, `dbscBoundKey`):
+Run migrations to create the two new tables (`dbscSession`, `dbscBoundKey`):
 
 ```sh
 npx @better-auth/cli migrate
 ```
 
-### server.ts
+That's the entire server integration for the protocol. The routes now answer at `/api/auth/dbsc/*` and `/api/auth/dbsc-bound/*` on whatever framework Better Auth is mounted on.
+
+### 2. Serve the polyfill SDK
+
+The plugin serves the init shim at `/api/auth/dbsc-client/init.js`, but the SDK bundle is static files shipped in `dbsc-toolkit/dist/client`. Serve them with your framework's static handler (Express shown):
 
 ```ts
-import express from "express"
-import cookieParser from "cookie-parser"
-import { toNodeHandler } from "better-auth/node"
-import { dbscExpress } from "@dbsc-toolkit/better-auth/express"
-import { auth } from "./auth.js"
-
-const app = express()
-app.use(cookieParser())
-
-const dbsc = dbscExpress(auth)
-dbsc.install(app)
-
-app.all("/api/auth/*splat", toNodeHandler(auth))
-app.use(express.json())
+import { createRequire } from "node:module"
+const require = createRequire(import.meta.url)
+const clientDir = path.join(path.dirname(require.resolve("dbsc-toolkit/package.json")), "dist", "client")
+app.use("/dbsc-client", express.static(clientDir))
 ```
 
-The order is load-bearing. `dbsc.install(app)` has to come before the Better Auth catch-all, otherwise `toNodeHandler` swallows `/api/auth/dbsc/*` and Chrome's registration POST 404s. I burned 30 minutes on this the first time. Don't do what I did.
-
-### Guarded routes
-
-```ts
-app.get("/profile", dbsc.requireProof(), async (req, res) => {
-  const session = await auth.api.getSession({ headers: new Headers(req.headers) })
-  if (!session) return res.status(401).end()
-  res.json({ email: session.user.email })
-})
-```
-
-`requireProof()` is a regular Express middleware. Drop it in front of any route a stolen cookie shouldn't reach. Unguarded routes are unaffected.
-
-POST handlers that take a body need `express.raw({ type: "*/*" })` in front of `requireProof()` so the body bytes survive for the signature check:
-
-```ts
-app.post("/payment", express.raw({ type: "*/*" }), dbsc.requireProof(), payHandler)
-```
-
-### Frontend
-
-One tag in your HTML:
+Then one tag in your HTML:
 
 ```html
-<script src="/dbsc-client/init.js" type="module"></script>
+<script src="/api/auth/dbsc-client/init.js" type="module"></script>
 ```
 
-The shim loads the polyfill SDK, points it at the right paths, and exposes three things on `window`:
+The shim loads the SDK, points it at the right paths, and exposes `window.boundFetch`, `window.initDbsc()`, and `window.clearBoundKey()`.
 
-- `boundFetch` is a `fetch` that signs the request with the polyfill key
-- `initDbsc()` re-runs the SDK after a fresh sign-in
-- `clearBoundKey()` wipes the polyfill key, call on sign-out
+### 3. Guard routes that need per-request proof
 
-The catch (worth knowing once and never again): the shim runs once on page load. A logged-out visitor lands on `phase: "unbound"`, the SDK returns without storing a key, and `boundFetch` falls back to plain `fetch`. After a fresh sign-in you have to call `initDbsc()` so the SDK observes the session Better Auth just issued:
+The protocol is framework-agnostic, but the per-request guard runs on **your** routes, so it's a framework middleware from `dbsc-toolkit`. On Express:
+
+```ts
+import { dbsc as dbscMiddleware, requireProof } from "dbsc-toolkit/express"
+import { createBetterAuthStorageAdapter } from "@dbsc-toolkit/better-auth/internal"
+
+const ctx = await auth.$context
+const storage = createBetterAuthStorageAdapter(ctx.adapter, ctx.internalAdapter)
+
+// Reads the bound cookie + sets the per-request tier on res.locals.dbsc.
+app.use(dbscMiddleware({ storage, secure: true }))
+
+app.get("/profile", requireProof(), profileHandler)
+app.post("/payment", express.raw({ type: "*/*" }), requireProof({ timestampWindowMs: 30_000 }), payHandler)
+```
+
+`requireProof()` returns 403 before your handler runs if the per-request proof is missing or invalid. Fastify, Hono, and Next.js have the matching guard in `dbsc-toolkit/fastify`, `dbsc-toolkit/hono`, `dbsc-toolkit/nextjs`.
+
+On the client, swap `fetch` for `boundFetch` on guarded routes — it signs the request with the device key:
+
+```js
+const r = await boundFetch("/profile", { credentials: "include" })
+```
+
+<details>
+<summary>Old per-framework helpers (removed in 1.0)</summary>
+
+Versions before 1.0 shipped `dbscExpress` / `dbscFastify` / `dbscHono` / `dbscNextjs` helpers to mount the routes. Those are gone — the plugin mounts its own routes now. If you're upgrading: delete the `dbscExpress(auth).install(app)` call, keep `plugins: [dbsc()]`, and use `requireProof` from `dbsc-toolkit/<framework>` for guarding (step 3 above).
+</details>
+
+### Frontend re-init after sign-in
+
+The init shim runs once on page load. A logged-out visitor lands on `phase: "unbound"`, the SDK returns without storing a key, and `boundFetch` falls back to plain `fetch`. After a fresh sign-in you call `initDbsc()` so the SDK observes the session Better Auth just issued:
 
 ```js
 const r = await fetch("/api/auth/sign-in/email", { ... })
@@ -111,7 +109,7 @@ const r = await boundFetch("/profile", { credentials: "include" })
 
 ## What's actually happening
 
-When the user signs in, the plugin's `after` hook attaches `Secure-Session-Registration` and three short-lived cookies to the response. Chrome 145+ sees the registration header, generates an ES256 keypair in the TPM, and POSTs a self-signed JWS to `/api/auth/dbsc/registration` on its own — no app code involved. The Express adapter verifies, stores the public JWK, flips the session's `tier` to `"dbsc"`.
+When the user signs in, the plugin's `after` hook attaches `Secure-Session-Registration` and three short-lived cookies to the response. Chrome 145+ sees the registration header, generates an ES256 keypair in the TPM, and POSTs a self-signed JWS to `/api/auth/dbsc/registration` on its own — no app code involved. The plugin's own route verifies, stores the public JWK, flips the session's `tier` to `"dbsc"`.
 
 In parallel, the init shim hits `/api/auth/dbsc-bound/state`. On a Chromium session that already has a TPM key, the response says `needs-bound-registration` and the SDK co-registers a polyfill Web Crypto key. This second key is what `requireProof()` actually verifies on every request, because the TPM key can't sign request-scoped messages from JavaScript.
 
@@ -133,73 +131,31 @@ Every session row carries a `tier`:
 
 ## Options
 
-The plugin splits across two factories. `dbsc()` goes in `auth.ts` and owns
-the after-hook + schema. `dbscExpress()` goes in `server.ts` and owns the
-protocol routes + the route guard.
-
-### `dbsc()` — the plugin factory
+All configuration lives on the `dbsc()` plugin:
 
 | Option | Type | Default | What it does |
 |---|---|---|---|
-| `basePath` | `string` | `"/api/auth"` | Must match `betterAuth({ basePath })`. The registration header points Chrome at `${basePath}/dbsc/registration`. |
+| `basePath` | `string` | `"/api/auth"` | Must match `betterAuth({ basePath })`. Protocol routes mount under it. |
 | `cookieScope` | `"host" \| "site"` | `"host"` | `host` → `__Host-` cookies, no Domain. `site` → `__Secure-` + Domain. |
 | `cookieDomain` | `string` | — | Required when `cookieScope` is `"site"`. |
-| `cookieTtl` | `number` | `600_000` | Max-Age (ms) for the cookies the after-hook writes. |
+| `cookieTtl` | `number` | `600_000` | Max-Age (ms) for the cookies the after-hook writes at sign-in. |
+| `boundCookieTtl` | `number` | `600_000` | Bound cookie lifetime / refresh cadence used by the protocol routes. |
+| `clientPath` | `string` | `"/dbsc-client"` | Path baked into the init shim where the SDK bundle is served. |
 | `onEvent` | `(e) => void` | — | Telemetry hook for registration / refresh / failures. |
 
-`sessionTtl` here is a deprecated alias for `cookieTtl` — it still works, removed in 0.3.0. (Unrelated to `dbscExpress`'s `sessionTtl` below, which is the storage session lifetime — same name, different layer, an artifact of the underlying `dbsc-toolkit` naming.)
-
-### `dbscExpress()` — the Express kit
-
-| Option | Type | Default | What it does |
-|---|---|---|---|
-| `basePath` | `string` | `"/api/auth"` | Must match the `dbsc({ basePath })` above. |
-| `secure` | `boolean` | `true` | `__Host-`/`__Secure-` prefixes + Secure flag. Set `false` on bare-http localhost. |
-| `clientPath` | `string \| false` | `"/dbsc-client"` | Where the polyfill SDK + init shim mount. `false` skips serving. |
-| `cookieScope` | `"host" \| "site"` | `"host"` | Same as the plugin's. |
-| `cookieDomain` | `string` | — | Required when `cookieScope` is `"site"`. |
-| `boundCookieTtl` | `number` | `600_000` | Bound cookie lifetime — how often the session re-signs a refresh. The knob you reach for most. |
-| `refreshGraceMs` | `number` | `30_000` | Grace after the bound cookie expires before the tier drops to `none`. |
-| `sessionTtl` | `number` | `24h` | Lifetime of the session **row** in storage (its `expiresAt`). Not a cookie. |
-| `registrationCookieTtl` | `number` | `24h` | TTL of the short-lived `__Host-dbsc-reg` cookie used only during registration. |
-| `trustProxy` | `boolean` | `true` | Whether `install()` sets Express `trust proxy`. |
-| `replayCache` | `ProofReplayCache` | no-op | Rejects a replayed proof (v2.8+). |
-| `rateLimiter` | `RateLimiter` | no-op | Guards the `/dbsc/*` routes. |
-| `onEvent` | `(e) => void` | — | Telemetry hook. |
-
-```ts
-// server.ts
-const dbsc = dbscExpress(auth, {
-  basePath: "/api/auth",
-  boundCookieTtl: 60_000,
-  refreshGraceMs: 30_000,
-  replayCache: new RedisReplayCache(redis),
-})
-```
-
-The six protocol paths (`/dbsc/registration`, `/dbsc/refresh`, the four
-`/dbsc-bound/*` routes) are derived from `basePath` and intentionally not
-configurable — they have to match what the after-hook advertises, or Chrome's
-registration POST 404s.
+`sessionTtl` is a deprecated alias for `cookieTtl`.
 
 ### Per-route proof tuning
 
-`dbsc.requireProof()` takes the same options the core guard takes, so you can
-vary strictness per route:
+The guard (`requireProof` from `dbsc-toolkit/<framework>`) takes per-route overrides:
 
 ```ts
 // Tighten the freshness window on a payment.
-app.post("/api/payment",
-  express.raw({ type: "*/*" }),
-  dbsc.requireProof({ timestampWindowMs: 30_000 }),
-  payHandler,
-)
+app.post("/payment", express.raw({ type: "*/*" }),
+  requireProof({ timestampWindowMs: 30_000 }), payHandler)
 
 // Relax on a low-risk read where a bound cookie is enough.
-app.get("/api/feed",
-  dbsc.requireProof({ allowDbscWithoutProof: true }),
-  feedHandler,
-)
+app.get("/feed", requireProof({ allowDbscWithoutProof: true }), feedHandler)
 ```
 
 Options: `timestampWindowMs` (default 5 min), `allowDbscWithoutProof` (default
@@ -219,9 +175,11 @@ Challenges live in Better Auth's existing `verification` table. The adapter uses
 
 | Import | When you need it |
 |---|---|
-| `@dbsc-toolkit/better-auth` | The `dbsc()` plugin for `betterAuth({ plugins })` |
-| `@dbsc-toolkit/better-auth/express` | `dbscExpress(auth)` for Express apps |
-| `@dbsc-toolkit/better-auth/internal` | `createBetterAuthStorageAdapter` for wiring DBSC into other runtimes (Hono, Fastify, Workers) |
+| `@dbsc-toolkit/better-auth` | The `dbsc()` plugin for `betterAuth({ plugins })` — works on every runtime |
+| `@dbsc-toolkit/better-auth/client` | The Better Auth client plugin (route type inference) |
+| `@dbsc-toolkit/better-auth/internal` | `createBetterAuthStorageAdapter` — the storage bridge, for the `requireProof` guard middleware |
+
+For the per-route guard, import `requireProof` from `dbsc-toolkit/express` (or `/fastify`, `/hono`, `/nextjs`) — that's the framework middleware that reads the per-request tier.
 
 ## License
 

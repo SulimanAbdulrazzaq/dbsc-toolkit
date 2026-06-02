@@ -23,8 +23,13 @@ import {
   type AnyTelemetryEvent,
 } from "dbsc-toolkit";
 
+import { createAuthEndpoint } from "better-auth/api";
+
 import { createBetterAuthStorageAdapter } from "./adapter.js";
 import { dbscSchema } from "./schema.js";
+import { makeCookies } from "./cookies.js";
+import { buildDbscRoutes } from "./routes.js";
+import { buildInitScript } from "./init-script.js";
 
 export interface DbscPluginOptions {
   /**
@@ -38,8 +43,12 @@ export interface DbscPluginOptions {
   cookieDomain?: string;
   /** Max-Age (ms) for the cookies the after-hook writes. Default: 600_000 (10 min). */
   cookieTtl?: number;
-  /** @deprecated alias for cookieTtl — removed in 0.3.0 */
+  /** @deprecated alias for cookieTtl — removed in a future major */
   sessionTtl?: number;
+  /** Bound cookie lifetime / refresh cadence (ms) used by the protocol routes. Default: 600_000. */
+  boundCookieTtl?: number;
+  /** Path the polyfill SDK is served at, baked into the init shim. Default "/dbsc-client". */
+  clientPath?: string;
   /** Telemetry hook */
   onEvent?: (event: AnyTelemetryEvent) => void | Promise<void>;
 }
@@ -56,6 +65,8 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
   } = opts;
   // cookieTtl is the canonical name; sessionTtl is a deprecated alias.
   const cookieTtl = opts.cookieTtl ?? opts.sessionTtl ?? DEFAULT_COOKIE_TTL;
+  const boundCookieTtl = opts.boundCookieTtl ?? DEFAULT_COOKIE_TTL;
+  const clientPath = opts.clientPath ?? "/dbsc-client";
 
   const secure = true;
   const scopeOpts = cookieDomain
@@ -99,15 +110,50 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
     ].join("; ");
   }
 
+  // The DBSC protocol routes live INSIDE the plugin via createAuthEndpoint, so
+  // they work on every Better Auth runtime (Express, Fastify, Hono, Next.js…)
+  // with zero per-framework setup. Native routes are declared bodyless — Chrome
+  // sends the JWS in a header with an empty body, like Better Auth's own
+  // sign-out route.
+  const cookies = makeCookies({ secure, cookieScope, cookieDomain });
+  const storageFromCtx = (ctx: any): StorageAdapter =>
+    createBetterAuthStorageAdapter(ctx.context.adapter, ctx.context.internalAdapter);
+
+  const protocolRoutes = buildDbscRoutes({
+    storageFromCtx,
+    cookies,
+    basePath,
+    boundCookieTtl,
+    ...(opts.onEvent !== undefined && { onEvent: opts.onEvent }),
+  });
+
+  // Serve the browser init shim from an endpoint so it works on every runtime.
+  // Return a raw Response so the Content-Type is JS (ctx.json forces JSON).
+  const initJs = buildInitScript({ basePath, clientPath });
+  const dbscClientInit = createAuthEndpoint(
+    `${clientPath}/init.js`,
+    { method: "GET" },
+    async (ctx: any) =>
+      ctx.json(
+        new Response(initJs, {
+          status: 200,
+          headers: {
+            "Content-Type": "application/javascript; charset=utf-8",
+            "Cache-Control": "public, max-age=300",
+          },
+        }),
+      ),
+  );
+
   return {
     id: "dbsc-toolkit",
 
     schema: dbscSchema,
 
-    // The DBSC protocol routes do NOT live inside the plugin — Better Auth's
-    // createAuthEndpoint refuses POSTs without a body (responds 415), and
-    // Chrome's registration request has the JWS in a header with no body.
-    // Use mountDbscRoutes(app, auth) on your Hono/Express app instead.
+    endpoints: {
+      ...protocolRoutes,
+      dbscClientInit,
+    },
 
     hooks: {
       after: [
