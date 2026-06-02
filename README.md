@@ -1,62 +1,60 @@
-# DBSC Toolkit
+<p align="center">
+  <img src="./assets/banner.png" width="880" alt="DBSC Toolkit">
+</p>
 
-[![npm](https://img.shields.io/npm/v/dbsc-toolkit.svg)](https://www.npmjs.com/package/dbsc-toolkit)
-[![CI](https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/actions/workflows/ci.yml)
-[![License](https://img.shields.io/npm/l/dbsc-toolkit.svg)](./LICENSE)
-[![Node](https://img.shields.io/node/v/dbsc-toolkit.svg)](https://nodejs.org)
+<h1 align="center">DBSC Toolkit</h1>
 
-> Stop stolen session cookies from being replayed on another device.
->
-> `dbsc-toolkit` is a Node.js implementation of W3C [Device Bound Session Credentials](https://www.w3.org/TR/dbsc/) with a Web Crypto polyfill for browsers that don't speak the protocol natively yet. Native DBSC on Chromium 146+ (TPM on Windows, Secure Enclave on macOS); the polyfill covers Firefox, Safari, mobile, and older Chromium.
->
-> Adapters: Express, Fastify, Hono, Next.js. Storage: in-memory, Redis, Postgres.
+<p align="center">
+  <strong>Stop stolen session cookies from being replayed on another device.</strong><br>
+  W3C Device Bound Session Credentials for Node.js — with a Web Crypto polyfill so every browser is covered, not just Chrome.
+</p>
 
-```ts
-// Bind the session inside your existing login route:
-app.post("/login", async (req, res) => {
-  await dbsc.bind(res, sessionId, { userId });
-  res.json({ ok: true });
-});
+<p align="center">
+  <a href="https://www.npmjs.com/package/dbsc-toolkit"><img src="https://img.shields.io/npm/v/dbsc-toolkit.svg" alt="npm"></a>
+  <a href="https://www.npmjs.com/package/dbsc-toolkit"><img src="https://img.shields.io/npm/dm/dbsc-toolkit.svg" alt="downloads"></a>
+  <a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/actions/workflows/ci.yml"><img src="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/types-TypeScript-blue.svg" alt="TypeScript">
+  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/dbsc-toolkit.svg" alt="License"></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/node/v/dbsc-toolkit.svg" alt="Node"></a>
+</p>
 
-// Guard sensitive routes:
-app.post("/payment", express.raw({ type: "*/*" }), requireProof(), paymentHandler);
+## The problem
+
+An attacker steals a session cookie — XSS, infostealer malware, a leaked log, a compromised proxy. The moment they have it, they paste it into their own browser and they're you. `HttpOnly` didn't matter. `Secure` didn't matter. Rotating the token only shortens the window; it doesn't close it.
+
+## The solution
+
+DBSC binds the session to a cryptographic key generated on the user's device at login. The cookie is still stealable — but every refresh, and every guarded request, needs a signature from that key. An attacker on another machine has nothing to sign with. The replay 403s.
+
+```
+   Browser                                   Server
+   ───────                                   ──────
+   sign in  ─────────────────────────────▶   issue session + Secure-Session-Registration
+   generate keypair (TPM / IndexedDB)
+   register public key  ──────────────────▶   store key, bind to session
+                          ◀──────────────────  bound session cookie
+   ...later, on a guarded request:
+   sign challenge with private key  ──────▶   verify signature → 200
+   stolen cookie, no key            ──────▶   403  ✋
 ```
 
-Key generation, the protocol routes, cookie management, and the polyfill all live inside the library.
+<p align="center">
+  <img src="./assets/demo.gif" width="720" alt="Login → bound → stolen-cookie replay → 403">
+</p>
 
-## Contents
+### What a stolen cookie gets the attacker
 
-- [Install](#install)
-- [Quick start](#quick-start)
-- [Live demo](#live-demo)
-- [Why dbsc-toolkit](#why-dbsc-toolkit)
-- [Comparison](#comparison)
-- [Why not JWT?](#why-not-just-use-jwt)
-- [How it works](#how-it-works)
-- [Who is this for?](#who-is-this-for)
-- [Adding to an existing app](#adding-to-an-existing-app)
-- [Protect your routes](#protect-your-routes)
-- [Production checklist](#production-checklist)
-- [API](#subpath-imports)
-- [Security model](#security-model)
-- [Going deeper](#going-deeper)
+<p align="center">
+  <img src="./assets/what-stealer-sees.png" width="760" alt="Attacker replays the stolen cookie from another machine and the request is rejected">
+</p>
 
-## Why dbsc-toolkit
+The cookie copies fine. The key doesn't — it never left the user's device. So the replayed request fails the proof check.
 
-Native DBSC ships on Chrome 146+ for Windows and macOS users with a hardware key store. That's roughly a third of the desktop traffic most apps see. Most other DBSC implementations focus on native browser support only, which leaves the rest of your users on plain bearer cookies.
+## Live demo
 
-This library ships a Web Crypto polyfill alongside native DBSC, so non-Chromium browsers get the same wire-level protection against cookie theft and the same `requireProof()` guard on the server. The polyfill key is stored non-extractably in IndexedDB rather than a TPM — there is no biometric prompt or any user interaction.
+**<https://dbsc-toolkit.onrender.com/>** — sign in, then hit the **"simulate stolen cookie"** button. It fires a bare request with the bound cookie and no proof, and comes back `403 PROOF_MISSING`. That's the whole library in one button.
 
-What you actually get:
-
-- Native W3C DBSC on Chromium 146+ (TPM on Windows, Secure Enclave on macOS).
-- A Web Crypto polyfill that brings the same protection to Firefox, Safari, mobile and older Chromium. Non-extractable IndexedDB key.
-- Adapters for Express, Fastify, Hono and Next.js — all four in one package.
-- Storage adapters for memory, Redis and Postgres. Swap by changing one import.
-- `requireProof()` — a per-request signature guard that works on every browser and defends against MITM body substitution via the signed body hash.
-- Replay cache (since v2.8) that rejects a captured-proof replay inside the timestamp window. Opt-in; you wire `RedisReplayCache` when you want it.
-- Multi-subdomain binding (since v2.9) via `cookieScope: "site"` for apps split across `app.example.com` + `api.example.com`.
-- Apache 2.0.
+Chromium 145+ lands on `tier: "dbsc"` (TPM-backed); Firefox/Safari land on `tier: "bound"` (Web Crypto polyfill). Same guard either way.
 
 ## Install
 
@@ -64,7 +62,7 @@ What you actually get:
 npm install dbsc-toolkit
 ```
 
-Optional peer dependencies — install only what you actually use:
+Framework and storage drivers are optional peer deps — install only what you use:
 
 ```sh
 npm install express ioredis              # Express + Redis
@@ -73,8 +71,6 @@ npm install fastify @fastify/cookie pg   # Fastify + Postgres
 
 ## Quick start
 
-`createDbsc()` takes your config once. `install()` mounts the protocol routes, the bound-route JSON parser, the `/dbsc-client` SDK, and sets `trust proxy`.
-
 ```ts
 import express from "express";
 import { randomUUID } from "node:crypto";
@@ -82,21 +78,20 @@ import { createDbsc } from "dbsc-toolkit/express";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
 const app = express();
-app.use(express.json());               // for your own routes' JSON bodies
+app.use(express.json());
 
-const dbsc = createDbsc({ storage: new MemoryStorage() });  // swap for Redis/Postgres in prod
-dbsc.install(app);
+const dbsc = createDbsc({ storage: new MemoryStorage() });  // Redis/Postgres in prod
+dbsc.install(app);                                          // mounts protocol routes + SDK
 
 app.post("/login", async (req, res) => {
-  await dbsc.bind(res, randomUUID(), { userId: req.body.username });
+  await dbsc.bind(res, randomUUID(), { userId: req.body.username });   // the one new line
   res.json({ ok: true });
 });
 
-app.get("/me", (_req, res) => res.json(res.locals.dbsc));
-app.listen(3000);
+app.post("/payment", express.raw({ type: "*/*" }), dbsc.requireProof(), payHandler);
 ```
 
-Load the polyfill in your HTML so Firefox / Safari / older Chromium can reach `tier: "bound"`:
+Load the polyfill in your HTML so non-Chromium browsers reach `tier: "bound"`:
 
 ```html
 <script type="module">
@@ -105,249 +100,122 @@ Load the polyfill in your HTML so Firefox / Safari / older Chromium can reach `t
 </script>
 ```
 
-Without the script those browsers stay on `tier: "none"`. Chromium 146+ doesn't need it — it negotiates the protocol on its own from the headers `dbsc()` sets.
-
-### Common failure modes
-
-- **`tier` always reads `"none"` on Chromium 146+** — running on plain HTTP (DBSC needs HTTPS), or `dbsc.install(app)` was never called. `install()` sets `trust proxy` and parses cookies, so the old "middleware order" class of bug is gone.
-- **Chrome loops registration** — storage got wiped. Move off `MemoryStorage` to Redis or Postgres before deploying anywhere that restarts. I learned this the hard way on Render free tier.
-- **Tier flips back to `"none"` right after login** — the race between `/login` returning and the browser running `POST /dbsc/registration`. Poll `/me` for ~1 s after login, or await the bound-SDK outcome promise. The demo wires both — see [examples/express/src/server.js](./examples/express/src/server.js).
-- **Firefox / Safari still on `"none"`** — the `<script type="module">` tag is missing. `install()` serves the SDK at `/dbsc-client`; you still load it on the page.
-
-Walk-through: [docs/getting-started.md](./docs/getting-started.md).
+Full walk-through, failure modes, and migration timeline: **[docs/getting-started.md](./docs/getting-started.md)** and **[docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md)**.
 
 ### Not on Express?
 
-`createDbsc()` is the Express convenience layer. The protocol itself — native DBSC, the polyfill, per-request proof verification — lives in a framework-agnostic core that takes plain data and a `StorageAdapter`, nothing else. The Express, Fastify, Hono, and Next.js adapters are thin wrappers over it. If you're on a different runtime (or wiring DBSC into your own framework's session layer), import the core handlers directly:
+The protocol lives in a framework-agnostic core — plain functions plus a `StorageAdapter`, no HTTP-layer assumptions. The Express/Fastify/Hono/Next.js adapters are thin wrappers. Build on the core directly for any runtime:
 
 ```ts
 import {
-  handleRegistration,   // POST /dbsc/registration
-  handleRefresh,        // POST /dbsc/refresh
-  handleBoundRegistration, handleBoundRefresh,   // the polyfill routes
-  verifyBoundProof,     // your requireProof() equivalent
-  issueChallenge,
-  buildRegistrationHeader,
-  type StorageAdapter,  // the only interface you implement
+  handleRegistration, handleRefresh,
+  handleBoundRegistration, handleBoundRefresh,
+  verifyBoundProof,        // your requireProof() equivalent
+  issueChallenge, buildRegistrationHeader,
+  type StorageAdapter,     // the only interface you implement
 } from "dbsc-toolkit";
 ```
 
-These are the same functions every shipped adapter calls. A complete raw-`http` integration built on them — both protocol surfaces, every header and cookie detail — is in [docs/adapters.md](./docs/adapters.md#writing-your-own-adapter).
+Complete raw-`http` example: [docs/adapters.md](./docs/adapters.md#writing-your-own-adapter).
 
-## Live demos
+## How it compares
 
-| URL | Stack | Source |
-|---|---|---|
-| <https://dbsc-toolkit.onrender.com/> | Express + raw `dbsc-toolkit` | [examples/express/](./examples/express/) |
-| <https://dbsc-better-auth-demo.onrender.com/> | Hono + Better Auth + `@dbsc-toolkit/better-auth` | [examples/better-auth/](./examples/better-auth/) |
+| | Plain cookies | JWT (bearer) | Native DBSC (Chrome 146+) | **dbsc-toolkit** |
+|---|:---:|:---:|:---:|:---:|
+| Replay-resistant (stolen cookie from another device) | ❌ | ❌ | ✅ | ✅ |
+| Works on Chrome / Edge / Brave | ✅ | ✅ | ✅ (TPM) | ✅ |
+| Works on Firefox / Safari / mobile / no-TPM | ✅ | ✅ | ❌ | ✅ (polyfill) |
+| Per-request body-hash proof vs MITM | ❌ | ❌ | ❌ | ✅ |
+| Captured-proof replay defense | n/a | ❌ | n/a | ✅ (replay cache) |
+| Multi-subdomain binding | loose | loose | ❌ | ✅ (`cookieScope: "site"`) |
+| Better Auth integration | n/a | n/a | n/a | ✅ (plugin) |
 
-Sign up, log in, click **Check session**. Chromium 145+ lands on `tier: "dbsc"` within a second; Firefox/Safari land on `tier: "bound"` within ~3 seconds. Open DevTools Network and watch the binding flow.
+DBSC complements your existing auth (passwords, MFA, sessions, JWTs) — it closes *replay after issue*, the gap none of them cover. More: [docs/security/threat-model.md](./docs/security/threat-model.md).
 
-## Comparison
+## Security at a glance
 
-|                            | Plain cookies | JWT (bearer) | Native DBSC (Chrome 146+) | **dbsc-toolkit** |
-|----------------------------|:-------------:|:------------:|:-------------------------:|:----------------:|
-| Stops cookie / token replay from another device | ❌ | ❌ | ✅ | ✅ |
-| Works on Chrome / Edge / Brave | ✅ | ✅ | ✅ (Windows + TPM) | ✅ |
-| Works on Firefox            | ✅ | ✅ | ❌ | ✅ (polyfill) |
-| Works on Safari             | ✅ | ✅ | ❌ | ✅ (polyfill) |
-| Works on mobile / no-TPM    | ✅ | ✅ | ❌ | ✅ (polyfill) |
-| Per-request body-hash proof against MITM | ❌ | ❌ | ❌ (TPM key isn't reachable from JS) | ✅ |
-| Captured-proof replay defense | n/a | ❌ | n/a | ✅ (v2.8 replay cache) |
-| Multi-subdomain binding     | ✅ (loose)  | ✅ (loose) | ❌ (`__Host-` only) | ✅ (v2.9 `cookieScope: "site"`) |
-| Server runtime              | any           | any          | n/a (browser-side)        | Node.js ≥ 20 |
+Defended:
 
-The native-DBSC column above describes a server that uses the spec without any polyfill. The polyfill key in this library lives in IndexedDB (`extractable: false`) rather than a TPM — a notch weaker against malware reading the browser profile, but it stops every remote-theft scenario the same way native DBSC does.
+- ✅ Cookie theft replayed from another device
+- ✅ Stolen bearer tokens (same category)
+- ✅ XSS reading `document.cookie`
+- ✅ Network capture / TLS-stripping proxy
+- ✅ Server log leakage
+- ✅ MITM body substitution (signed body hash)
 
-## "Why not just use JWT?"
+Not defended (be honest about the boundary):
 
-JWTs are bearer tokens. If stolen, they can be replayed from another device. DBSC adds proof-of-possession: the browser has to prove on every refresh (and on every `requireProof()`-guarded request) that it still has the private key bound at login. An attacker who got the token alone has nothing to sign with.
+- ⚠️ On-device malware reading the browser profile — only the `dbsc` tier (TPM) defeats this; the `bound` polyfill key is on disk
+- ⚠️ Browser/OS compromise, rogue extension with `subtle.sign` access
 
-It complements your existing auth — passwords, MFA, session cookies, JWTs — rather than replacing any of them. The gap it closes is *replay after issue*.
+Full STRIDE analysis: [docs/security/threat-model.md](./docs/security/threat-model.md) · best practices: [docs/security/best-practices.md](./docs/security/best-practices.md).
 
-## How it works
+## Protection tiers
 
-```
-Login → Key Registration → Cookie Issued → Challenge → Signature Verification → Refresh
-```
+Every session carries a `tier`. You don't gate on it directly — `requireProof()` does the enforcement — but it tells you how the binding was achieved on a given browser.
 
-On login the server responds with a `Secure-Session-Registration` header. The browser generates an ECDSA keypair in the TPM (native DBSC) or IndexedDB (polyfill), POSTs the public key, and gets a short-lived session cookie. Every ~10 minutes the browser re-signs a fresh server challenge to renew the cookie. A copy of the cookie pasted into another device has no key — the next refresh fails, and any route guarded by `requireProof()` returns 403 immediately.
+<p align="center">
+  <img src="./assets/tier.png" width="760" alt="dbsc (TPM-backed), bound (Web Crypto polyfill), and none">
+</p>
 
-Full wire-format walk-through: [HOW-IT-WORKS.md](./HOW-IT-WORKS.md).
+`dbsc` is hardware-backed (TPM / Secure Enclave). `bound` is the Web Crypto polyfill (non-extractable IndexedDB key). `none` is an unbound or stale session. Detail: [HOW-IT-WORKS.md](./HOW-IT-WORKS.md).
 
-## Who is this for?
+## Ecosystem
 
-Use `dbsc-toolkit` if:
-
-- You run a Node.js backend.
-- Your users authenticate with session cookies (or JWT bearer tokens).
-- Cookie / token theft is in your threat model — XSS, infostealer malware, leaked logs, compromised proxies.
-- You want coverage on Chrome and Firefox / Safari now, not eventually.
-
-Not the right fit if:
-
-- You don't issue any persistent client credential (every request re-authenticates from scratch).
-- You can't deploy HTTPS — DBSC cookies require `Secure`, and the spec rejects insecure origins.
-- Your backend is Python / Go / Rust / Java / .NET — no port exists yet; you'd implement against the [W3C spec](https://www.w3.org/TR/dbsc/) directly.
-- You need DBSC on iOS / mobile Chrome / ChromeOS *with native key storage* — those platforms don't ship native DBSC. The polyfill still works there; the key just lives in IndexedDB instead of secure hardware.
-
-## Adding to an existing app
-
-You don't rewrite login and you don't migrate the session store. DBSC sits alongside your existing session cookie and binds to the same session id.
+| Package | What it is |
+|---|---|
+| `dbsc-toolkit` | Core + Express/Fastify/Hono/Next.js adapters, memory/Redis/Postgres storage |
+| `dbsc-toolkit/client` | Browser SDK + Web Crypto polyfill |
+| [`@dbsc-toolkit/better-auth`](./packages/better-auth/) | First-class [Better Auth](https://better-auth.com) plugin — binds every sign-in method automatically |
 
 ```ts
-import { createDbsc, requireProof } from "dbsc-toolkit/express";
-import { RedisStorage } from "dbsc-toolkit/storage/redis";
-import Redis from "ioredis";
-
-// 1. configure the kit once — storage is the only required option
-const dbsc = createDbsc({ storage: new RedisStorage(new Redis(process.env.REDIS_URL)) });
-
-// 2. install once — mounts the protocol routes, trust proxy, the SDK
-dbsc.install(app);
-
-// 3. one line in your existing /login, after the password check
-app.post("/login", async (req, res) => {
-  const user = await yourPasswordCheck(req.body);           // unchanged
-  const sid  = await issueYourOwnSession(user.id);          // unchanged
-  await dbsc.bind(res, sid, { userId: user.id });           // <- the new line
-  res.json({ ok: true });
-});
-
-// 4. guard sensitive routes — one call. POST routes deliver raw bytes.
-app.post("/payment", express.raw({ type: "*/*" }), requireProof(), paymentHandler);
-
-// 5. one line in /logout
-app.post("/logout", async (req, res) => {
-  await res.locals.dbsc.revoke();                           // <- the new line
-  await yourSessionStore.delete(req.cookies.sid);           // unchanged
-  res.json({ ok: true });
-});
+// Better Auth, two lines:
+import { dbsc } from "@dbsc-toolkit/better-auth"            // auth.ts → plugins: [dbsc()]
+import { dbscExpress } from "@dbsc-toolkit/better-auth/express"  // server.ts → dbscExpress(auth).install(app)
 ```
 
-`install()` handles `trust proxy`, cookie parsing, the bound-route JSON parser, and the `/dbsc-client` static mount. You still need `express.json()` for your *own* routes' bodies. `sessionId` is whatever id your session store already issues — DBSC binds to it, no second id-space.
+## Roadmap
 
-**No server-side session id?** (NextAuth JWT mode, iron-session, Lucia stateless) Call `dbsc.bind(res, { userId })` with no id — the kit derives a stable one and manages a per-device cookie so each browser of the same user binds independently. Per-system recipes: [docs/integration-recipes.md](./docs/integration-recipes.md).
+- [x] Express, Fastify, Hono, Next.js adapters
+- [x] Memory, Redis, PostgreSQL storage
+- [x] Web Crypto polyfill (Firefox / Safari / mobile / older Chromium)
+- [x] Per-request proof + body signing + replay cache
+- [x] Multi-subdomain binding (`cookieScope: "site"`)
+- [x] Better Auth plugin
+- [ ] Koa / NestJS adapters
+- [ ] Bun / Deno native paths
+- [ ] Third-party security audit
+- [ ] WebAuthn step-up integration
 
-**App split across subdomains?** (`app.example.com` + `api.example.com`) Default `__Host-` cookies are origin-locked — proxy `/dbsc/*` and `/dbsc-bound/*` through one origin if you can; that's the strongest setting. If a same-origin layout isn't workable, v2.9.0+ exposes `cookieScope: "site"` + `cookieDomain: "example.com"` on `createDbsc({...})`, switching the binding cookies to `__Secure-` with a `Domain` attribute. The validator throws at construction time if either is wrong — misconfiguration is loud, not silent. Trade-off and concrete recipe: [docs/integration-recipes.md#multi-subdomain-apps-cookiescope-site](./docs/integration-recipes.md#multi-subdomain-apps-cookiescope-site).
+## Used by
 
-Full walk-through with `autoBind`, per-route policy, and the migration timeline: [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md).
-
-### Using Better Auth?
-
-Install [@dbsc-toolkit/better-auth](./packages/better-auth/) — sessions from every sign-in method (email, OAuth, magic link, passkey) get bound automatically:
-
-```ts
-// auth.ts
-import { betterAuth } from "better-auth"
-import { dbsc } from "@dbsc-toolkit/better-auth"
-
-export const auth = betterAuth({
-  plugins: [dbsc()],
-})
-```
-
-```ts
-// server.ts
-import { dbscExpress } from "@dbsc-toolkit/better-auth/express"
-
-const dbsc = dbscExpress(auth)
-dbsc.install(app)                              // mounts /dbsc/*, /dbsc-bound/*, /dbsc-client/*
-app.all("/api/auth/*splat", toNodeHandler(auth))
-app.get("/profile", dbsc.requireProof(), profileHandler)
-```
-
-```html
-<script src="/dbsc-client/init.js" type="module"></script>
-```
-
-Live demo: <https://dbsc-better-auth-demo.onrender.com/>. Full docs in the [package README](./packages/better-auth/README.md).
-
-## Protect your routes
-
-After `createDbsc().install()`, every request through the middleware has a `tier` field on the request context. The library does not auto-protect anything — you add `requireProof()` to each route that matters.
-
-| Your route does… | Use this guard | What it stops |
-|---|---|---|
-| Public / read-only (feed, search, public profile) | Nothing | n/a — no auth gate at all |
-| Anything authenticated (post, comment, upvote, settings, payment, admin) | `requireProof()` (server) + `wrapFetch()` (client) | A stolen cookie can't be replayed from another device, can't ride along during the freshness window, and an MITM can't substitute a POST body |
-
-`requireProof()` requires a bound device plus a per-request proof, and works on every browser. As of v2.7, Chromium sessions co-register a polyfill key alongside the TPM key so the per-request signature is enforced uniformly across tiers. `wrapFetch` signs the request body by default since v2.8; POST routes mount `express.raw()` in front. Apps with many guarded routes can swap to `installFetchInterceptor({ pathPrefixes: ["/api/secure/"] })` and wrap once at boot.
-
-For apps facing active MITM or log-spillage exposure, v2.8 also adds an optional **replay cache** that rejects a second arrival of the same proof bytes — pass `replayCache: new RedisReplayCache(redis)` to `createDbsc`. See [docs/per-request-signing.md](./docs/per-request-signing.md).
-
-Full threat boundary, per-framework wiring (Fastify / Hono / Next.js), and the migration timeline: [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md) and [docs/per-request-signing.md](./docs/per-request-signing.md).
-
-## Production checklist
-
-- [ ] HTTPS enabled — DBSC requires `Secure` cookies; plain HTTP locks every user to `tier: "none"`.
-- [ ] Redis or PostgreSQL storage — `MemoryStorage` is lost on restart; bound browsers loop registration.
-- [ ] `requireProof()` on every authenticated route — read-only public routes need no guard.
-- [ ] `wrapFetch({ signBody: true })` on the client side for those routes (default since v2.8).
-- [ ] Replay cache enabled when relevant — `replayCache: new RedisReplayCache(redis)` in `createDbsc({...})`.
-- [ ] `trust proxy` set — `install()` sets it, but verify nothing in your own app config overrides it.
-- [ ] Polyfill script loaded — the `<script type="module">` tag; without it Firefox/Safari stay on `tier: "none"`.
+Using DBSC Toolkit in production? Open a PR and add your project here.
 
 ## Subpath imports
 
 | Import | What it is |
-|--------|------------|
-| `dbsc-toolkit` | Core types, crypto, protocol functions |
-| `dbsc-toolkit/express` | Express middleware |
-| `dbsc-toolkit/fastify` | Fastify plugin |
-| `dbsc-toolkit/hono` | Hono middleware |
-| `dbsc-toolkit/nextjs` | Next.js App Router middleware + handlers |
-| `dbsc-toolkit/client` | Browser SDK with `initBoundDbsc()` for the polyfill |
+|---|---|
+| `dbsc-toolkit` | Core: types, crypto, protocol handlers, framework-agnostic |
+| `dbsc-toolkit/express` · `/fastify` · `/hono` · `/nextjs` | Framework adapters |
+| `dbsc-toolkit/client` | Browser SDK + polyfill |
 | `dbsc-toolkit/storage/{memory,redis,postgres}` | Storage adapters |
 
-Tree-shaking eliminates anything you don't import. Using Koa, Hapi, raw `http`, Bun, or Deno? Call core directly — see [docs/adapters.md](./docs/adapters.md).
+## Docs
 
-## Protection tiers
-
-`tier` is the state of a session — what kind of binding the browser achieved. Don't gate on it directly; gate with `requireProof()` instead and read `tier` only for display.
-
-| Tier | Mechanism | Protects against |
-|------|-----------|------------------|
-| `dbsc` | Native W3C DBSC, key in TPM (Windows) or Secure Enclave (macOS) | Cookie theft (XSS, network, logs, paste-to-other-browser) **and** infostealer malware reading the browser profile |
-| `bound` | Web Crypto polyfill, non-extractable ECDSA P-256 key in IndexedDB | Cookie theft. Does not defeat infostealer malware on the user's machine. |
-| `none` | No active / fresh binding | Nothing the cookie itself doesn't already do |
-
-Why not gate routes on `tier === "dbsc"`? Because every Firefox and Safari user can only reach `tier: "bound"`, and `requireProof()` already gives those browsers the same per-request guarantee via a signed proof. The one exception is routes whose threat model specifically includes on-device infostealer malware — there, hardware-backed key isolation actually matters, and you accept the trade-off of locking non-Chromium browsers out. More in [docs/security/best-practices.md](./docs/security/best-practices.md).
-
-## Security model
-
-What this protects against:
-
-- Stolen session cookies replayed from another device.
-- Stolen bearer tokens (same category — bearer == portable).
-- Cookie exfiltration via XSS, network capture, log leakage, or proxy leakage.
-
-What the Web Crypto polyfill (`tier: "bound"`) does not protect against:
-
-- Malware running on the user's machine with access to the browser profile.
-- Browser or OS compromise.
-
-Native DBSC (`tier: "dbsc"`) is stronger against local malware because the private key lives inside the TPM or Secure Enclave — software can't extract it even with admin access. The polyfill key is non-extractable from JavaScript, but the encrypted blob lives on disk and a privileged on-device attacker can reach it.
-
-None of this replaces HTTPS, input validation, strong passwords, or MFA.
-
-## Going deeper
-
-- **Concepts and protocol:** [HOW-IT-WORKS.md](./HOW-IT-WORKS.md)
+- **Concepts & protocol:** [HOW-IT-WORKS.md](./HOW-IT-WORKS.md)
+- **Getting started:** [docs/getting-started.md](./docs/getting-started.md)
+- **Add to an existing app:** [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md)
+- **Per-request signing & replay cache:** [docs/per-request-signing.md](./docs/per-request-signing.md)
 - **Bound polyfill wire protocol:** [docs/bound-polyfill.md](./docs/bound-polyfill.md)
-- **Per-request signing (v2.7 dual-key + v2.8 replay cache):** [docs/per-request-signing.md](./docs/per-request-signing.md)
 - **API reference:** [docs/api-reference.md](./docs/api-reference.md)
-- **Adapters (Express / Fastify / Hono / Next.js + writing your own):** [docs/adapters.md](./docs/adapters.md)
-- **Storage (memory / Redis / Postgres):** [docs/storage.md](./docs/storage.md)
-- **Telemetry hooks:** [docs/telemetry.md](./docs/telemetry.md)
-- **Deployment (Render / Fly / Vercel / Cloudflare / nginx):** [docs/deployment.md](./docs/deployment.md)
-- **Security best practices:** [docs/security/best-practices.md](./docs/security/best-practices.md)
-- **Threat model:** [docs/security/threat-model.md](./docs/security/threat-model.md)
+- **Adapters (+ build your own):** [docs/adapters.md](./docs/adapters.md)
+- **Storage:** [docs/storage.md](./docs/storage.md) · **Deployment:** [docs/deployment.md](./docs/deployment.md)
+- **Security:** [threat model](./docs/security/threat-model.md) · [best practices](./docs/security/best-practices.md)
 - **Troubleshooting:** [docs/troubleshooting.md](./docs/troubleshooting.md)
 
 ## Status
 
-Verified end-to-end on Chrome 147 / Windows / TPM 2.0. Native DBSC requires Chromium 146+ on Windows or macOS Apple Silicon. The bound polyfill works on every browser with Web Crypto + IndexedDB (Firefox, Safari, mobile browsers, older Chromium). No third-party security audit yet. Production-readiness table and adoption guidance: [HOW-IT-WORKS.md#production-readiness](./HOW-IT-WORKS.md#production-readiness).
+Verified end-to-end on Chrome 147 / Windows / TPM 2.0. Native DBSC requires Chromium 146+ on Windows or Apple Silicon macOS; the polyfill covers every browser with Web Crypto + IndexedDB. No third-party security audit yet — see [HOW-IT-WORKS.md#production-readiness](./HOW-IT-WORKS.md#production-readiness).
 
 ## License
 

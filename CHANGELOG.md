@@ -2,6 +2,18 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.9.10] — 2026-06-02
+
+### Changed
+
+- **README rewritten for a first-time reader.** Cut from ~350 lines to a
+  scannable front page: a banner, a problem/solution opener with an ASCII flow
+  diagram, a demo GIF, a "what a stolen cookie gets the attacker" image, a
+  protection-tiers image, a tighter comparison table, an ecosystem section, and
+  a roadmap. The heavy detail (failure modes, full security model, production
+  checklist, tier deep-dive) moved into the existing `docs/` pages — nothing
+  was deleted, only relocated. Docs/presentation only; no code or API change.
+
 ## [2.9.9] — 2026-05-31
 
 ### Changed

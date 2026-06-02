@@ -57,6 +57,7 @@ test-results/
 .cursor/
 .aider*
 .windsurf/
+.understand-anything/
 CLAUDE.md
 docs/dbsc-debugging-lessons.md
 *.tmp
