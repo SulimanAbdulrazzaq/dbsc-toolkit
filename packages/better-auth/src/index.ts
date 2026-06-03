@@ -145,10 +145,36 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
       ),
   );
 
+  // Chrome's DBSC registration/refresh POSTs are browser-initiated and carry
+  // NO Origin header (the JWS rides a header, the body is empty). Better Auth's
+  // CSRF guard 403s any cookie-bearing POST without an Origin, which would kill
+  // the native flow and force every Chrome user onto the bound polyfill. Skip
+  // the origin check for the DBSC protocol paths only (prefix-matched, relative
+  // to basePath), merged with whatever the app already configured.
+  const dbscSkipPaths = ["/dbsc/", "/dbsc-bound/"];
+
   return {
     id: "dbsc-toolkit",
 
     schema: dbscSchema,
+
+    init(ctx: any) {
+      // Better Auth derives `context.skipOriginCheck` from
+      // advanced.disableOriginCheck at context-creation time, BEFORE plugin
+      // init runs — so merging into options here would be ignored. Set the
+      // derived `context.skipOriginCheck` directly (init's `context` return is
+      // Object.assign'd onto the live context), merging with whatever's there.
+      const current = ctx?.skipOriginCheck;
+      let skipOriginCheck: boolean | string[];
+      if (current === true) {
+        skipOriginCheck = true; // app already skips everything
+      } else if (Array.isArray(current)) {
+        skipOriginCheck = [...new Set([...current, ...dbscSkipPaths])];
+      } else {
+        skipOriginCheck = dbscSkipPaths;
+      }
+      return { context: { skipOriginCheck } };
+    },
 
     endpoints: {
       ...protocolRoutes,
