@@ -1,14 +1,28 @@
-# @dbsc-toolkit/better-auth
+<h1 align="center">@dbsc-toolkit/better-auth</h1>
 
-Device Bound Session Credentials for [Better Auth](https://better-auth.com). One plugin line — `plugins: [dbsc()]` — works on every Better Auth runtime (Express, Fastify, Hono, Next.js, SvelteKit, Node…). The protocol routes mount through Better Auth's own router, so there's no framework-specific setup.
+<p align="center">
+  <strong>Device Bound Session Credentials for <a href="https://better-auth.com">Better Auth</a>.</strong><br>
+  One plugin line stops stolen session cookies from being replayed on another device — on every framework Better Auth runs on.
+</p>
 
-A session cookie gets stolen. Today the attacker pastes it into their own browser and they're your user. Cookie HttpOnly didn't matter. Cookie Secure didn't matter. Refresh tokens didn't matter.
+<p align="center">
+  <a href="https://www.npmjs.com/package/@dbsc-toolkit/better-auth"><img src="https://img.shields.io/npm/v/@dbsc-toolkit/better-auth.svg" alt="npm"></a>
+  <a href="https://www.npmjs.com/package/@dbsc-toolkit/better-auth"><img src="https://img.shields.io/npm/dm/@dbsc-toolkit/better-auth.svg" alt="downloads"></a>
+  <img src="https://img.shields.io/badge/types-TypeScript-blue.svg" alt="TypeScript">
+  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/@dbsc-toolkit/better-auth.svg" alt="License"></a>
+</p>
 
-With DBSC the session is tied to a private key the browser generates inside the device at sign-in. The cookie is still stealable. But the refresh request needs a signature from the key, and the attacker on another machine has nothing to sign with. The replay 403s.
+## The problem
 
-Live demo: [dbsc-better-auth-demo.onrender.com](https://dbsc-better-auth-demo.onrender.com). The page has a "Simulate stolen cookie" button that fires a bare fetch with the bound-session cookie attached and no proof header. It comes back 403 `PROOF_MISSING`. That's the whole point of the library, in one button.
+A session cookie gets stolen — XSS, infostealer malware, a leaked log. The attacker pastes it into their own browser and they're your user. `HttpOnly` didn't matter. `Secure` didn't matter. Refresh tokens didn't matter.
 
-Chromium 145+ does this with a key in the TPM or Secure Enclave. Firefox, Safari, and older Chromium use a Web Crypto polyfill key in IndexedDB with `extractable: false`. Same `requireProof()` guard either way.
+## The solution
+
+DBSC ties the session to a private key the browser generates inside the device at sign-in. The cookie is still stealable, but the refresh request — and every guarded request — needs a signature from that key, and the attacker on another machine has nothing to sign with. The replay 403s.
+
+`plugins: [dbsc()]` is the whole server integration. The plugin mounts its protocol routes through Better Auth's own router, so it works on **every runtime** (Express, Fastify, Hono, Next.js, SvelteKit, Node) with no framework-specific setup. Chromium 145+ binds to a key in the TPM or Secure Enclave; Firefox, Safari, and older Chromium fall back to a Web Crypto polyfill key in IndexedDB (`extractable: false`). Same guard either way.
+
+**[Live demo](https://dbsc-better-auth-demo.onrender.com)** — sign in, then hit the "simulate stolen cookie" button. It fires a bare request with the bound cookie and no proof, and comes back 403 `PROOF_MISSING`. The whole plugin in one button.
 
 ## Install
 
@@ -128,6 +142,43 @@ Every session row carries a `tier`:
 `"none"` is the transient state between sign-in and the registration POST completing. Usually under a second.
 
 `requireProof()` accepts both `dbsc` and `bound`. The per-request signature is what gates the route, not where the key lives. The point of distinguishing the two tiers is telemetry: an `onEvent` hook receives `tier_change` events when a session moves between them.
+
+## How it compares
+
+| | Plain Better Auth session | + DBSC plugin |
+|---|:---:|:---:|
+| Replay-resistant (stolen cookie from another device) | ❌ | ✅ |
+| Works on Chrome / Edge / Brave | ✅ | ✅ (native TPM) |
+| Works on Firefox / Safari / mobile / no-TPM | ✅ | ✅ (polyfill) |
+| Per-request body-hash proof vs MITM | ❌ | ✅ |
+| Captured-proof replay defense | ❌ | ✅ (replay cache) |
+| Setup | — | one plugin line |
+
+DBSC complements the auth you already have — it closes *replay after issue*, the gap a session cookie alone can't.
+
+## Security at a glance
+
+Defended:
+
+- ✅ Cookie theft replayed from another device
+- ✅ XSS reading `document.cookie`
+- ✅ Network capture / TLS-stripping proxy
+- ✅ Server log leakage
+- ✅ MITM body substitution (signed body hash)
+
+Not defended (be honest about the boundary):
+
+- ⚠️ On-device malware reading the browser profile — only the `dbsc` tier (TPM) defeats this; the `bound` polyfill key is on disk
+- ⚠️ Browser/OS compromise, rogue extension with `subtle.sign` access
+
+Full threat model: [dbsc-toolkit security docs](https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/blob/main/docs/security/threat-model.md).
+
+## Ecosystem
+
+| Package | What it is |
+|---|---|
+| [`@dbsc-toolkit/better-auth`](https://www.npmjs.com/package/@dbsc-toolkit/better-auth) | This plugin — DBSC for Better Auth, every framework |
+| [`dbsc-toolkit`](https://www.npmjs.com/package/dbsc-toolkit) | The engine — protocol, crypto, polyfill, the `requireProof` guards |
 
 ## Options
 

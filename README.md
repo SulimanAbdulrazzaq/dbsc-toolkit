@@ -56,6 +56,12 @@ The cookie copies fine. The key doesn't — it never left the user's device. So 
 
 Chromium 145+ lands on `tier: "dbsc"` (TPM-backed); Firefox/Safari land on `tier: "bound"` (Web Crypto polyfill). Same guard either way.
 
+## Why DBSC Toolkit exists
+
+Native DBSC currently ships only on Chromium-based browsers. That leaves Firefox, Safari, mobile, and older Chromium users on plain cookies — defeating the point if you're trying to stop cookie theft across your whole user base.
+
+DBSC Toolkit extends device-bound sessions to those browsers through a Web Crypto polyfill, so every user gets the same per-request guard. Today it's one of the few open-source implementations providing cross-browser DBSC-style protection for Node.js.
+
 ## Install
 
 ```sh
@@ -68,6 +74,18 @@ Framework and storage drivers are optional peer deps — install only what you u
 npm install express ioredis              # Express + Redis
 npm install fastify @fastify/cookie pg   # Fastify + Postgres
 ```
+
+## Integration in 3 lines
+
+Drop into an existing Express app — no rewrite of your login or session store:
+
+```ts
+const dbsc = createDbsc({ storage });   // 1. configure once
+dbsc.install(app);                      // 2. mount protocol routes + SDK
+await dbsc.bind(res, sessionId, { userId });   // 3. bind, in your login route
+```
+
+Then guard sensitive routes with `requireProof()`. The full picture:
 
 ## Quick start
 
@@ -120,7 +138,7 @@ Complete raw-`http` example: [docs/adapters.md](./docs/adapters.md#writing-your-
 
 ## How it compares
 
-| | Plain cookies | JWT (bearer) | Native DBSC (Chrome 146+) | **dbsc-toolkit** |
+| | Plain cookies | JWT (bearer) | Native DBSC (Chrome 145+) | **dbsc-toolkit** |
 |---|:---:|:---:|:---:|:---:|
 | Replay-resistant (stolen cookie from another device) | ❌ | ❌ | ✅ | ✅ |
 | Works on Chrome / Edge / Brave | ✅ | ✅ | ✅ (TPM) | ✅ |
@@ -169,9 +187,8 @@ Every session carries a `tier`. You don't gate on it directly — `requireProof(
 | [`@dbsc-toolkit/better-auth`](./packages/better-auth/) | First-class [Better Auth](https://better-auth.com) plugin — binds every sign-in method automatically |
 
 ```ts
-// Better Auth, two lines:
-import { dbsc } from "@dbsc-toolkit/better-auth"            // auth.ts → plugins: [dbsc()]
-import { dbscExpress } from "@dbsc-toolkit/better-auth/express"  // server.ts → dbscExpress(auth).install(app)
+// Better Auth — one plugin line, works on every framework:
+import { dbsc } from "@dbsc-toolkit/better-auth"   // auth.ts → plugins: [dbsc()]
 ```
 
 ## Roadmap
@@ -186,10 +203,6 @@ import { dbscExpress } from "@dbsc-toolkit/better-auth/express"  // server.ts �
 - [ ] Bun / Deno native paths
 - [ ] Third-party security audit
 - [ ] WebAuthn step-up integration
-
-## Used by
-
-Using DBSC Toolkit in production? Open a PR and add your project here.
 
 ## Subpath imports
 
@@ -215,7 +228,7 @@ Using DBSC Toolkit in production? Open a PR and add your project here.
 
 ## Status
 
-Verified end-to-end on Chrome 147 / Windows / TPM 2.0. Native DBSC requires Chromium 146+ on Windows or Apple Silicon macOS; the polyfill covers every browser with Web Crypto + IndexedDB. No third-party security audit yet — see [HOW-IT-WORKS.md#production-readiness](./HOW-IT-WORKS.md#production-readiness).
+Verified end-to-end on Chrome 147 / Windows / TPM 2.0. Native DBSC requires Chromium 145+ on Windows or Apple Silicon macOS; the polyfill covers every browser with Web Crypto + IndexedDB. No third-party security audit yet — see [HOW-IT-WORKS.md#production-readiness](./HOW-IT-WORKS.md#production-readiness).
 
 ## License
 

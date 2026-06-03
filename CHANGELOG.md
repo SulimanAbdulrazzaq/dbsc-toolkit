@@ -2,6 +2,18 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.9.11] — 2026-06-03
+
+### Changed
+
+- **README polish.** Unified the Chromium version floor to 145+ everywhere
+  (some sections still said 146, a contradiction worth fixing in a
+  security project). Added a "Why DBSC Toolkit exists" positioning
+  section and an "Integration in 3 lines" snippet above the quick start.
+  Dropped the empty "Used by" placeholder and refreshed the Better Auth
+  one-liner in the Ecosystem section to the 1.0 plugin shape. Docs only —
+  no code changed.
+
 ## [2.9.10] — 2026-06-02
 
 ### Changed
