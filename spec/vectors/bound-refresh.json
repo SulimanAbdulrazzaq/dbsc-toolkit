@@ -1,0 +1,21 @@
+{
+  "description": "Bound-polyfill refresh. ECDSA P-256 signature over `<jti>.<timestamp>` (timestamp = ms since epoch as decimal string).",
+  "publicKeyJwk": {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "OiqsLo2Fgx8s1x5EI9bjUDi5QN9lg9_pM8VGYnvduP4",
+    "y": "LItgwbWewmg0rrauKI1IX4tE2WzNnmB322E4UvfSPt8"
+  },
+  "requestBody": {
+    "challenge": "KN3qw_pQxR8tY5uI8oP1aS2dF3gH4jK5lM6nO7pQ8rS",
+    "signature": "Z6UAtiMG1Rm-t4uJFRCZQkZvf3h6YWLMTAWL4p40qTSYwyx8ojEjzrg_kFj_Zv53dy-kzFj6VmNWYcDH6k8JLA",
+    "timestamp": 1700000000000
+  },
+  "signedMessage": "KN3qw_pQxR8tY5uI8oP1aS2dF3gH4jK5lM6nO7pQ8rS.1700000000000",
+  "signatureVerifies": true,
+  "expectedResponse": {
+    "session_identifier": "sess_3f9a1c7e8b2d4f60a1b2c3d4e5f60718",
+    "refresh_url": "/dbsc-bound/refresh",
+    "tier": "bound"
+  }
+}

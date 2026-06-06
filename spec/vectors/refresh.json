@@ -1,0 +1,24 @@
+{
+  "description": "Native refresh JWS (browser -> server). No jwk in the protected header; verified against the stored registration key.",
+  "challenge": "KN3qw_pQxR8tY5uI8oP1aS2dF3gH4jK5lM6nO7pQ8rS",
+  "sessionId": "sess_3f9a1c7e8b2d4f60a1b2c3d4e5f60718",
+  "storedPublicKeyJwk": {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "OiqsLo2Fgx8s1x5EI9bjUDi5QN9lg9_pM8VGYnvduP4",
+    "y": "LItgwbWewmg0rrauKI1IX4tE2WzNnmB322E4UvfSPt8"
+  },
+  "jwsProtectedHeader": {
+    "alg": "ES256",
+    "typ": "dbsc+jwt"
+  },
+  "jwsPayload": {
+    "jti": "KN3qw_pQxR8tY5uI8oP1aS2dF3gH4jK5lM6nO7pQ8rS"
+  },
+  "secureSessionResponse": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImRic2Mrand0In0.eyJqdGkiOiJLTjNxd19wUXhSOHRZNXVJOG9QMWFTMmRGM2dINGpLNWxNNm5PN3BROHJTIn0.dZhwcoAWFE9jCoWAInYiaw9z_ZO_nJCfVv8JUGK_5xZybqIal0uWB8Svdid9A4eymcitK8amsuuhrh7t15lsew",
+  "expectedResult": {
+    "verified": true,
+    "sessionId": "sess_3f9a1c7e8b2d4f60a1b2c3d4e5f60718",
+    "jti": "KN3qw_pQxR8tY5uI8oP1aS2dF3gH4jK5lM6nO7pQ8rS"
+  }
+}

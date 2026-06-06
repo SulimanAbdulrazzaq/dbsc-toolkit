@@ -2,6 +2,26 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.9.12] — 2026-06-06
+
+### Added
+
+- **Protocol specification.** A language-neutral spec lives in `spec/`
+  (Protocol 1.0): the native Chromium flow, the bound Web Crypto polyfill,
+  per-request proofs, the storage and cookie contracts, the error catalog,
+  and conformance levels. It is extracted from the verified implementation,
+  so a conforming DBSC server can be built in any language — not just Node.
+- **Test vectors.** `spec/vectors/` ships real, round-trip-verified fixtures
+  (registration and refresh JWS, bound registration/refresh, per-request
+  proof, the registration header string) for checking an implementation
+  against the reference without a browser.
+
+### Changed
+
+- README gained a "Protocol & spec" section pointing at `spec/`. The spec
+  tree is repo-only and is not part of the published npm package. Docs only —
+  no code changed.
+
 ## [2.9.11] — 2026-06-03
 
 ### Changed

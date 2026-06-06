@@ -1,0 +1,28 @@
+{
+  "description": "Per-request proof (X-Dbsc-Bound-Proof). Signed message is `<sessionId>.<METHOD>.<path>.<ts>` (METHOD uppercase), plus `.<bh>` when body signing is on, where bh = base64url(sha256(body bytes)).",
+  "publicKeyJwk": {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "OiqsLo2Fgx8s1x5EI9bjUDi5QN9lg9_pM8VGYnvduP4",
+    "y": "LItgwbWewmg0rrauKI1IX4tE2WzNnmB322E4UvfSPt8"
+  },
+  "sessionId": "sess_3f9a1c7e8b2d4f60a1b2c3d4e5f60718",
+  "withoutBody": {
+    "method": "POST",
+    "path": "/api/payment",
+    "timestamp": 1700000000000,
+    "signedMessage": "sess_3f9a1c7e8b2d4f60a1b2c3d4e5f60718.POST./api/payment.1700000000000",
+    "header": "ts=1700000000000;sig=3Pm3X4NoUzSYeorTjL_lb_ilozYv7DUgef9Dw9oQq8GOq904CIMnBM6aQHl1pV6ZwYX4XQB_KYjlha07ldKVQQ",
+    "signatureVerifies": true
+  },
+  "withBody": {
+    "method": "POST",
+    "path": "/api/payment",
+    "timestamp": 1700000000000,
+    "body": "{\"amount\":1000,\"currency\":\"usd\"}",
+    "bodyHash": "oiO2DcatvCkR58BziJsiDfEYHFU0-mvljDpwmBw1TFQ",
+    "signedMessage": "sess_3f9a1c7e8b2d4f60a1b2c3d4e5f60718.POST./api/payment.1700000000000.oiO2DcatvCkR58BziJsiDfEYHFU0-mvljDpwmBw1TFQ",
+    "header": "ts=1700000000000;sig=pPh1fBZeTPBH13ZwZaMCebLLLpAryZwXZvYl_H7cPYJBLhcz9DOffiqZbSIBKcr7UMEC9o-yzOb_SeJKzyjpvQ;bh=oiO2DcatvCkR58BziJsiDfEYHFU0-mvljDpwmBw1TFQ",
+    "signatureVerifies": true
+  }
+}

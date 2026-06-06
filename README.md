@@ -191,6 +191,14 @@ Every session carries a `tier`. You don't gate on it directly — `requireProof(
 import { dbsc } from "@dbsc-toolkit/better-auth"   // auth.ts → plugins: [dbsc()]
 ```
 
+## Protocol & spec
+
+The wire protocol is documented as a language-neutral spec in [`spec/`](./spec/): header formats, JWS and JSON shapes, the storage and cookie contracts, error codes, and real test vectors. `dbsc-toolkit` is the reference implementation — the spec is what lets a conforming DBSC server be built in any language, not just Node.
+
+- [`spec/README.md`](./spec/README.md) — start here
+- [`spec/02-native-protocol.md`](./spec/02-native-protocol.md) — the native Chromium flow on the wire
+- [`spec/09-conformance.md`](./spec/09-conformance.md) — what "conforming" means and how to verify it
+
 ## Roadmap
 
 - [x] Express, Fastify, Hono, Next.js adapters
