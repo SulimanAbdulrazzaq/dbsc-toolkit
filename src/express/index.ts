@@ -41,6 +41,12 @@ export type { CreateDbscOptions, DbscKit, BindOptions } from "./create-dbsc.js";
 export interface DbscInternal {
   storage: StorageAdapter;
   secure: boolean;
+  /**
+   * Whether the bound polyfill is enabled. When false, `requireProof()`
+   * auto-relaxes: a native `dbsc`-tier session passes without a per-request
+   * bound proof (there is no bound key to verify against).
+   */
+  boundEnabled: boolean;
   /** v2.8+: optional replay cache; undefined → no replay check (Noop). */
   replayCache?: ProofReplayCache;
 }
@@ -180,6 +186,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
     boundChallengePath = "/dbsc-bound/challenge",
     boundRegistrationPath = "/dbsc-bound/registration",
     boundRefreshPath = "/dbsc-bound/refresh",
+    bound = true,
     boundCookieTtl = DEFAULT_BOUND_TTL,
     refreshGraceMs = 30_000,
     registrationCookieTtl = DEFAULT_REG_TTL,
@@ -627,24 +634,34 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       return;
     }
 
+    // When the bound polyfill is disabled, the state route still answers so the
+    // client SDK stands down cleanly (phase "unbound"); the other three bound
+    // routes are simply not served.
     if (req.method === "GET" && req.path === boundStatePath) {
-      await handleBoundStateRoute(req, res);
+      if (bound) {
+        await handleBoundStateRoute(req, res);
+      } else {
+        res.setHeader("X-Server-Time", String(Date.now()));
+        res.status(200).json({ phase: "unbound", sessionId: null });
+      }
       return;
     }
 
-    if (req.method === "GET" && req.path === boundChallengePath) {
-      await handleBoundChallengeRoute(req, res);
-      return;
-    }
+    if (bound) {
+      if (req.method === "GET" && req.path === boundChallengePath) {
+        await handleBoundChallengeRoute(req, res);
+        return;
+      }
 
-    if (req.method === "POST" && req.path === boundRegistrationPath) {
-      await handleBoundRegistrationRoute(req, res);
-      return;
-    }
+      if (req.method === "POST" && req.path === boundRegistrationPath) {
+        await handleBoundRegistrationRoute(req, res);
+        return;
+      }
 
-    if (req.method === "POST" && req.path === boundRefreshPath) {
-      await handleBoundRefreshRoute(req, res);
-      return;
+      if (req.method === "POST" && req.path === boundRefreshPath) {
+        await handleBoundRefreshRoute(req, res);
+        return;
+      }
     }
 
     const sessionId = req.cookies?.[COOKIES.bound] as string | undefined;
@@ -664,6 +681,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
     (res.locals as Record<PropertyKey, unknown>)[DBSC_INTERNAL] = {
       storage,
       secure,
+      boundEnabled: bound,
       ...(replayCache !== undefined && { replayCache }),
     } satisfies DbscInternal;
 

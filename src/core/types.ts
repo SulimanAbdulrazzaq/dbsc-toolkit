@@ -172,6 +172,16 @@ export interface DbscOptions {
   storage: StorageAdapter;
   registrationPath?: string;
   refreshPath?: string;
+  /**
+   * Mount the Web Crypto polyfill routes (`/dbsc-bound/*`) and accept the
+   * `bound` tier. Default `true`. Set `false` to run native DBSC only
+   * (Chromium 145+): the four bound routes are not served (the state route
+   * answers `phase: "unbound"` so the client SDK stands down), non-Chromium
+   * browsers stay at `tier: "none"`, and `requireProof()` auto-relaxes so a
+   * native `dbsc`-tier session still passes without a per-request bound proof.
+   * Firefox / Safari then get no binding and `requireProof()` 403s them.
+   */
+  bound?: boolean;
   boundCookieTtl?: number;
   registrationCookieTtl?: number;
   /**

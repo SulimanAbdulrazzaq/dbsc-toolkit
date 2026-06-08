@@ -139,6 +139,7 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     requireProof: (req: NextRequest, session: RequireProofSession) =>
       requireProof(req, session, {
         storage: opts.storage,
+        ...(opts.bound !== undefined && { bound: opts.bound }),
         ...(opts.replayCache !== undefined && { replayCache: opts.replayCache }),
       }),
   };

@@ -71,6 +71,8 @@ app.post("/settings/email", requireBoundProof({ storage }), emailHandler);
 
 As of v2.7 the default for `allowDbscWithoutProof` is `false`: Chromium sessions must carry the proof header on guarded routes, exactly like every other browser. The v2.7 client SDK co-registers a polyfill ECDSA key on Chromium alongside the TPM key, and `wrapFetch` signs every guarded request with the polyfill key — the TPM key continues to drive `/dbsc/refresh` in the background. The legacy v2.6 default of `true` left a refresh-cycle replay window open on Chromium (a stolen cookie passed `requireProof()` until the next refresh failed signature verification); pass `allowDbscWithoutProof: true` to reinstate that behavior if your Chromium clients cannot ship the v2.7 SDK.
 
+Running with `bound: false` (native-only mode) flips this implicitly: with the polyfill off there is no bound key to verify a per-request proof against, so `requireProof()` auto-relaxes the `dbsc` tier — equivalent to `allowDbscWithoutProof: true`, but you don't set it. The session relies on the refresh-cycle binding only. An explicit `allowDbscWithoutProof` still takes precedence. See [bound-polyfill.md](./bound-polyfill.md#disabling-the-polyfill-bound-false).
+
 ### Server, Fastify / Hono / Next.js
 
 Same shape. `requireBoundProof` is exported from each adapter subpath.

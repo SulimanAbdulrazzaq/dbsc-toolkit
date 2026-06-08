@@ -249,3 +249,37 @@ describe("Next.js requireProof", () => {
     expect(gate.ok).toBe(false);
   });
 });
+
+describe("bound: false (native-only)", () => {
+  it("state answers unbound; the other bound routes pass through (not handled)", async () => {
+    const storage = new MemoryStorage();
+    const mw = createDbscMiddleware({ storage, secure: false, bound: false });
+
+    const state = await mw(reqWith({ url: "http://x/dbsc-bound/state" }));
+    expect(state.status).toBe(200);
+    expect(((await state.json()) as any).phase).toBe("unbound");
+
+    // A bound route that is not mounted falls through to NextResponse.next(),
+    // which carries the x-middleware-next marker and no bound JSON body.
+    const reg = await mw(reqWith({ url: "http://x/dbsc-bound/registration", method: "POST" }));
+    expect(reg.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("requireProof auto-relaxes a native dbsc session, still 403s tier:none", async () => {
+    const storage = new MemoryStorage();
+    const sessionId = "next-native-only";
+    const now = Date.now();
+    await storage.setSession({ id: sessionId, userId: "u1", tier: "dbsc", createdAt: now, expiresAt: now + 60_000, lastRefreshAt: now });
+    await storage.setBoundKey({ sessionId, kind: "native", jwk: { kty: "EC", crv: "P-256", x: "x", y: "y" }, createdAt: now, algorithm: "ES256" });
+
+    const req = reqWith({ url: "http://x/guarded", cookies: { "dbsc-session": sessionId } });
+    const session = await getDbscSession(req, storage, { secure: false });
+    const gate = await requireProof(req, session, { storage, bound: false });
+    expect(gate.ok).toBe(true);
+
+    const bare = reqWith({ url: "http://x/guarded" });
+    const bareSession = await getDbscSession(bare, storage, { secure: false });
+    const denied = await requireProof(bare, bareSession, { storage, bound: false });
+    expect(denied.ok).toBe(false);
+  });
+});

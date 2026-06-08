@@ -32,6 +32,8 @@ Three responsibilities. That's it.
 
 **(4) Cover browsers without native DBSC via a Web Crypto polyfill.** Firefox, Safari, and older Chromium ignore the DBSC registration headers. For those, the library ships a small client SDK (`initBoundDbsc()`) that activates ~3 seconds after login when it sees no native binding, generates a non-extractable ECDSA P-256 keypair via Web Crypto, registers the public key with the server, and signs refresh challenges automatically. Same wire-level protection against cookie theft, no biometric prompt, no user interaction. The key lives in IndexedDB rather than a TPM, so this is software-bound; see "Tier semantics" below for the exact threat boundary.
 
+The polyfill is on by default. Pass `bound: false` to run native DBSC only — the bound routes don't mount, non-Chromium browsers stay at `tier: "none"`, and `requireProof()` relaxes to the native binding. Use it only when you can mandate a Chromium build with a hardware key store; for a general audience, the polyfill is what covers everyone else.
+
 Explicit non-goals: this is not an authentication system (you bring your own login), not MFA (it complements MFA, doesn't replace), not a CSRF defense (SameSite cookies still do that), not a captcha. It binds an existing session to hardware. Your existing auth stack does everything else.
 
 ---

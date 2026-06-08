@@ -29,6 +29,15 @@ export interface RequireProofOptions {
    * only when calling the Next.js `requireProof` directly or overriding.
    */
   replayCache?: ProofReplayCache;
+  /**
+   * Whether the bound polyfill is enabled (mirror of `DbscOptions.bound`).
+   * When `false`, the guard auto-relaxes: a native `dbsc`-tier session passes
+   * without a per-request bound proof, since no bound key was ever registered.
+   * Express / Fastify / Hono read this from the middleware context
+   * automatically; the Next.js `requireProof` takes it here because it has no
+   * shared context. An explicit `allowDbscWithoutProof` still wins.
+   */
+  bound?: boolean;
 }
 
 /** Human-readable reason for a `tier: "none"` rejection — quota-aware. */

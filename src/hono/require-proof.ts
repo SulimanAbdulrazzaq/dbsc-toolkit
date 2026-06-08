@@ -44,12 +44,13 @@ export function requireProof(opts: RequireProofOptions = {}): MiddlewareHandler 
           500,
         );
       }
+      // bound polyfill off → no bound key exists → auto-relax the dbsc tier.
+      const allowDbscWithoutProof =
+        opts.allowDbscWithoutProof ?? (internal?.boundEnabled === false ? true : undefined);
       proofHandler = requireBoundProof({
         storage,
         signBody: true,
-        ...(opts.allowDbscWithoutProof !== undefined && {
-          allowDbscWithoutProof: opts.allowDbscWithoutProof,
-        }),
+        ...(allowDbscWithoutProof !== undefined && { allowDbscWithoutProof }),
         ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
         ...(internal?.replayCache !== undefined && { replayCache: internal.replayCache }),
       });

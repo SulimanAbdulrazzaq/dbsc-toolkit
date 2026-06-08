@@ -1,6 +1,6 @@
 {
   "name": "@dbsc-toolkit/better-auth",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "DBSC (Device Bound Session Credentials) plugin for Better Auth, powered by dbsc-toolkit.",
   "license": "Apache-2.0",
   "type": "module",
@@ -28,6 +28,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
+    "test": "vitest run",
     "clean": "rimraf dist"
   },
   "peerDependencies": {

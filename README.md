@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Stop stolen session cookies from being replayed on another device.</strong><br>
-  W3C Device Bound Session Credentials for Node.js — with a Web Crypto polyfill so every browser is covered, not just Chrome.
+  A language-neutral DBSC protocol spec plus a reference implementation for Node.js — with a Web Crypto polyfill so every browser is covered, not just Chrome.
 </p>
 
 <p align="center">
@@ -61,6 +61,8 @@ Chromium 145+ lands on `tier: "dbsc"` (TPM-backed); Firefox/Safari land on `tier
 Native DBSC currently ships only on Chromium-based browsers. That leaves Firefox, Safari, mobile, and older Chromium users on plain cookies — defeating the point if you're trying to stop cookie theft across your whole user base.
 
 DBSC Toolkit extends device-bound sessions to those browsers through a Web Crypto polyfill, so every user gets the same per-request guard. Today it's one of the few open-source implementations providing cross-browser DBSC-style protection for Node.js.
+
+It's built in two layers. The protocol — every header, JWS shape, and the storage and cookie contracts — is written up as a **language-neutral spec** in [`spec/`](./spec/), with real test vectors. This Node.js package is the **reference implementation** of that spec. The spec is designed so a conforming server can be built in any ecosystem; ports to Python, PHP, and Java/Keycloak are the natural next step, and the spec plus its [test vectors](./spec/vectors) are what they target. None exist yet — Node.js is the only implementation today.
 
 ## Install
 
@@ -178,6 +180,8 @@ Every session carries a `tier`. You don't gate on it directly — `requireProof(
 
 `dbsc` is hardware-backed (TPM / Secure Enclave). `bound` is the Web Crypto polyfill (non-extractable IndexedDB key). `none` is an unbound or stale session. Detail: [HOW-IT-WORKS.md](./HOW-IT-WORKS.md).
 
+The polyfill is on by default. To run native DBSC only (Chromium 145+, no `bound` tier), pass `bound: false` — the `/dbsc-bound/*` routes don't mount and `requireProof()` relaxes to the native binding.
+
 ## Ecosystem
 
 | Package | What it is |
@@ -210,7 +214,6 @@ The wire protocol is documented as a language-neutral spec in [`spec/`](./spec/)
 - [ ] Koa / NestJS adapters
 - [ ] Bun / Deno native paths
 - [ ] Third-party security audit
-- [ ] WebAuthn step-up integration
 
 ## Subpath imports
 
@@ -223,6 +226,7 @@ The wire protocol is documented as a language-neutral spec in [`spec/`](./spec/)
 
 ## Docs
 
+- **Protocol spec (language-neutral):** [spec/](./spec/) · [conformance](./spec/09-conformance.md) · [test vectors](./spec/vectors)
 - **Concepts & protocol:** [HOW-IT-WORKS.md](./HOW-IT-WORKS.md)
 - **Getting started:** [docs/getting-started.md](./docs/getting-started.md)
 - **Add to an existing app:** [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md)

@@ -267,3 +267,36 @@ describe("Hono createDbsc", () => {
     expect(((await res.json()) as any).phase).toBe("unbound");
   });
 });
+
+describe("bound: false (native-only)", () => {
+  function build(register?: (app: Hono, storage: MemoryStorage) => void) {
+    const storage = new MemoryStorage();
+    const app = new Hono();
+    app.use("*", dbsc({ storage, secure: false, bound: false }));
+    if (register) register(app, storage);
+    return { storage, app };
+  }
+
+  it("state answers unbound; other bound routes are not mounted (404)", async () => {
+    const { app } = build();
+    const state = await app.fetch(new Request("http://x/dbsc-bound/state"));
+    expect(((await state.json()) as any).phase).toBe("unbound");
+    expect((await app.fetch(new Request("http://x/dbsc-bound/challenge"))).status).toBe(404);
+    expect((await app.fetch(new Request("http://x/dbsc-bound/registration", { method: "POST" }))).status).toBe(404);
+    expect((await app.fetch(new Request("http://x/dbsc-bound/refresh", { method: "POST" }))).status).toBe(404);
+  });
+
+  it("requireProof() auto-relaxes a native dbsc session and still 403s tier:none", async () => {
+    const sessionId = "sess-hono-native";
+    const { storage, app } = build((a) => {
+      a.get("/guarded", requireProof(), (c) => c.json({ ok: true }));
+    });
+    const now = Date.now();
+    await storage.setSession({ id: sessionId, userId: "u1", tier: "dbsc", createdAt: now, expiresAt: now + 60000, lastRefreshAt: now });
+    await storage.setBoundKey({ sessionId, kind: "native", jwk: { kty: "EC", crv: "P-256", x: "x", y: "y" }, createdAt: now, algorithm: "ES256" });
+    const ok = await app.fetch(new Request("http://x/guarded", { headers: { cookie: `dbsc-session=${sessionId}` } }));
+    expect(ok.status).toBe(200);
+    const denied = await app.fetch(new Request("http://x/guarded"));
+    expect(denied.status).toBe(403);
+  });
+});

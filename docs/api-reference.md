@@ -103,6 +103,7 @@ interface DbscOptions {
   storage: StorageAdapter;
   registrationPath?: string;        // default "/dbsc/registration"
   refreshPath?: string;             // default "/dbsc/refresh"
+  bound?: boolean;                  // default true — false runs native DBSC only (see below)
   boundCookieTtl?: number;          // default 600000 (10 min, in ms)
   registrationCookieTtl?: number;   // default 86400000 (24h, in ms)
   refreshGraceMs?: number;          // default 30000 — see below (2.5.0+)
@@ -119,6 +120,8 @@ interface AutoBindResult {
   userId: string;
 }
 ```
+
+`bound` (default `true`) toggles the Web Crypto polyfill. Set `false` to run native DBSC only (Chromium 145+): the `/dbsc-bound/challenge`, `/dbsc-bound/registration`, and `/dbsc-bound/refresh` routes are not mounted (`/dbsc-bound/state` still answers `phase: "unbound"` so a loaded client SDK stands down), non-Chromium browsers stay at `tier: "none"`, and `requireProof()` auto-relaxes so a native `dbsc`-tier session passes without a per-request bound proof. Use it only when you can mandate a Chromium build with a hardware key store; for general-audience apps the polyfill is what covers Firefox / Safari. See [bound-polyfill.md](./bound-polyfill.md#disabling-the-polyfill-bound-false).
 
 `autoBind` is the transparent-migration hook. The middleware calls it on every request that does not carry the bound cookie yet, passing the framework-native request. Return a `{ sessionId, userId }` to start binding, or `null` to skip. See [integrating-existing-auth.md](./integrating-existing-auth.md).
 

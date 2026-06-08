@@ -47,12 +47,15 @@ export function requireProof(opts: RequireProofOptions = {}): RequestHandler {
         });
         return;
       }
+      // When the bound polyfill is disabled, no bound key is ever registered,
+      // so a native dbsc-tier session has nothing to prove with. Auto-relax:
+      // pass dbsc through. An explicit option still wins.
+      const allowDbscWithoutProof =
+        opts.allowDbscWithoutProof ?? (internal?.boundEnabled === false ? true : undefined);
       proofHandler = requireBoundProof({
         storage,
         signBody: true,
-        ...(opts.allowDbscWithoutProof !== undefined && {
-          allowDbscWithoutProof: opts.allowDbscWithoutProof,
-        }),
+        ...(allowDbscWithoutProof !== undefined && { allowDbscWithoutProof }),
         ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
         ...(internal?.replayCache !== undefined && { replayCache: internal.replayCache }),
       });

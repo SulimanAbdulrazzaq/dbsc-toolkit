@@ -47,6 +47,14 @@ export interface DbscPluginOptions {
   sessionTtl?: number;
   /** Bound cookie lifetime / refresh cadence (ms) used by the protocol routes. Default: 600_000. */
   boundCookieTtl?: number;
+  /**
+   * Mount the Web Crypto polyfill routes. Default true. Set false to run
+   * native DBSC only (Chromium 145+): the bound endpoints are not mounted
+   * (the state endpoint answers `unbound`), non-Chromium browsers stay
+   * unbound, and a `requireProof` imported from `dbsc-toolkit/<framework>`
+   * must run with `bound: false` so it auto-relaxes the native `dbsc` tier.
+   */
+  bound?: boolean;
   /** Path the polyfill SDK is served at, baked into the init shim. Default "/dbsc-client". */
   clientPath?: string;
   /** Telemetry hook */
@@ -124,6 +132,7 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
     cookies,
     basePath,
     boundCookieTtl,
+    ...(opts.bound !== undefined && { bound: opts.bound }),
     ...(opts.onEvent !== undefined && { onEvent: opts.onEvent }),
   });
 

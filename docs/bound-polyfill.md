@@ -212,6 +212,22 @@ initBoundDbsc({
 
 Match these to whatever paths you passed into the server middleware. Default paths line up across both layers so the call usually takes no arguments.
 
+## Disabling the polyfill (`bound: false`)
+
+The polyfill is on by default. To run native DBSC only — Chromium 145+ with hardware-backed keys, nothing else — pass `bound: false` to the middleware / `createDbsc()` / the Better Auth plugin:
+
+```ts
+const dbsc = createDbsc({ storage, bound: false });
+```
+
+What changes:
+
+- The three bound routes (`/dbsc-bound/challenge`, `/dbsc-bound/registration`, `/dbsc-bound/refresh`) are not mounted. The `/dbsc-bound/state` route still answers `{ phase: "unbound" }`, so a client that loaded `initBoundDbsc()` stands down cleanly instead of erroring.
+- Non-Chromium browsers (Firefox, Safari, older Chromium) never bind. They stay at `tier: "none"`, and `requireProof()` 403s them. That is the point of native-only mode — you are choosing to support only hardware-backed binding.
+- Chromium sessions reach `tier: "dbsc"` exactly as before. But because no bound key is ever registered, there is nothing for the per-request proof to verify against. So `requireProof()` **auto-relaxes**: a native `dbsc` session passes without a per-request proof, relying on the refresh-cycle binding (the pre-v2.7 posture). You don't set anything extra — `bound: false` implies it. An explicit `allowDbscWithoutProof` still wins if you pass one.
+
+Don't disable the polyfill just to "simplify." It's the only thing covering the majority of browsers; native-only is for deployments that can mandate a Chromium build with a hardware key store (managed fleets, internal tools), not general-audience apps.
+
 ## Telemetry
 
 The bound flow emits the same event types as native DBSC:

@@ -2,6 +2,27 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.10.0] — 2026-06-07
+
+### Added
+
+- **`bound` option to run native DBSC only.** Pass `bound: false` to any
+  adapter (`dbsc()` / `createDbsc()`) to disable the Web Crypto polyfill.
+  The three bound routes are not mounted; `/dbsc-bound/state` still answers
+  `phase: "unbound"` so a loaded client SDK stands down cleanly. Non-Chromium
+  browsers stay at `tier: "none"`, and `requireProof()` auto-relaxes so a
+  native `dbsc`-tier session passes without a per-request bound proof
+  (relying on the refresh-cycle binding). Default stays `true` — existing
+  behavior is unchanged. Native-only mode suits managed fleets that can
+  mandate a Chromium build with a hardware key store.
+
+### Changed
+
+- README now leads with the two-layer identity: a language-neutral protocol
+  spec (`spec/`) plus this Node.js reference implementation. Docs across
+  `bound-polyfill`, `api-reference`, `per-request-signing`, and HOW-IT-WORKS
+  cover the new option and the `requireProof()` auto-relax.
+
 ## [2.9.12] — 2026-06-06
 
 ### Added

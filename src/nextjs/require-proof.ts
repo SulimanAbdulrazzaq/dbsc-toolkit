@@ -57,15 +57,16 @@ export async function requireProof(
       ),
     };
   }
+  // bound polyfill off → no bound key exists → auto-relax the dbsc tier.
+  const allowDbscWithoutProof =
+    opts.allowDbscWithoutProof ?? (opts.bound === false ? true : undefined);
   return requireBoundProof(
     req,
     { sessionId: session.sessionId, tier: session.tier },
     {
       storage: opts.storage,
       signBody: true,
-      ...(opts.allowDbscWithoutProof !== undefined && {
-        allowDbscWithoutProof: opts.allowDbscWithoutProof,
-      }),
+      ...(allowDbscWithoutProof !== undefined && { allowDbscWithoutProof }),
       ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
       ...(opts.replayCache !== undefined && { replayCache: opts.replayCache }),
     },

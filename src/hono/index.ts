@@ -40,6 +40,8 @@ export type { CreateDbscOptions, DbscKit, BindOptions } from "./create-dbsc.js";
 export interface DbscInternal {
   storage: StorageAdapter;
   secure: boolean;
+  /** When false, `requireProof()` auto-relaxes the native dbsc tier. */
+  boundEnabled: boolean;
   replayCache?: ProofReplayCache;
 }
 export const DBSC_INTERNAL: unique symbol = Symbol("dbsc-toolkit.hono.internal");
@@ -171,6 +173,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
     boundChallengePath = "/dbsc-bound/challenge",
     boundRegistrationPath = "/dbsc-bound/registration",
     boundRefreshPath = "/dbsc-bound/refresh",
+    bound = true,
     boundCookieTtl = DEFAULT_BOUND_TTL_MS,
     refreshGraceMs = 30_000,
     registrationCookieTtl = DEFAULT_REG_TTL_MS,
@@ -363,6 +366,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
 
     if (c.req.method === "GET" && url.pathname === boundStatePath) {
       c.header("X-Server-Time", String(Date.now()));
+      if (!bound) return c.json({ phase: "unbound", sessionId: null });
       const skippedRaw: Record<string, string | undefined> = {
         "secure-session-skipped": c.req.header("secure-session-skipped"),
         "sec-session-skipped": c.req.header("sec-session-skipped"),
@@ -404,7 +408,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
       });
     }
 
-    if (c.req.method === "GET" && url.pathname === boundChallengePath) {
+    if (bound && c.req.method === "GET" && url.pathname === boundChallengePath) {
       c.header("X-Server-Time", String(Date.now()));
       const sid = readBoundSessionId();
       if (!sid) return c.json({ error: "no session" }, 403);
@@ -414,7 +418,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
       return c.json({ challenge: challenge.jti });
     }
 
-    if (c.req.method === "POST" && url.pathname === boundRegistrationPath) {
+    if (bound && c.req.method === "POST" && url.pathname === boundRegistrationPath) {
       c.header("X-Server-Time", String(Date.now()));
       const allowed = await rateLimiter.checkRegistration(ip);
       if (!allowed) return c.json({ error: "rate limited" }, 429);
@@ -464,7 +468,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
       }
     }
 
-    if (c.req.method === "POST" && url.pathname === boundRefreshPath) {
+    if (bound && c.req.method === "POST" && url.pathname === boundRefreshPath) {
       c.header("X-Server-Time", String(Date.now()));
       const sid = readBoundSessionId();
       if (!sid) return c.json({ error: "no session" }, 403);
@@ -571,6 +575,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
     (dbscSession as unknown as Record<PropertyKey, unknown>)[DBSC_INTERNAL] = {
       storage,
       secure,
+      boundEnabled: bound,
       ...(replayCache !== undefined && { replayCache }),
     } satisfies DbscInternal;
     c.set("dbsc", dbscSession);

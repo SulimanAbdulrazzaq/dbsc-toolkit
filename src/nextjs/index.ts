@@ -145,6 +145,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
     boundChallengePath = "/dbsc-bound/challenge",
     boundRegistrationPath = "/dbsc-bound/registration",
     boundRefreshPath = "/dbsc-bound/refresh",
+    bound = true,
     boundCookieTtl = DEFAULT_BOUND_TTL_MS,
     registrationCookieTtl = DEFAULT_REG_TTL_MS,
     rateLimiter = new NoopRateLimiter(),
@@ -348,6 +349,11 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
       req.cookies.get(COOKIES.bound)?.value ?? req.cookies.get(COOKIES.reg)?.value;
 
     if (req.method === "GET" && url === boundStatePath) {
+      if (!bound) {
+        const res = NextResponse.json({ phase: "unbound", sessionId: null });
+        res.headers.set("X-Server-Time", String(Date.now()));
+        return res;
+      }
       const sid = readBoundSessionId();
       const xServerTime = String(Date.now());
       const skippedRaw: Record<string, string | undefined> = {
@@ -404,7 +410,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
       return res;
     }
 
-    if (req.method === "GET" && url === boundChallengePath) {
+    if (bound && req.method === "GET" && url === boundChallengePath) {
       const xServerTime = String(Date.now());
       const sid = readBoundSessionId();
       if (!sid) {
@@ -424,7 +430,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
       return r;
     }
 
-    if (req.method === "POST" && url === boundRegistrationPath) {
+    if (bound && req.method === "POST" && url === boundRegistrationPath) {
       const xServerTime = String(Date.now());
       const withTime = (r: NextResponse): NextResponse => {
         r.headers.set("X-Server-Time", xServerTime);
@@ -485,7 +491,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
       }
     }
 
-    if (req.method === "POST" && url === boundRefreshPath) {
+    if (bound && req.method === "POST" && url === boundRefreshPath) {
       const xServerTime = String(Date.now());
       const sid = readBoundSessionId();
       if (!sid) {

@@ -191,10 +191,13 @@ All configuration lives on the `dbsc()` plugin:
 | `cookieDomain` | `string` | — | Required when `cookieScope` is `"site"`. |
 | `cookieTtl` | `number` | `600_000` | Max-Age (ms) for the cookies the after-hook writes at sign-in. |
 | `boundCookieTtl` | `number` | `600_000` | Bound cookie lifetime / refresh cadence used by the protocol routes. |
+| `bound` | `boolean` | `true` | `false` runs native DBSC only (Chromium 145+). The bound polyfill routes don't mount; non-Chromium browsers stay unbound. |
 | `clientPath` | `string` | `"/dbsc-client"` | Path baked into the init shim where the SDK bundle is served. |
 | `onEvent` | `(e) => void` | — | Telemetry hook for registration / refresh / failures. |
 
 `sessionTtl` is a deprecated alias for `cookieTtl`.
+
+With `bound: false`, only the two native endpoints mount (the state route still answers `unbound` so a loaded SDK stands down). Guard routes with `requireProof` imported from `dbsc-toolkit/<framework>` — pass `bound: false` to it as well so it auto-relaxes the native `dbsc` tier (Chromium passes on its hardware binding; non-Chromium browsers are unbound and 403). Native-only suits managed fleets that can mandate a Chromium build with a hardware key store, not general-audience apps.
 
 ### Per-route proof tuning
 

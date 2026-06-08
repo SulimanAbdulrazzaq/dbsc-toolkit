@@ -47,6 +47,8 @@ declare module "fastify" {
 export interface DbscInternal {
   storage: StorageAdapter;
   secure: boolean;
+  /** When false, `requireProof()` auto-relaxes the native dbsc tier. */
+  boundEnabled: boolean;
   replayCache?: ProofReplayCache;
 }
 export const DBSC_INTERNAL: unique symbol = Symbol("dbsc-toolkit.fastify.internal");
@@ -145,6 +147,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     boundChallengePath = "/dbsc-bound/challenge",
     boundRegistrationPath = "/dbsc-bound/registration",
     boundRefreshPath = "/dbsc-bound/refresh",
+    bound = true,
     boundCookieTtl = DEFAULT_BOUND_TTL_MS,
     refreshGraceMs = 30_000,
     registrationCookieTtl = DEFAULT_REG_TTL_MS,
@@ -194,6 +197,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     (req as unknown as Record<PropertyKey, unknown>)[DBSC_INTERNAL] = {
       storage,
       secure,
+      boundEnabled: bound,
       ...(replayCache !== undefined && { replayCache }),
     } satisfies DbscInternal;
 
@@ -387,6 +391,10 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
 
   fastify.get(boundStatePath, async (req: FastifyRequest, reply: FastifyReply) => {
     reply.header("X-Server-Time", String(Date.now()));
+    // Polyfill disabled: tell the client SDK to stand down.
+    if (!bound) {
+      return reply.status(200).send({ phase: "unbound", sessionId: null });
+    }
     const skipped = parseSessionSkippedHeader(req.headers as Record<string, string | string[] | undefined>);
     const nativeSkipped = skipped.length ? skipped.map((s) => s.reason) : undefined;
     const sessionId = readBoundSessionId(req);
@@ -428,17 +436,18 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     });
   });
 
-  fastify.get(boundChallengePath, async (req: FastifyRequest, reply: FastifyReply) => {
-    reply.header("X-Server-Time", String(Date.now()));
-    const sessionId = readBoundSessionId(req);
-    if (!sessionId) return reply.status(403).send({ error: "no session" });
-    const session = await storage.getSession(sessionId);
-    if (!session) return reply.status(403).send({ error: "no session" });
-    const challenge = await issueChallenge(sessionId, storage);
-    return reply.status(200).send({ challenge: challenge.jti });
-  });
+  if (bound) {
+    fastify.get(boundChallengePath, async (req: FastifyRequest, reply: FastifyReply) => {
+      reply.header("X-Server-Time", String(Date.now()));
+      const sessionId = readBoundSessionId(req);
+      if (!sessionId) return reply.status(403).send({ error: "no session" });
+      const session = await storage.getSession(sessionId);
+      if (!session) return reply.status(403).send({ error: "no session" });
+      const challenge = await issueChallenge(sessionId, storage);
+      return reply.status(200).send({ challenge: challenge.jti });
+    });
 
-  fastify.post(boundRegistrationPath, async (req: FastifyRequest, reply: FastifyReply) => {
+    fastify.post(boundRegistrationPath, async (req: FastifyRequest, reply: FastifyReply) => {
     reply.header("X-Server-Time", String(Date.now()));
     const ip = req.ip;
     const allowed = await rateLimiter.checkRegistration(ip);
@@ -533,7 +542,8 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
       }
       throw err;
     }
-  });
+    });
+  }
 };
 
 export const dbsc = fp(dbscPlugin, { name: "@dbsc-toolkit/server-fastify" });

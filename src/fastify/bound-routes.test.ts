@@ -346,3 +346,48 @@ describe("Fastify createDbsc", () => {
     }
   });
 });
+
+describe("bound: false (native-only)", () => {
+  async function start(register: (app: FastifyInstance, storage: MemoryStorage) => void) {
+    const storage = new MemoryStorage();
+    const app = Fastify();
+    await app.register(fastifyCookie);
+    await app.register(dbsc, { storage, secure: false, bound: false });
+    register(app, storage);
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const addr = app.server.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    return { storage, url: `http://127.0.0.1:${port}`, close: () => app.close() };
+  }
+
+  it("state answers unbound; the other bound routes are not mounted (404)", async () => {
+    const ctx = await start(() => {});
+    try {
+      const state = await fetch(`${ctx.url}/dbsc-bound/state`);
+      expect((await state.json()).phase).toBe("unbound");
+      expect((await fetch(`${ctx.url}/dbsc-bound/challenge`)).status).toBe(404);
+      expect((await fetch(`${ctx.url}/dbsc-bound/registration`, { method: "POST" })).status).toBe(404);
+      expect((await fetch(`${ctx.url}/dbsc-bound/refresh`, { method: "POST" })).status).toBe(404);
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it("requireProof() auto-relaxes a native dbsc session and still 403s tier:none", async () => {
+    const sessionId = "sess-fastify-native";
+    const ctx = await start((app) => {
+      app.get("/guarded", { preHandler: requireProof() }, async () => ({ ok: true }));
+    });
+    try {
+      const now = Date.now();
+      await ctx.storage.setSession({ id: sessionId, userId: "u1", tier: "dbsc", createdAt: now, expiresAt: now + 60_000, lastRefreshAt: now });
+      await ctx.storage.setBoundKey({ sessionId, kind: "native", jwk: { kty: "EC", crv: "P-256", x: "x", y: "y" }, createdAt: now, algorithm: "ES256" });
+      const ok = await fetch(`${ctx.url}/guarded`, { headers: { cookie: `dbsc-session=${sessionId}` } });
+      expect(ok.status).toBe(200);
+      const denied = await fetch(`${ctx.url}/guarded`);
+      expect(denied.status).toBe(403);
+    } finally {
+      await ctx.close();
+    }
+  });
+});

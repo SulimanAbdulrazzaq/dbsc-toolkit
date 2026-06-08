@@ -49,6 +49,12 @@ export interface RouteDeps {
   cookies: DbscCookies;
   basePath: string;
   boundCookieTtl: number;
+  /**
+   * Mount the bound polyfill endpoints. Default true. When false, only the
+   * two native endpoints are returned; the state endpoint still answers
+   * `phase: "unbound"` so a client SDK stands down cleanly.
+   */
+  bound?: boolean;
   onEvent?: ((event: AnyTelemetryEvent) => void | Promise<void>) | undefined;
 }
 
@@ -88,6 +94,7 @@ function originOf(ctx: any): string {
 
 export function buildDbscRoutes(deps: RouteDeps): Record<string, unknown> {
   const { storageFromCtx, cookies, basePath, boundCookieTtl, onEvent } = deps;
+  const boundEnabled = deps.bound !== false;
   const refreshUrl = `${basePath}${REFRESH_PATH}`;
   const boundRefreshUrl = `${basePath}${BOUND_REFRESH_PATH}`;
 
@@ -175,6 +182,8 @@ export function buildDbscRoutes(deps: RouteDeps): Record<string, unknown> {
     { method: "GET" },
     async (ctx: any) => {
       ctx.setHeader("X-Server-Time", String(Date.now()));
+      // Polyfill disabled: tell the client SDK to stand down.
+      if (!boundEnabled) return ctx.json({ phase: "unbound", sessionId: null });
       const storage = storageFromCtx(ctx);
       const cctx = ctx as unknown as CookieCtx;
       const skipped = parseSessionSkippedHeader(headersRecord(ctx));
@@ -278,13 +287,18 @@ export function buildDbscRoutes(deps: RouteDeps): Record<string, unknown> {
     },
   );
 
+  // Native endpoints always mount. The state endpoint mounts even when the
+  // polyfill is off (it answers "unbound" so a client SDK stands down); the
+  // other three bound endpoints are omitted when bound is disabled.
   return {
     dbscRegistration,
     dbscRefresh,
     dbscBoundState,
-    dbscBoundChallenge,
-    dbscBoundRegistration,
-    dbscBoundRefresh,
+    ...(boundEnabled && {
+      dbscBoundChallenge,
+      dbscBoundRegistration,
+      dbscBoundRefresh,
+    }),
   };
 }
 
