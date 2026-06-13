@@ -36,7 +36,7 @@
     "dbsc-toolkit": ">=2.9.0"
   },
   "devDependencies": {
-    "better-auth": "^1.2.0",
+    "better-auth": "^1.6.18",
     "dbsc-toolkit": "workspace:*",
     "rimraf": "^6.0.0",
     "typescript": "^6.0.0"
