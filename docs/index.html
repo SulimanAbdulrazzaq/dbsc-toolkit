@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DBSC for Node.js — Device Bound Session Credentials Server Library | dbsc-toolkit</title>
+<meta name="description" content="Server-side Device Bound Session Credentials (DBSC) for Node.js. Express, Fastify, Hono and Next.js middleware that binds session cookies to a hardware TPM key to stop cookie theft — plus a Web Crypto polyfill for Firefox and Safari.">
+<link rel="canonical" href="https://sulimanabdulrazzaq.github.io/dbsc-toolkit/">
+<meta name="robots" content="index, follow">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="DBSC for Node.js — Device Bound Session Credentials Server Library">
+<meta property="og:description" content="Bind session cookies to a hardware key so a stolen cookie can't be replayed. DBSC for Express, Fastify, Hono and Next.js, with a Web Crypto polyfill for every other browser.">
+<meta property="og:url" content="https://sulimanabdulrazzaq.github.io/dbsc-toolkit/">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="DBSC for Node.js — Device Bound Session Credentials Server Library">
+<meta name="twitter:description" content="Bind session cookies to a hardware key so a stolen cookie can't be replayed. DBSC for Express, Fastify, Hono and Next.js.">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareSourceCode",
+  "name": "dbsc-toolkit",
+  "description": "Server-side Device Bound Session Credentials (DBSC) for Node.js, with Express, Fastify, Hono and Next.js adapters and a Web Crypto polyfill for non-Chromium browsers.",
+  "codeRepository": "https://github.com/SulimanAbdulrazzaq/dbsc-toolkit",
+  "programmingLanguage": "TypeScript",
+  "runtimePlatform": "Node.js",
+  "license": "https://www.apache.org/licenses/LICENSE-2.0",
+  "author": { "@type": "Person", "name": "Suliman Abdulrazzaq" },
+  "keywords": "DBSC, Device Bound Session Credentials, Node.js, Express, Fastify, Hono, Next.js, cookie theft, session security, TPM, Web Crypto"
+}
+</script>
+
+<style>
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1a1a1a; background: #fff; }
+@media (prefers-color-scheme: dark) { body { color: #e6e6e6; background: #0d1117; } a { color: #6cb6ff; } code, pre { background: #161b22 !important; } .card { background: #161b22 !important; border-color: #30363d !important; } }
+.wrap { max-width: 820px; margin: 0 auto; padding: 0 20px; }
+header { padding: 64px 0 32px; }
+h1 { font-size: 2.1rem; line-height: 1.2; margin: 0 0 12px; }
+.sub { font-size: 1.2rem; color: #555; margin: 0 0 24px; }
+@media (prefers-color-scheme: dark) { .sub { color: #9da7b3; } }
+a { color: #0969da; text-decoration: none; }
+a:hover { text-decoration: underline; }
+.cta a { display: inline-block; margin: 4px 10px 4px 0; padding: 10px 18px; border: 1px solid #d0d7de; border-radius: 8px; font-weight: 600; }
+.cta a.primary { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+h2 { font-size: 1.4rem; margin: 40px 0 12px; }
+pre { background: #f6f8fa; padding: 16px; border-radius: 8px; overflow-x: auto; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: #f6f8fa; padding: 2px 5px; border-radius: 4px; }
+pre code { padding: 0; background: none; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 16px 0; }
+.card { border: 1px solid #d0d7de; border-radius: 10px; padding: 16px; background: #fafbfc; }
+.card h3 { margin: 0 0 6px; font-size: 1rem; }
+.card p { margin: 0; font-size: 0.92rem; color: #57606a; }
+@media (prefers-color-scheme: dark) { .card p { color: #9da7b3; } }
+footer { margin: 56px 0 40px; padding-top: 24px; border-top: 1px solid #d0d7de; color: #57606a; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Device Bound Session Credentials (DBSC) for Node.js</h1>
+  <p class="sub">Bind session cookies to a hardware key so a stolen cookie can't be replayed on another device. A DBSC server library for Express, Fastify, Hono and Next.js — with a Web Crypto polyfill so Firefox and Safari are covered too.</p>
+  <p class="cta">
+    <a class="primary" href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit">View on GitHub</a>
+    <a href="https://www.npmjs.com/package/dbsc-toolkit">npm: dbsc-toolkit</a>
+    <a href="https://dbsc-toolkit.onrender.com/">Live demo</a>
+  </p>
+</header>
+
+<p>A session cookie is a bearer token: whoever holds it is the user. <strong>Device Bound Session Credentials (DBSC)</strong> — shipped to Chrome stable in 146 — removes that weakness by binding the session to a private key generated inside the device's hardware (a TPM on Windows, the Secure Enclave on Apple Silicon). The key never leaves the device, so a cookie copied to another machine fails the next signature check and the session dies. <code>dbsc-toolkit</code> is the server-side library that implements the whole protocol for Node.js.</p>
+
+<h2>Install</h2>
+<pre><code>npm install dbsc-toolkit</code></pre>
+
+<h2>Minimal Express server</h2>
+<pre><code>import express from "express";
+import { randomUUID } from "node:crypto";
+import { createDbsc } from "dbsc-toolkit/express";
+import { MemoryStorage } from "dbsc-toolkit/storage/memory";
+
+const app = express();
+app.use(express.json());
+
+const dbsc = createDbsc({ storage: new MemoryStorage() });
+dbsc.install(app);
+
+app.post("/login", async (req, res) => {
+  await dbsc.bind(res, randomUUID(), { userId: req.body.username });
+  res.json({ ok: true });
+});</code></pre>
+
+<h2>Every modern browser, one server</h2>
+<div class="grid">
+  <div class="card"><h3>tier: dbsc</h3><p>Native DBSC on Chromium 145+. Key held in the TPM / Secure Enclave. Defeats remote theft and on-device infostealers.</p></div>
+  <div class="card"><h3>tier: bound</h3><p>Web Crypto polyfill for Firefox, Safari and older Chromium. Non-extractable key in IndexedDB. Defeats remote cookie theft.</p></div>
+  <div class="card"><h3>tier: none</h3><p>Unbound or stale. Your app decides what each tier is allowed to do via a single route guard.</p></div>
+</div>
+
+<h2>Framework adapters</h2>
+<p>The same core protocol ships as middleware for the main Node.js stacks: <strong>Express</strong>, <strong>Fastify</strong>, <strong>Hono</strong> (Node, Bun, Deno, Workers) and <strong>Next.js</strong> App Router. Storage adapters for in-memory, Redis and Postgres. There is also a <a href="https://www.npmjs.com/package/@dbsc-toolkit/better-auth">Better Auth plugin</a>.</p>
+
+<h2>Documentation</h2>
+<ul>
+  <li><a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit#readme">README &amp; quickstart</a></li>
+  <li><a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/tree/main/spec">Language-neutral protocol spec</a> &amp; <a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/tree/main/spec/vectors">test vectors</a></li>
+  <li><a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/blob/main/docs/blog/dbsc-explained.md">DBSC explained: how the protocol works</a></li>
+  <li><a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/blob/main/docs/blog/implementing-dbsc-on-express.md">Implementing DBSC on Express</a></li>
+</ul>
+
+<footer>
+  <p><code>dbsc-toolkit</code> — open-source (Apache-2.0) Device Bound Session Credentials for Node.js. Verified end-to-end against Chrome 147 on real TPM 2.0 hardware. Built by <a href="https://github.com/SulimanAbdulrazzaq">Suliman Abdulrazzaq</a>.</p>
+</footer>
+
+</div>
+</body>
+</html>

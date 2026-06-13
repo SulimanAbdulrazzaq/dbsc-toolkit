@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://sulimanabdulrazzaq.github.io/dbsc-toolkit/sitemap.xml
