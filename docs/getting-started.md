@@ -99,6 +99,7 @@ From this point forward your application code never has to think about DBSC. The
 
 ## Next steps
 
+- Not on Express? The same flow ships for Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, and raw `node:http` — or wire the framework-agnostic core into anything. See [adapters](./adapters.md).
 - Bolting DBSC onto an existing app with its own session cookie? See [integrating with existing auth](./integrating-existing-auth.md).
 - Switch to a real storage adapter — see [storage](./storage.md).
 - Read [protocol](./protocol.md) to understand exactly what Chrome and the server exchange.

@@ -133,6 +133,147 @@ export async function GET(req: NextRequest) {
 
 The kit's `getSession` / `requireProof` carry storage from the config — nothing re-passed. Next.js has no shared request context, so `requireProof` takes the session object explicitly. Memory storage will not survive serverless cold starts; use Redis or Postgres.
 
+## NestJS
+
+`DbscModule.forRoot()` mounts the protocol middleware for every route (Express platform) and provides `DbscService` for binding. `DbscGuard` is the route guard.
+
+```ts
+import { Module } from "@nestjs/common";
+import { DbscModule } from "dbsc-toolkit/nestjs";
+import { MemoryStorage } from "dbsc-toolkit/storage/memory";
+
+@Module({ imports: [DbscModule.forRoot({ storage: new MemoryStorage() })] })
+export class AppModule {}
+```
+
+Bind in a login controller, guard a sensitive route:
+
+```ts
+import { Controller, Post, Res, UseGuards } from "@nestjs/common";
+import type { Response } from "express";
+import { DbscService, DbscGuard } from "dbsc-toolkit/nestjs";
+import { randomUUID } from "node:crypto";
+
+@Controller()
+export class AppController {
+  constructor(private readonly dbsc: DbscService) {}
+
+  @Post("login")
+  async login(@Res({ passthrough: true }) res: Response) {
+    await this.dbsc.bind(res, randomUUID(), { userId: "u1" });
+    return { ok: true };
+  }
+
+  @UseGuards(DbscGuard)
+  @Post("payment")
+  pay() {
+    return { ok: true };
+  }
+}
+```
+
+A guarded POST body-hashes the request, so it must deliver raw bytes (`rawBody: true` in `NestFactory.create`, with the JSON parser disabled on that route). GET routes need no parser. `createDbscGuard(opts)` returns a guard with options baked in (e.g. a storage override).
+
+## Koa
+
+Koa's `ctx.req` / `ctx.res` are raw `node:http` objects, so the adapter delegates to the generic node handler.
+
+```ts
+import Koa from "koa";
+import { createDbsc, requireProof } from "dbsc-toolkit/koa";
+import { MemoryStorage } from "dbsc-toolkit/storage/memory";
+
+const app = new Koa();
+const dbsc = createDbsc({ storage: new MemoryStorage() });
+dbsc.install(app);
+
+app.use(async (ctx, next) => {
+  if (ctx.path === "/login") {
+    await dbsc.bind(ctx, crypto.randomUUID(), { userId: "u1" });
+    ctx.body = { ok: true };
+    return;
+  }
+  await next();
+});
+
+// guard a route
+app.use(requireProof()); // place before the protected handler
+```
+
+The guard reads the raw body from `ctx.request.rawBody` when a body parser populated it, else from the socket.
+
+## SvelteKit
+
+A `handle` hook answers the protocol routes; `bindSession` and `requireProof` work inside actions and `+server` handlers.
+
+`src/hooks.server.ts`:
+
+```ts
+import { dbscHandle } from "dbsc-toolkit/sveltekit";
+import { MemoryStorage } from "dbsc-toolkit/storage/memory";
+
+export const handle = dbscHandle({ storage: new MemoryStorage() });
+```
+
+`src/routes/login/+server.ts`:
+
+```ts
+import { bindSession } from "dbsc-toolkit/sveltekit";
+import { storage } from "$lib/dbsc";
+
+export async function POST(event) {
+  await bindSession(event, crypto.randomUUID(), storage, { userId: "u1" });
+  return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+}
+```
+
+`src/routes/payment/+server.ts`:
+
+```ts
+import { requireProof } from "dbsc-toolkit/sveltekit";
+
+export async function POST(event) {
+  await requireProof()(event); // throws error(403) if not from the bound device
+  return new Response(JSON.stringify({ ok: true }));
+}
+```
+
+`event.locals.dbsc` carries `{ sessionId, tier }` for every request after the hook runs.
+
+## Raw `node:http` (generic)
+
+The foundation the Koa adapter builds on, usable with any server that exposes Node's request/response objects. There is no `install()` — wire `handler()` at the top of your listener and branch on its boolean return (`true` = it answered a protocol route).
+
+```ts
+import { createServer } from "node:http";
+import { createDbsc } from "dbsc-toolkit/node";
+import { MemoryStorage } from "dbsc-toolkit/storage/memory";
+
+const dbsc = createDbsc({ storage: new MemoryStorage() });
+const handle = dbsc.handler();
+const guard = dbsc.requireProof();
+
+createServer(async (req, res) => {
+  if (await handle(req, res)) return; // protocol route answered
+
+  const url = new URL(req.url ?? "/", "http://x");
+  if (url.pathname === "/login") {
+    await dbsc.bind(res, crypto.randomUUID(), { userId: "u1" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  if (url.pathname === "/payment") {
+    if (!(await guard(req, res))) return; // 403 already written
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  res.statusCode = 404;
+  res.end();
+}).listen(3000);
+```
+
+`getDbscSession(req)` reads the resolved `{ sessionId, tier }` after `handle()` returns `false`.
+
 ---
 
 ## Writing your own adapter

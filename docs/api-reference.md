@@ -11,6 +11,10 @@ Every public export across all subpaths.
 | `dbsc-toolkit/fastify` | Fastify plugin |
 | `dbsc-toolkit/hono` | Hono middleware |
 | `dbsc-toolkit/nextjs` | Next.js middleware + `getDbscSession` |
+| `dbsc-toolkit/nestjs` | NestJS `DbscModule` + `DbscGuard` + `DbscService` |
+| `dbsc-toolkit/koa` | Koa middleware |
+| `dbsc-toolkit/sveltekit` | SvelteKit `dbscHandle` hook + `requireProof` |
+| `dbsc-toolkit/node` | Generic raw `node:http` handler |
 | `dbsc-toolkit/client` | Browser SDK |
 | `dbsc-toolkit/storage/memory` | `MemoryStorage` |
 | `dbsc-toolkit/storage/redis` | `RedisStorage` |
@@ -604,6 +608,54 @@ function createDbsc(opts: DbscNextOptions & { sessionTtl?: number }): {
 Next.js has no shared request context, so `requireProof` takes the session (from `getDbscSession`) and storage explicitly, and returns `{ ok }` / `{ ok: false, response }` like `requireBoundProof`. The `createDbsc` kit has no `install()` — export `kit.middleware()` from `middleware.ts`, call `kit.getSession` / `kit.requireProof` inside route handlers (storage is baked in).
 
 On the no-sessionId JWT path, pass the request in `BindOptions` so the kit can manage the per-device cookie: `kit.bind(res, { userId, req })`. Without `req` (and without `deviceHint`) the derived id is `userId`-only — which collides for a user with two browsers. `BindOptions` here is `{ userId, deviceHint?, namespace?, req?: NextRequest }`.
+
+---
+
+## `dbsc-toolkit/nestjs`
+
+```ts
+DbscModule.forRoot(opts: DbscNestOptions): DynamicModule  // mounts the protocol middleware globally
+class DbscService { bind(res, sessionId, opts): Promise<string> }   // injectable
+class DbscGuard implements CanActivate                              // @UseGuards(DbscGuard)
+createDbscGuard(opts: RequireProofOptions): new () => CanActivate   // guard with options baked in
+bindSession(res, sessionId, storage, opts): Promise<void>          // re-exported from the Express adapter
+```
+
+Express platform. The guard reads `res.locals.dbsc` set by the middleware. A guarded POST is body-hashed, so it must deliver raw bytes (`rawBody: true`). `DbscNestOptions` is the Express adapter's option set.
+
+## `dbsc-toolkit/koa`
+
+```ts
+dbsc(opts: DbscKoaOptions): Middleware
+bindSession(ctx, sessionId, storage, opts): Promise<void>
+requireProof(opts?: RequireProofOptions): Middleware
+createDbsc(opts): { install(app), middleware(), bind(ctx, sessionId, opts), requireProof(opts?) }
+```
+
+Delegates to the `node:http` handler over `ctx.req` / `ctx.res`; sets `ctx.respond = false` when it answers a protocol route. The session lands on `ctx.state.dbsc`. The guard reads the raw body from `ctx.request.rawBody` when present.
+
+## `dbsc-toolkit/sveltekit`
+
+```ts
+dbscHandle(opts: DbscSvelteKitOptions): Handle            // src/hooks.server.ts
+bindSession(event, sessionId, storage, opts): Promise<void>
+requireProof(opts?: RequireProofOptions): (event) => Promise<void>  // throws error(403) on failure
+```
+
+The hook resolves the session onto `event.locals.dbsc`. Protocol routes return a `Response` directly with manual `Set-Cookie`; `bindSession` uses `event.cookies` (it runs inside an action/handler that goes through `resolve`).
+
+## `dbsc-toolkit/node`
+
+```ts
+dbsc(opts: DbscNodeOptions): (req, res) => Promise<boolean>   // true = answered a protocol route
+getDbscSession(req): DbscNodeSession | undefined
+bindSession(res, sessionId, storage, opts): Promise<void>
+readJsonBody(req): Promise<Record<string, unknown>>
+requireProof(opts?): (req, res) => Promise<boolean>          // true = passed; false = 403 already written
+createDbsc(opts): { handler(), getSession(req), bind(res, sessionId, opts), requireProof(opts?) }
+```
+
+Generic raw `node:http`. No `install()` — branch on the handler's boolean return. The guard caches the verified raw body on the request so a downstream handler can re-read it via `readJsonBody`.
 
 ---
 

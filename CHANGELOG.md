@@ -2,6 +2,30 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.11.0] — 2026-06-15
+
+### Added
+
+- **Four new framework adapters**, each a thin wrapper over the existing core:
+  - `dbsc-toolkit/node` — a generic raw `node:http` handler that works with any
+    server exposing Node's request/response objects. The foundation the Koa
+    adapter builds on.
+  - `dbsc-toolkit/koa` — Koa middleware (delegates to the `node:http` handler).
+  - `dbsc-toolkit/sveltekit` — a `handle` hook plus `bindSession` / `requireProof`
+    for actions and `+server` handlers.
+  - `dbsc-toolkit/nestjs` — `DbscModule.forRoot()`, `DbscService`, and a
+    `DbscGuard` route guard (Express platform).
+  - All honor the `bound` option and the per-request `requireProof()` guard
+    exactly like the existing adapters. New peer deps (`koa`, `@nestjs/common`,
+    `@nestjs/core`, `@sveltejs/kit`) are optional.
+
+### Changed
+
+- Repositioned the README and the landing page around "DBSC for Node.js — works
+  with any framework": the framework-agnostic core is surfaced as the throughline,
+  with the adapters as conveniences and a documented path for wiring the core into
+  anything. No API changes.
+
 ## [2.10.0] — 2026-06-07
 
 ### Added

@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Stop stolen session cookies from being replayed on another device.</strong><br>
-  A language-neutral DBSC protocol spec plus a reference implementation for Node.js — with a Web Crypto polyfill so every browser is covered, not just Chrome.
+  Device Bound Session Credentials for Node.js — one framework-agnostic core with adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit and raw <code>node:http</code>, plus a Web Crypto polyfill so every browser is covered, not just Chrome. A language-neutral protocol spec with a Node reference implementation.
 </p>
 
 <p align="center">
@@ -122,9 +122,23 @@ Load the polyfill in your HTML so non-Chromium browsers reach `tier: "bound"`:
 
 Full walk-through, failure modes, and migration timeline: **[docs/getting-started.md](./docs/getting-started.md)** and **[docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md)**.
 
-### Not on Express?
+### Any framework
 
-The protocol lives in a framework-agnostic core — plain functions plus a `StorageAdapter`, no HTTP-layer assumptions. The Express/Fastify/Hono/Next.js adapters are thin wrappers. Build on the core directly for any runtime:
+The protocol lives in a framework-agnostic core — plain functions plus a `StorageAdapter`, no HTTP-layer assumptions. The adapters are thin wrappers; pick yours:
+
+| Framework | Import |
+|---|---|
+| Express | `dbsc-toolkit/express` |
+| Fastify | `dbsc-toolkit/fastify` |
+| Hono (Node, Bun, Deno, Workers) | `dbsc-toolkit/hono` |
+| Next.js (App Router) | `dbsc-toolkit/nextjs` |
+| NestJS | `dbsc-toolkit/nestjs` |
+| Koa | `dbsc-toolkit/koa` |
+| SvelteKit | `dbsc-toolkit/sveltekit` |
+| Any other server (raw `node:http`) | `dbsc-toolkit/node` |
+| [Better Auth](https://better-auth.com) | `@dbsc-toolkit/better-auth` |
+
+**No adapter for your framework? You can still use it.** Every adapter is a thin shell over the same core, so any HTTP framework on Node works — wire the core in directly:
 
 ```ts
 import {
@@ -136,7 +150,7 @@ import {
 } from "dbsc-toolkit";
 ```
 
-Complete raw-`http` example: [docs/adapters.md](./docs/adapters.md#writing-your-own-adapter).
+The generic `dbsc-toolkit/node` adapter is exactly this over raw `node:http`. Complete example: [docs/adapters.md](./docs/adapters.md#writing-your-own-adapter).
 
 ## How it compares
 
@@ -186,7 +200,7 @@ The polyfill is on by default. To run native DBSC only (Chromium 145+, no `bound
 
 | Package | What it is |
 |---|---|
-| `dbsc-toolkit` | Core + Express/Fastify/Hono/Next.js adapters, memory/Redis/Postgres storage |
+| `dbsc-toolkit` | Core + adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit & raw `node:http`; memory/Redis/Postgres storage |
 | `dbsc-toolkit/client` | Browser SDK + Web Crypto polyfill |
 | [`@dbsc-toolkit/better-auth`](./packages/better-auth/) | First-class [Better Auth](https://better-auth.com) plugin — binds every sign-in method automatically |
 
@@ -211,7 +225,7 @@ The wire protocol is documented as a language-neutral spec in [`spec/`](./spec/)
 - [x] Per-request proof + body signing + replay cache
 - [x] Multi-subdomain binding (`cookieScope: "site"`)
 - [x] Better Auth plugin
-- [ ] Koa / NestJS adapters
+- [x] NestJS, Koa, SvelteKit & generic `node:http` adapters
 - [ ] Bun / Deno native paths
 - [ ] Third-party security audit
 
@@ -220,7 +234,7 @@ The wire protocol is documented as a language-neutral spec in [`spec/`](./spec/)
 | Import | What it is |
 |---|---|
 | `dbsc-toolkit` | Core: types, crypto, protocol handlers, framework-agnostic |
-| `dbsc-toolkit/express` · `/fastify` · `/hono` · `/nextjs` | Framework adapters |
+| `dbsc-toolkit/express` · `/fastify` · `/hono` · `/nextjs` · `/nestjs` · `/koa` · `/sveltekit` · `/node` | Framework adapters |
 | `dbsc-toolkit/client` | Browser SDK + polyfill |
 | `dbsc-toolkit/storage/{memory,redis,postgres}` | Storage adapters |
 
