@@ -8,6 +8,8 @@
 <meta name="description" content="Server-side Device Bound Session Credentials (DBSC) for Node.js, on any framework. Express, Fastify, Hono, Next.js, NestJS, Koa and SvelteKit adapters that bind session cookies to a hardware TPM key to stop cookie theft, plus a Web Crypto polyfill for Firefox and Safari.">
 <link rel="canonical" href="https://sulimanabdulrazzaq.github.io/dbsc-toolkit/">
 <meta name="robots" content="index, follow">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a0d12" media="(prefers-color-scheme: dark)">
 
 <meta property="og:type" content="website">
 <meta property="og:title" content="DBSC for Node.js - Device Bound Session Credentials Server Library">
@@ -34,291 +36,303 @@
 
 <style>
 :root {
+  color-scheme: light dark;
   --bg: #ffffff;
-  --bg-soft: #f6f8fa;
+  --bg-soft: #f7f9fb;
   --panel: #ffffff;
-  --text: #11161d;
-  --muted: #5a6573;
-  --faint: #8b95a3;
-  --border: #e4e8ee;
-  --border-strong: #d4dae2;
-  --accent: #0a7d44;
-  --accent-bg: #0a7d44;
+  --text: #0e1319;
+  --muted: #586573;
+  --faint: #8a94a2;
+  --border: #e6eaef;
+  --border-strong: #d3dae2;
+  --accent: #0b8049;
+  --accent-bg: #0b8049;
   --on-accent: #ffffff;
-  --accent-soft: rgba(10, 125, 68, 0.08);
-  --danger: #c4374a;
-  --code-bg: #f6f8fa;
-  --r: 12px;
-  --r-btn: 9px;
+  --accent-soft: rgba(11, 128, 73, 0.08);
+  --accent-line: rgba(11, 128, 73, 0.22);
+  --danger: #c33a4d;
+  --danger-soft: rgba(195, 58, 77, 0.09);
+  --code-bg: #f7f9fb;
+  --shadow: 0 1px 2px rgba(16,24,33,.04), 0 12px 32px -16px rgba(16,24,33,.18);
+  --r: 14px;
+  --r-sm: 9px;
   --maxw: 1080px;
+  --s1: 8px; --s2: 16px; --s3: 24px; --s4: 40px; --s5: 64px; --s6: 96px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0a0d12;
-    --bg-soft: #0f141b;
+    --bg-soft: #0e131b;
     --panel: #11161f;
-    --text: #e8edf3;
-    --muted: #97a3b2;
-    --faint: #6b7685;
-    --border: #1d2530;
+    --text: #e9eef4;
+    --muted: #99a4b3;
+    --faint: #69737f;
+    --border: #1c242f;
     --border-strong: #2a3340;
-    --accent: #45dd91;
-    --accent-bg: #2cc07a;
+    --accent: #4ce29a;
+    --accent-bg: #2ec47e;
     --on-accent: #04130b;
-    --accent-soft: rgba(69, 221, 145, 0.10);
-    --danger: #f0707f;
-    --code-bg: #0e131b;
+    --accent-soft: rgba(76, 226, 154, 0.10);
+    --accent-line: rgba(76, 226, 154, 0.26);
+    --danger: #f47282;
+    --danger-soft: rgba(244, 114, 130, 0.12);
+    --code-bg: #0d121a;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 16px 40px -20px rgba(0,0,0,.6);
   }
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 84px; }
+html { scroll-behavior: smooth; scroll-padding-top: 88px; -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 1.6;
-  color: var(--text);
-  background: var(--bg);
-  -webkit-font-smoothing: antialiased;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 16px; line-height: 1.6; color: var(--text); background: var(--bg);
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  -webkit-tap-highlight-color: transparent;
 }
 .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
 a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
 code, pre, .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
-code { font-size: 0.86em; background: var(--accent-soft); color: var(--accent); padding: 0.12em 0.4em; border-radius: 6px; }
+code { font-size: 0.85em; background: var(--accent-soft); color: var(--accent); padding: 0.12em 0.42em; border-radius: 6px; }
 pre { margin: 0; }
-pre code { background: none; color: inherit; padding: 0; font-size: 13px; line-height: 1.7; }
+pre code { background: none; color: inherit; padding: 0; font-size: 13px; line-height: 1.75; }
+:where(a, button, .btn, summary, [tabindex]):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+h1, h2, h3 { text-wrap: balance; }
+p { text-wrap: pretty; }
+
+.skip { position: absolute; left: -999px; top: 8px; z-index: 100; background: var(--panel); color: var(--text); border: 1px solid var(--border-strong); padding: 10px 16px; border-radius: var(--r-sm); }
+.skip:focus { left: 16px; }
 
 /* nav */
-header.nav {
-  position: sticky; top: 0; z-index: 50;
-  height: 64px; display: flex; align-items: center;
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
-  backdrop-filter: saturate(150%) blur(10px);
-  -webkit-backdrop-filter: saturate(150%) blur(10px);
+.nav {
+  position: sticky; top: 0; z-index: 50; height: 64px; display: flex; align-items: center;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  backdrop-filter: saturate(160%) blur(12px); -webkit-backdrop-filter: saturate(160%) blur(12px);
   border-bottom: 1px solid var(--border);
 }
 .nav .wrap { display: flex; align-items: center; justify-content: space-between; width: 100%; }
-.brand { display: flex; align-items: center; gap: 9px; font-weight: 650; letter-spacing: -0.01em; color: var(--text); }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 660; letter-spacing: -0.015em; color: var(--text); font-size: 15.5px; }
 .brand:hover { text-decoration: none; }
-.brand .dot { width: 11px; height: 11px; border-radius: 3px; background: var(--accent-bg); box-shadow: 0 0 0 3px var(--accent-soft); }
-.nav nav { display: flex; align-items: center; gap: 26px; }
-.nav nav a { color: var(--muted); font-size: 14.5px; font-weight: 500; }
-.nav nav a:hover { color: var(--text); text-decoration: none; }
-.nav .ghbtn { color: var(--text); border: 1px solid var(--border-strong); padding: 7px 14px; border-radius: var(--r-btn); }
-.nav .ghbtn:hover { border-color: var(--accent); }
-@media (max-width: 720px) { .nav nav a.hideable { display: none; } }
+.brand .mark { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(140deg, var(--accent-bg), color-mix(in srgb, var(--accent-bg) 55%, #000)); box-shadow: inset 0 1px 0 rgba(255,255,255,.25); }
+.nav-links { display: flex; align-items: center; gap: 4px; }
+.nav-links a { color: var(--muted); font-size: 14.5px; font-weight: 500; padding: 8px 12px; border-radius: var(--r-sm); }
+.nav-links a:hover { color: var(--text); text-decoration: none; background: var(--bg-soft); }
+.nav-links a.cta { color: var(--text); border: 1px solid var(--border-strong); margin-left: 6px; }
+.nav-links a.cta:hover { border-color: var(--accent); background: transparent; }
+@media (max-width: 680px) { .nav-links a.hideable { display: none; } }
 
 /* buttons */
-.btn { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; padding: 11px 20px; border-radius: var(--r-btn); border: 1px solid transparent; transition: transform .12s ease, background .15s ease, border-color .15s ease; }
+.btn { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; padding: 11px 20px; border-radius: var(--r-sm); border: 1px solid transparent; cursor: pointer; touch-action: manipulation; transition: transform .12s ease, filter .15s ease, border-color .15s ease, background-color .15s ease; }
 .btn:hover { text-decoration: none; }
 .btn:active { transform: translateY(1px); }
 .btn-primary { background: var(--accent-bg); color: var(--on-accent); }
-.btn-primary:hover { filter: brightness(1.06); }
+.btn-primary:hover { filter: brightness(1.07); }
 .btn-ghost { color: var(--text); border-color: var(--border-strong); background: var(--panel); }
 .btn-ghost:hover { border-color: var(--accent); }
 
 /* hero */
-.hero { position: relative; padding: 84px 0 72px; overflow: hidden; }
-.hero::before {
-  content: ""; position: absolute; inset: -40% 0 auto 0; height: 520px; z-index: 0;
-  background: radial-gradient(60% 70% at 30% 0%, var(--accent-soft), transparent 70%);
-  pointer-events: none;
-}
-.hero .wrap { position: relative; z-index: 1; display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 52px; align-items: center; }
-.hero h1 { font-size: clamp(2.3rem, 5vw, 3.4rem); line-height: 1.05; letter-spacing: -0.03em; margin: 0 0 20px; font-weight: 720; }
+.hero { position: relative; padding: var(--s6) 0 var(--s5); overflow: hidden; }
+.hero::before { content: ""; position: absolute; inset: -45% 0 auto 0; height: 560px; z-index: 0; background: radial-gradient(58% 64% at 28% 0%, var(--accent-soft), transparent 72%); pointer-events: none; }
+.hero .wrap { position: relative; z-index: 1; display: grid; grid-template-columns: 1.04fr 0.96fr; gap: 56px; align-items: center; }
+.tagpill { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 550; color: var(--muted); background: var(--bg-soft); border: 1px solid var(--border); padding: 5px 12px 5px 8px; border-radius: 999px; margin-bottom: 22px; }
+.tagpill .v { color: var(--accent); font-weight: 650; background: var(--accent-soft); border-radius: 999px; padding: 1px 8px; font-size: 11.5px; letter-spacing: .02em; }
+.hero h1 { font-size: clamp(2.35rem, 5.2vw, 3.5rem); line-height: 1.04; letter-spacing: -0.035em; margin: 0 0 20px; font-weight: 730; }
 .hero h1 .em { color: var(--accent); }
-.hero .lead { font-size: 1.18rem; color: var(--muted); margin: 0 0 30px; max-width: 30ch; }
+.hero .lead { font-size: 1.17rem; color: var(--muted); margin: 0 0 30px; max-width: 32ch; }
 .hero .cta { display: flex; gap: 12px; flex-wrap: wrap; }
-.hero .meta { margin-top: 26px; font-size: 13.5px; color: var(--faint); display: flex; gap: 18px; flex-wrap: wrap; }
-.hero .meta b { color: var(--muted); font-weight: 600; }
+
+/* exchange visual */
+.exchange { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; box-shadow: var(--shadow); }
+.exchange .row { display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+.exchange .row:last-child { border-bottom: none; }
+.exchange .who { font-size: 12px; color: var(--faint); width: 86px; }
+.exchange .req { font: 13px/1.4 ui-monospace, monospace; color: var(--text); }
+.exchange .req .m { color: var(--accent); font-weight: 600; }
+.exchange .req small { display: block; color: var(--faint); font-size: 11.5px; margin-top: 3px; }
+.badge { font: 600 12px ui-monospace, monospace; padding: 4px 9px; border-radius: 7px; white-space: nowrap; }
+.badge.ok { color: var(--accent); background: var(--accent-soft); }
+.badge.no { color: var(--danger); background: var(--danger-soft); }
+.exchange .cap { padding: 12px 18px; font-size: 12.5px; color: var(--muted); background: var(--bg-soft); }
+
+/* sections */
+main section { padding: var(--s6) 0; }
+section.alt { background: var(--bg-soft); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.h2 { font-size: clamp(1.7rem, 3.2vw, 2.25rem); letter-spacing: -0.028em; line-height: 1.12; margin: 0 0 14px; font-weight: 700; }
+.sec-lead { color: var(--muted); font-size: 1.06rem; max-width: 60ch; margin: 0 0 var(--s4); }
 
 /* code panel */
-.panel { background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; box-shadow: 0 12px 40px -18px rgba(0,0,0,0.25); }
-.panel .bar { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--code-bg) 60%, var(--bg-soft)); }
+.panel { background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; box-shadow: var(--shadow); }
+.panel .bar { display: flex; align-items: center; gap: 8px; padding: 11px 15px; border-bottom: 1px solid var(--border); }
 .panel .bar .lights { display: flex; gap: 6px; }
 .panel .bar .lights i { width: 10px; height: 10px; border-radius: 50%; background: var(--border-strong); display: block; }
 .panel .bar .fname { margin-left: 6px; font: 12px ui-monospace, monospace; color: var(--faint); }
 .panel pre { padding: 18px; overflow-x: auto; }
-.tok-k { color: #c678dd; } .tok-s { color: #98c379; } .tok-f { color: #61afef; } .tok-c { color: var(--faint); } .tok-n { color: #d19a66; }
-@media (prefers-color-scheme: light) { .tok-k { color: #a626a4; } .tok-s { color: #50a14f; } .tok-f { color: #4078f2; } .tok-n { color: #b76b01; } }
-
-/* trust band */
-.trust { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--bg-soft); }
-.trust .wrap { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; padding-top: 22px; padding-bottom: 22px; }
-.trust .t { font-size: 0.92rem; color: var(--muted); }
-.trust .t b { display: block; color: var(--text); font-size: 0.98rem; font-weight: 650; margin-bottom: 2px; letter-spacing: -0.01em; }
-@media (max-width: 720px) { .trust .wrap { grid-template-columns: 1fr; gap: 14px; } }
-
-/* sections */
-section { padding: 88px 0; }
-section.alt { background: var(--bg-soft); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.h2 { font-size: clamp(1.7rem, 3.2vw, 2.3rem); letter-spacing: -0.025em; line-height: 1.12; margin: 0 0 14px; font-weight: 700; }
-.sec-lead { color: var(--muted); font-size: 1.06rem; max-width: 62ch; margin: 0 0 40px; }
-
-/* problem flow */
-.flow { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
-.flow .card { border: 1px solid var(--border); border-radius: var(--r); padding: 26px; background: var(--panel); }
-.flow .card h3 { margin: 0 0 8px; font-size: 1.12rem; letter-spacing: -0.01em; }
-.flow .card p { margin: 0; color: var(--muted); font-size: 0.97rem; }
-.flow .bad { border-left: 3px solid var(--danger); }
-.flow .good { border-left: 3px solid var(--accent); }
-.verdict { margin-top: 30px; font-size: 1.12rem; line-height: 1.5; max-width: 70ch; }
-.verdict .x { color: var(--danger); font-weight: 700; }
-.verdict .ok { color: var(--accent); font-weight: 700; }
+.tok-k { color: #c678dd; } .tok-s { color: #98c379; } .tok-f { color: #61afef; } .tok-c { color: var(--faint); }
+@media (prefers-color-scheme: light) { .tok-k { color: #a224a0; } .tok-s { color: #3f923b; } .tok-f { color: #2f6df0; } }
 
 /* steps */
-.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; background: var(--panel); }
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; background: var(--panel); }
 .steps .step { padding: 30px 26px; border-right: 1px solid var(--border); }
 .steps .step:last-child { border-right: none; }
-.steps .num { font: 600 13px ui-monospace, monospace; color: var(--accent); margin-bottom: 14px; }
-.steps .step h3 { margin: 0 0 8px; font-size: 1.05rem; }
+.steps .lab { font: 600 12.5px ui-monospace, monospace; color: var(--accent); margin-bottom: 14px; letter-spacing: .01em; }
+.steps .step h3 { margin: 0 0 8px; font-size: 1.05rem; letter-spacing: -0.01em; }
 .steps .step p { margin: 0; color: var(--muted); font-size: 0.93rem; }
 @media (max-width: 820px) { .steps { grid-template-columns: 1fr; } .steps .step { border-right: none; border-bottom: 1px solid var(--border); } .steps .step:last-child { border-bottom: none; } }
 
-/* tiers table */
-.tiers { width: 100%; border-collapse: collapse; border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+/* tiers */
+.tiers { width: 100%; border-collapse: collapse; border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; font-variant-numeric: tabular-nums; }
 .tiers th, .tiers td { text-align: left; padding: 15px 18px; border-bottom: 1px solid var(--border); font-size: 0.95rem; }
-.tiers thead th { background: var(--bg-soft); font-weight: 650; font-size: 0.86rem; letter-spacing: 0.01em; color: var(--muted); }
+.tiers thead th { background: var(--bg-soft); font-weight: 640; font-size: 0.84rem; color: var(--muted); }
 .tiers tbody tr:last-child td { border-bottom: none; }
 .tiers .tier { font-family: ui-monospace, monospace; font-weight: 600; color: var(--text); white-space: nowrap; }
 .tiers .yes { color: var(--accent); font-weight: 600; }
 .tiers .no { color: var(--faint); }
-.tiers td:first-child { width: 16%; }
+@media (max-width: 720px) { .tiers thead { display: none; } .tiers, .tiers tbody, .tiers tr, .tiers td { display: block; width: 100%; } .tiers tr { border-bottom: 2px solid var(--border); } .tiers td { border: none; padding: 6px 16px; } .tiers td.tier { padding-top: 16px; font-size: 1rem; } }
 
 /* framework grid */
-.fwgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
-.fw { border: 1px solid var(--border); border-radius: var(--r); background: var(--panel); padding: 22px 22px 8px; transition: border-color .15s ease, transform .15s ease; scroll-margin-top: 84px; }
+.fwgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.fw { border: 1px solid var(--border); border-radius: var(--r); background: var(--panel); padding: 22px 22px 8px; transition: border-color .15s ease; scroll-margin-top: 88px; }
 .fw:hover { border-color: var(--border-strong); }
 .fw .fwhead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.fw h3 { margin: 0; font-size: 1.06rem; letter-spacing: -0.01em; }
+.fw h3 { margin: 0; font-size: 1.05rem; letter-spacing: -0.01em; }
 .fw .imp { font: 12px ui-monospace, monospace; color: var(--accent); background: var(--accent-soft); padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
 .fw p { color: var(--muted); font-size: 0.9rem; margin: 8px 0 12px; }
-.fw pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 9px; padding: 13px 14px; overflow-x: auto; margin-bottom: 16px; }
+.fw pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 13px 14px; overflow-x: auto; margin-bottom: 16px; }
 .fw.span2 { grid-column: 1 / -1; }
-@media (max-width: 760px) { .fwgrid { grid-template-columns: 1fr; } }
+@media (max-width: 720px) { .fwgrid { grid-template-columns: 1fr; } }
 
-/* spec / credibility */
-.cred { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-.cred .item { padding: 4px 0; }
-.cred .item .big { font-size: 1.15rem; font-weight: 650; letter-spacing: -0.01em; margin-bottom: 6px; }
-.cred .item p { margin: 0; color: var(--muted); font-size: 0.92rem; }
-.cred .item a { font-weight: 600; }
-@media (max-width: 760px) { .cred { grid-template-columns: 1fr; gap: 26px; } }
+/* install */
+.install .wrap { display: grid; grid-template-columns: 0.92fr 1.08fr; gap: 48px; align-items: center; }
+.copybox { display: flex; align-items: center; gap: 12px; background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 13px 16px; font: 14px ui-monospace, monospace; margin-bottom: 18px; }
+.copybox .cmd::before { content: "$ "; color: var(--faint); }
 
-/* install band */
-.install .wrap { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 44px; align-items: center; }
-.install .copybox { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--r-btn); padding: 13px 16px; font: 14px ui-monospace, monospace; margin-bottom: 18px; }
-.install .copybox .cmd::before { content: "$ "; color: var(--faint); }
+/* learn cards */
+.learn { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.lc { display: block; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel); padding: 22px; transition: border-color .15s ease, transform .15s ease; }
+.lc:hover { border-color: var(--accent); text-decoration: none; transform: translateY(-2px); }
+.lc h3 { margin: 0 0 6px; font-size: 1.04rem; color: var(--text); letter-spacing: -0.01em; }
+.lc p { margin: 0 0 12px; color: var(--muted); font-size: 0.92rem; }
+.lc .go { color: var(--accent); font-size: 0.88rem; font-weight: 600; }
+@media (max-width: 720px) { .learn { grid-template-columns: 1fr; } }
+
+/* spec */
+.cred { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+.cred .big { font-size: 1.12rem; font-weight: 650; letter-spacing: -0.01em; margin-bottom: 6px; }
+.cred p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+@media (max-width: 720px) { .cred { grid-template-columns: 1fr; gap: 26px; } }
 
 /* footer */
-footer.site { border-top: 1px solid var(--border); padding: 44px 0; color: var(--muted); font-size: 0.9rem; }
-footer.site .wrap { display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap; }
-footer.site .flinks { display: flex; gap: 22px; flex-wrap: wrap; }
-footer.site a { color: var(--muted); }
-footer.site a:hover { color: var(--text); }
+.site-footer { border-top: 1px solid var(--border); padding: var(--s4) 0; color: var(--muted); font-size: 0.9rem; }
+.site-footer .wrap { display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap; }
+.site-footer .flinks { display: flex; gap: 22px; flex-wrap: wrap; }
+.site-footer a { color: var(--muted); }
+.site-footer a:hover { color: var(--text); }
 
 /* reveal */
-.reveal { opacity: 0; transform: translateY(14px); transition: opacity .6s cubic-bezier(.16,1,.3,1), transform .6s cubic-bezier(.16,1,.3,1); }
+.reveal { opacity: 0; transform: translateY(14px); transition: opacity .55s cubic-bezier(.16,1,.3,1), transform .55s cubic-bezier(.16,1,.3,1); }
 .reveal.in { opacity: 1; transform: none; }
-@media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } html { scroll-behavior: auto; } }
+@media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } html { scroll-behavior: auto; } *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; } }
 
 @media (max-width: 880px) {
-  .hero .wrap { grid-template-columns: 1fr; gap: 36px; }
-  .hero { padding: 56px 0 48px; }
+  .hero .wrap { grid-template-columns: 1fr; gap: 38px; }
+  .hero { padding: var(--s5) 0 var(--s4); }
   .hero .lead { max-width: none; }
-  .flow { grid-template-columns: 1fr; }
   .install .wrap { grid-template-columns: 1fr; gap: 26px; }
-  section { padding: 64px 0; }
+  main section { padding: var(--s5) 0; }
 }
 </style>
 </head>
 <body>
 
+<a class="skip" href="#main">Skip to content</a>
+
 <header class="nav">
   <div class="wrap">
-    <a class="brand" href="/dbsc-toolkit/"><span class="dot"></span>dbsc-toolkit</a>
-    <nav>
+    <a class="brand" href="/dbsc-toolkit/" translate="no"><span class="mark" aria-hidden="true"></span>dbsc-toolkit</a>
+    <nav class="nav-links" aria-label="Primary">
       <a class="hideable" href="#frameworks">Frameworks</a>
-      <a class="hideable" href="#how">How it works</a>
-      <a class="hideable" href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/tree/main/spec">Spec</a>
-      <a class="ghbtn" href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit">GitHub</a>
+      <a class="hideable" href="#how">How It Works</a>
+      <a class="hideable" href="./docs.html">Docs</a>
+      <a class="cta" href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit">GitHub</a>
     </nav>
   </div>
 </header>
 
+<main id="main">
+
 <section class="hero">
   <div class="wrap">
     <div>
+      <span class="tagpill"><span class="v">v2.11</span> Device Bound Session Credentials for Node.js</span>
       <h1>Stop stolen session cookies from being <span class="em">replayed.</span></h1>
-      <p class="lead">Device Bound Session Credentials for Node.js, on any framework. The cookie still copies; the device key it needs doesn't.</p>
+      <p class="lead">The cookie still copies. The device key it needs to refresh doesn’t. A session lifted to another machine dies on the next request.</p>
       <div class="cta">
-        <a class="btn btn-primary" href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit#readme">Get started</a>
-        <a class="btn btn-ghost" href="https://www.npmjs.com/package/dbsc-toolkit">npm: dbsc-toolkit</a>
+        <a class="btn btn-primary" href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit#readme">Get Started</a>
+        <a class="btn btn-ghost" href="./docs.html">Read the Docs</a>
       </div>
     </div>
-    <div class="panel reveal">
-      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="fname">server.js</span></div>
-<pre><code><span class="tok-k">import</span> { createDbsc } <span class="tok-k">from</span> <span class="tok-s">"dbsc-toolkit/express"</span>;
-<span class="tok-k">import</span> { MemoryStorage } <span class="tok-k">from</span> <span class="tok-s">"dbsc-toolkit/storage/memory"</span>;
-
-<span class="tok-k">const</span> dbsc = <span class="tok-f">createDbsc</span>({ storage: <span class="tok-k">new</span> <span class="tok-f">MemoryStorage</span>() });
-dbsc.<span class="tok-f">install</span>(app);
-
-app.<span class="tok-f">post</span>(<span class="tok-s">"/login"</span>, <span class="tok-k">async</span> (req, res) => {
-  <span class="tok-c">// bind the session to this device after your auth</span>
-  <span class="tok-k">await</span> dbsc.<span class="tok-f">bind</span>(res, sessionId, { userId });
-  res.<span class="tok-f">json</span>({ ok: <span class="tok-k">true</span> });
-});</code></pre>
+    <div class="exchange reveal" role="img" aria-label="The real device gets 200 OK; the same cookie replayed from another machine gets 403 rejected.">
+      <div class="row">
+        <span class="who">Bound device</span>
+        <span class="req" translate="no"><span class="m">POST</span> /payment<small>cookie + valid device proof</small></span>
+        <span class="badge ok">200 OK</span>
+      </div>
+      <div class="row">
+        <span class="who">Attacker</span>
+        <span class="req" translate="no"><span class="m">POST</span> /payment<small>stolen cookie, no device key</small></span>
+        <span class="badge no">403 PROOF_MISSING</span>
+      </div>
+      <p class="cap">Same cookie, two machines. Only the device that registered the key gets through.</p>
     </div>
   </div>
 </section>
 
-<div class="trust">
-  <div class="wrap">
-    <div class="t"><b>Verified on real hardware</b>Chrome 147 + TPM 2.0, refresh cycle included</div>
-    <div class="t"><b>8 framework adapters</b>Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, node:http</div>
-    <div class="t"><b>Apache-2.0, zero lock-in</b>Every line readable, polyfill covers Firefox and Safari</div>
+<div class="trust" style="border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--bg-soft);">
+  <div class="wrap" style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px;padding-top:22px;padding-bottom:22px;">
+    <div style="font-size:.92rem;color:var(--muted);"><b style="display:block;color:var(--text);font-weight:650;margin-bottom:2px;">Verified on real hardware</b>Chrome 147 with TPM 2.0, refresh cycle included</div>
+    <div style="font-size:.92rem;color:var(--muted);"><b style="display:block;color:var(--text);font-weight:650;margin-bottom:2px;">8 framework adapters</b>Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, node:http</div>
+    <div style="font-size:.92rem;color:var(--muted);"><b style="display:block;color:var(--text);font-weight:650;margin-bottom:2px;">Apache-2.0, no lock-in</b>Every line readable; polyfill covers Firefox and Safari</div>
   </div>
 </div>
 
 <section class="alt" id="why">
   <div class="wrap">
-    <h2 class="h2 reveal">A session cookie trusts whoever holds it</h2>
+    <h2 class="h2 reveal">A Session Cookie Trusts Whoever Holds It</h2>
     <p class="sec-lead reveal">That single property drives most account takeovers. Infostealer malware lifts the cookie off disk, the attacker pastes it into their own browser, and they are you. No password, no MFA prompt. DBSC binds the session to a key that never leaves the device, so a copied cookie has nothing to sign with.</p>
-    <div class="flow">
-      <div class="card bad reveal">
-        <h3>Without binding</h3>
-        <p>The cookie is a bearer token. Steal it, replay it from any machine, and the session is yours until it expires.</p>
-      </div>
-      <div class="card good reveal">
-        <h3>With DBSC</h3>
-        <p>The browser generates a private key inside the TPM at login. Every refresh and every guarded request needs a signature from it.</p>
-      </div>
+    <div class="panel reveal" style="max-width:760px;">
+      <div class="bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span class="fname">the mechanism</span></div>
+<pre><code translate="no"><span class="tok-c">// 1. at login, the browser mints a keypair in the TPM</span>
+<span class="tok-c">//    and registers the public half. the private key</span>
+<span class="tok-c">//    never leaves the chip.</span>
+<span class="tok-c">// 2. every refresh and every guarded request needs a</span>
+<span class="tok-c">//    fresh signature from that key.</span>
+<span class="tok-c">// 3. a replayed cookie from another device cannot sign,</span>
+<span class="tok-c">//    so the server demotes it:</span>
+tier: <span class="tok-s">"dbsc"</span>  <span class="tok-c">// real device, verified</span>
+tier: <span class="tok-s">"none"</span>  <span class="tok-c">// replay rejected, 403</span></code></pre>
     </div>
-    <p class="verdict reveal">The replayed cookie reaches the server, fails the signature check, and the session dies. <span class="x">Stolen cookie, another device</span> becomes <span class="ok">403, rejected</span>.</p>
   </div>
 </section>
 
 <section id="how">
   <div class="wrap">
-    <h2 class="h2 reveal">How the binding holds</h2>
+    <h2 class="h2 reveal">How the Binding Holds</h2>
     <p class="sec-lead reveal">The server is reactive. It sets one header after login and answers two endpoints; the browser drives the rest. You never write the protocol routes.</p>
     <div class="steps reveal">
       <div class="step">
-        <div class="num">Register</div>
-        <h3>Key born in hardware</h3>
+        <div class="lab">Register</div>
+        <h3>Key Born in Hardware</h3>
         <p>At login the browser creates an EC P-256 keypair in the TPM or Secure Enclave and registers the public half. The private key never leaves the chip.</p>
       </div>
       <div class="step">
-        <div class="num">Refresh</div>
-        <h3>Proof every cycle</h3>
+        <div class="lab">Refresh</div>
+        <h3>Proof Every Cycle</h3>
         <p>The bound cookie is short-lived. Before each renewal the browser signs a fresh server challenge. A device without the key cannot refresh.</p>
       </div>
       <div class="step">
-        <div class="num">Guard</div>
-        <h3>One call per route</h3>
-        <p><code>requireProof()</code> demands a per-request signature on sensitive routes, closing the gap between refreshes. Same guard on every browser.</p>
+        <div class="lab">Guard</div>
+        <h3>One Call per Route</h3>
+        <p><code translate="no">requireProof()</code> demands a per-request signature on sensitive routes, closing the gap between refreshes. Same guard on every browser.</p>
       </div>
     </div>
   </div>
@@ -326,16 +340,16 @@ app.<span class="tok-f">post</span>(<span class="tok-s">"/login"</span>, <span c
 
 <section class="alt" id="tiers">
   <div class="wrap">
-    <h2 class="h2 reveal">Every browser, one server</h2>
-    <p class="sec-lead reveal">Native DBSC is Chromium-only today. The Web Crypto polyfill covers the rest, so you read one <code>tier</code> and don't branch per browser. Run native-only with <code>bound: false</code>.</p>
+    <h2 class="h2 reveal">Every Browser, One Server</h2>
+    <p class="sec-lead reveal">Native DBSC is Chromium-only today. The Web Crypto polyfill covers the rest, so you read one <code translate="no">tier</code> and don’t branch per browser. Run native-only with <code translate="no">bound: false</code>.</p>
     <table class="tiers reveal">
       <thead>
-        <tr><th>Tier</th><th>Where the key lives</th><th>Remote cookie theft</th><th>On-device infostealer</th></tr>
+        <tr><th scope="col">Tier</th><th scope="col">Where the key lives</th><th scope="col">Remote cookie theft</th><th scope="col">On-device infostealer</th></tr>
       </thead>
       <tbody>
-        <tr><td class="tier">dbsc</td><td>Hardware (TPM / Secure Enclave), Chromium 145+</td><td class="yes">Defeated</td><td class="yes">Defeated</td></tr>
-        <tr><td class="tier">bound</td><td>Non-extractable IndexedDB key (Firefox, Safari, older Chromium)</td><td class="yes">Defeated</td><td class="no">Not defeated</td></tr>
-        <tr><td class="tier">none</td><td>Unbound or stale session</td><td class="no">Bare cookie</td><td class="no">Bare cookie</td></tr>
+        <tr><td class="tier" translate="no">dbsc</td><td>Hardware (TPM / Secure Enclave), Chromium 145+</td><td class="yes">Defeated</td><td class="yes">Defeated</td></tr>
+        <tr><td class="tier" translate="no">bound</td><td>Non-extractable IndexedDB key (Firefox, Safari, older Chromium)</td><td class="yes">Defeated</td><td class="no">Not defeated</td></tr>
+        <tr><td class="tier" translate="no">none</td><td>Unbound or stale session</td><td class="no">Bare cookie</td><td class="no">Bare cookie</td></tr>
       </tbody>
     </table>
   </div>
@@ -343,70 +357,70 @@ app.<span class="tok-f">post</span>(<span class="tok-s">"/login"</span>, <span c
 
 <section id="frameworks">
   <div class="wrap">
-    <h2 class="h2 reveal">DBSC for any Node.js framework</h2>
+    <h2 class="h2 reveal">DBSC for Any Node.js Framework</h2>
     <p class="sec-lead reveal">Every adapter is a thin shell over the same framework-agnostic core. Pick yours, or wire the core into anything when no adapter exists.</p>
     <div class="fwgrid">
 
       <article class="fw reveal" id="express">
-        <div class="fwhead"><h3>DBSC for Express</h3><span class="imp">dbsc-toolkit/express</span></div>
-        <p>The reference adapter. <code>install()</code> mounts the protocol routes; <code>bind()</code> starts a session.</p>
-<pre><code>const dbsc = createDbsc({ storage });
+        <div class="fwhead"><h3>DBSC for Express</h3><span class="imp" translate="no">dbsc-toolkit/express</span></div>
+        <p>The reference adapter. <code translate="no">install()</code> mounts the protocol routes; <code translate="no">bind()</code> starts a session.</p>
+<pre><code translate="no">const dbsc = createDbsc({ storage });
 dbsc.install(app);
 await dbsc.bind(res, sessionId, { userId });</code></pre>
       </article>
 
       <article class="fw reveal" id="fastify">
-        <div class="fwhead"><h3>DBSC for Fastify</h3><span class="imp">dbsc-toolkit/fastify</span></div>
-        <p>A plugin that registers <code>@fastify/cookie</code> and the protocol routes for you.</p>
-<pre><code>const dbsc = createDbsc({ storage });
+        <div class="fwhead"><h3>DBSC for Fastify</h3><span class="imp" translate="no">dbsc-toolkit/fastify</span></div>
+        <p>A plugin that registers <code translate="no">@fastify/cookie</code> and the protocol routes for you.</p>
+<pre><code translate="no">const dbsc = createDbsc({ storage });
 await dbsc.install(app);
 await dbsc.bind(reply, sessionId, { userId });</code></pre>
       </article>
 
       <article class="fw reveal" id="hono">
-        <div class="fwhead"><h3>DBSC for Hono</h3><span class="imp">dbsc-toolkit/hono</span></div>
+        <div class="fwhead"><h3>DBSC for Hono</h3><span class="imp" translate="no">dbsc-toolkit/hono</span></div>
         <p>Web-standard middleware. Runs on Node, Bun, Deno and Cloudflare Workers.</p>
-<pre><code>const dbsc = createDbsc({ storage });
+<pre><code translate="no">const dbsc = createDbsc({ storage });
 dbsc.install(app);
 await dbsc.bind(c, sessionId, { userId });</code></pre>
       </article>
 
       <article class="fw reveal" id="nextjs">
-        <div class="fwhead"><h3>DBSC for Next.js</h3><span class="imp">dbsc-toolkit/nextjs</span></div>
+        <div class="fwhead"><h3>DBSC for Next.js</h3><span class="imp" translate="no">dbsc-toolkit/nextjs</span></div>
         <p>App Router. Export the middleware, read the session inside route handlers.</p>
-<pre><code>// middleware.ts
+<pre><code translate="no">// middleware.ts
 export default dbsc.middleware();
 // route: const s = await dbsc.getSession(req);</code></pre>
       </article>
 
       <article class="fw reveal" id="nestjs">
-        <div class="fwhead"><h3>DBSC for NestJS</h3><span class="imp">dbsc-toolkit/nestjs</span></div>
-        <p>A module mounts the protocol; <code>DbscGuard</code> protects routes; <code>DbscService</code> binds.</p>
-<pre><code>imports: [DbscModule.forRoot({ storage })]
+        <div class="fwhead"><h3>DBSC for NestJS</h3><span class="imp" translate="no">dbsc-toolkit/nestjs</span></div>
+        <p>A module mounts the protocol; <code translate="no">DbscGuard</code> protects routes; <code translate="no">DbscService</code> binds.</p>
+<pre><code translate="no">imports: [DbscModule.forRoot({ storage })]
 // @UseGuards(DbscGuard) on a route
 // this.dbsc.bind(res, sessionId, { userId })</code></pre>
       </article>
 
       <article class="fw reveal" id="koa">
-        <div class="fwhead"><h3>DBSC for Koa</h3><span class="imp">dbsc-toolkit/koa</span></div>
-        <p>Middleware over Koa's raw request and response objects.</p>
-<pre><code>const dbsc = createDbsc({ storage });
+        <div class="fwhead"><h3>DBSC for Koa</h3><span class="imp" translate="no">dbsc-toolkit/koa</span></div>
+        <p>Middleware over Koa’s raw request and response objects.</p>
+<pre><code translate="no">const dbsc = createDbsc({ storage });
 dbsc.install(app);
 await dbsc.bind(ctx, sessionId, { userId });</code></pre>
       </article>
 
       <article class="fw reveal" id="sveltekit">
-        <div class="fwhead"><h3>DBSC for SvelteKit</h3><span class="imp">dbsc-toolkit/sveltekit</span></div>
-        <p>A <code>handle</code> hook answers the routes; bind and guard inside actions.</p>
-<pre><code>// hooks.server.ts
+        <div class="fwhead"><h3>DBSC for SvelteKit</h3><span class="imp" translate="no">dbsc-toolkit/sveltekit</span></div>
+        <p>A <code translate="no">handle</code> hook answers the routes; bind and guard inside actions.</p>
+<pre><code translate="no">// hooks.server.ts
 export const handle = dbscHandle({ storage });
 // await requireProof()(event) in a +server</code></pre>
       </article>
 
       <article class="fw reveal span2" id="node">
-        <div class="fwhead"><h3>Any other server, via raw node:http or the core</h3><span class="imp">dbsc-toolkit/node</span></div>
-        <p>No adapter for your framework? The generic <code>node:http</code> handler works with any server that exposes the Node request and response objects, and the framework-agnostic core (<code>handleRegistration</code>, <code>handleRefresh</code>, <code>verifyBoundProof</code> plus a <code>StorageAdapter</code>) wires into anything.</p>
-<pre><code>const handle = dbsc.handler();
+        <div class="fwhead"><h3>Any Other Server, via raw node:http or the core</h3><span class="imp" translate="no">dbsc-toolkit/node</span></div>
+        <p>No adapter for your framework? The generic <code translate="no">node:http</code> handler works with any server that exposes the Node request and response objects, and the framework-agnostic core (<code translate="no">handleRegistration</code>, <code translate="no">handleRefresh</code>, <code translate="no">verifyBoundProof</code> plus a <code translate="no">StorageAdapter</code>) wires into anything.</p>
+<pre><code translate="no">const handle = dbsc.handler();
 createServer(async (req, res) => {
   if (await handle(req, res)) return; // protocol route answered
   // ... your routes; read getDbscSession(req)
@@ -420,14 +434,14 @@ createServer(async (req, res) => {
 <section class="alt install" id="install">
   <div class="wrap">
     <div class="reveal">
-      <h2 class="h2">Install and bind in minutes</h2>
+      <h2 class="h2">Install and Bind in Minutes</h2>
       <p class="sec-lead" style="margin-bottom:24px;">One dependency, optional framework and storage peers. Memory storage to start; Redis or Postgres for production.</p>
-      <div class="copybox"><span class="cmd">npm install dbsc-toolkit</span></div>
-      <a class="btn btn-primary" href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/blob/main/docs/getting-started.md">Read the quickstart</a>
+      <div class="copybox"><span class="cmd" translate="no">npm install dbsc-toolkit</span></div>
+      <a class="btn btn-primary" href="./docs.html?doc=docs/getting-started.md">Read the Quickstart</a>
     </div>
     <div class="panel reveal">
-      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="fname">payment.js</span></div>
-<pre><code><span class="tok-c">// guard a sensitive route. A replayed cookie</span>
+      <div class="bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span class="fname">payment.js</span></div>
+<pre><code translate="no"><span class="tok-c">// guard a sensitive route. a replayed cookie</span>
 <span class="tok-c">// from another device is rejected on arrival.</span>
 app.<span class="tok-f">post</span>(<span class="tok-s">"/payment"</span>, dbsc.<span class="tok-f">requireProof</span>(), (req, res) => {
   res.<span class="tok-f">json</span>({ ok: <span class="tok-k">true</span>, tier: res.locals.dbsc.tier });
@@ -436,35 +450,61 @@ app.<span class="tok-f">post</span>(<span class="tok-s">"/payment"</span>, dbsc.
   </div>
 </section>
 
-<section id="spec">
+<section id="learn">
   <div class="wrap">
-    <h2 class="h2 reveal">A spec, not just a library</h2>
+    <h2 class="h2 reveal">Learn the Protocol</h2>
+    <p class="sec-lead reveal">Full documentation on this site, plus deep dives written from shipping it against real hardware.</p>
+    <div class="learn">
+      <a class="lc reveal" href="./docs.html?doc=docs/getting-started.md">
+        <h3>Getting Started</h3>
+        <p>Zero to a bound session on Express in under five minutes, with the failure modes called out.</p>
+        <span class="go">Open guide</span>
+      </a>
+      <a class="lc reveal" href="./docs.html?doc=docs/blog/dbsc-explained.md">
+        <h3>How DBSC Works</h3>
+        <p>The whole protocol end to end, framework-free. Registration, refresh, the tier model, and what it protects.</p>
+        <span class="go">Read the explainer</span>
+      </a>
+      <a class="lc reveal" href="./docs.html?doc=docs/blog/what-dbsc-protects.md">
+        <h3>The Threat Boundary</h3>
+        <p>What DBSC stops and what it doesn’t. An honest read you can hand to a security review.</p>
+        <span class="go">See the limits</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="spec">
+  <div class="wrap">
+    <h2 class="h2 reveal">A Spec, Not Just a Library</h2>
     <p class="sec-lead reveal">The wire protocol is written up as a language-neutral specification with round-trip test vectors. Node is the reference implementation; the spec is what lets a conforming DBSC server be built in any language.</p>
     <div class="cred">
-      <div class="item reveal">
-        <div class="big">Language-neutral spec</div>
-        <p>Header grammar, JWS and JSON shapes, the storage and cookie contracts, and error codes. <a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/tree/main/spec">Read the spec</a></p>
+      <div class="reveal">
+        <div class="big">Language-Neutral Spec</div>
+        <p>Header grammar, JWS and JSON shapes, the storage and cookie contracts, and error codes. <a href="./docs.html?doc=spec/README.md">Read the spec</a></p>
       </div>
-      <div class="item reveal">
-        <div class="big">Round-trip test vectors</div>
+      <div class="reveal">
+        <div class="big">Round-Trip Test Vectors</div>
         <p>Known inputs and expected outputs, so any implementation self-checks without a browser. <a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/tree/main/spec/vectors">Test vectors</a></p>
       </div>
-      <div class="item reveal">
-        <div class="big">Verified end to end</div>
-        <p>Tested against Chrome 147 on real TPM 2.0 hardware, including the refresh cycle. <a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/blob/main/docs/blog/dbsc-explained.md">How it works</a></p>
+      <div class="reveal">
+        <div class="big">Verified End to End</div>
+        <p>Tested against Chrome 147 on real TPM 2.0 hardware, including the refresh cycle. <a href="./docs.html?doc=docs/blog/dbsc-explained.md">How it works</a></p>
       </div>
     </div>
   </div>
 </section>
 
-<footer class="site">
+</main>
+
+<footer class="site-footer">
   <div class="wrap">
     <span>dbsc-toolkit, Apache-2.0. Built by <a href="https://github.com/SulimanAbdulrazzaq">Suliman Abdulrazzaq</a>.</span>
     <span class="flinks">
+      <a href="./docs.html">Docs</a>
       <a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit">GitHub</a>
       <a href="https://www.npmjs.com/package/dbsc-toolkit">npm</a>
       <a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/tree/main/spec">Spec</a>
-      <a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/tree/main/docs">Docs</a>
     </span>
   </div>
 </footer>
@@ -474,7 +514,7 @@ app.<span class="tok-f">post</span>(<span class="tok-s">"/payment"</span>, dbsc.
     if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
-    }, { threshold: 0.12 });
+    }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
     document.querySelectorAll(".reveal").forEach(function (el) { io.observe(el); });
   })();
 </script>

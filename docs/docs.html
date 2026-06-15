@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docs - dbsc-toolkit | Device Bound Session Credentials for Node.js</title>
+<meta name="description" content="Documentation for dbsc-toolkit: getting started, framework adapters, per-request signing, storage, deployment, the language-neutral DBSC spec, and security guides.">
+<link rel="canonical" href="https://sulimanabdulrazzaq.github.io/dbsc-toolkit/docs.html">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a0d12" media="(prefers-color-scheme: dark)">
+
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://raw.githubusercontent.com" crossorigin>
+<link rel="stylesheet" media="(prefers-color-scheme: light)" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11/styles/github.min.css">
+<link rel="stylesheet" media="(prefers-color-scheme: dark)" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11/styles/github-dark.min.css">
+
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff; --bg-soft: #f7f9fb; --panel: #ffffff;
+  --text: #0e1319; --muted: #586573; --faint: #8a94a2;
+  --border: #e6eaef; --border-strong: #d3dae2;
+  --accent: #0b8049; --accent-bg: #0b8049; --on-accent: #ffffff;
+  --accent-soft: rgba(11,128,73,.08);
+  --code-bg: #f7f9fb;
+  --r: 12px; --r-sm: 9px; --side: 264px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0a0d12; --bg-soft: #0e131b; --panel: #11161f;
+    --text: #e9eef4; --muted: #99a4b3; --faint: #69737f;
+    --border: #1c242f; --border-strong: #2a3340;
+    --accent: #4ce29a; --accent-bg: #2ec47e; --on-accent: #04130b;
+    --accent-soft: rgba(76,226,154,.10);
+    --code-bg: #0d121a;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: 84px; }
+body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 16px; line-height: 1.65; color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
+code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+:where(a, button, [tabindex]):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+.skip { position: absolute; left: -999px; top: 8px; z-index: 100; background: var(--panel); border: 1px solid var(--border-strong); padding: 10px 16px; border-radius: var(--r-sm); color: var(--text); }
+.skip:focus { left: 16px; }
+
+/* nav */
+.nav { position: sticky; top: 0; z-index: 50; height: 64px; display: flex; align-items: center; background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: saturate(160%) blur(12px); -webkit-backdrop-filter: saturate(160%) blur(12px); border-bottom: 1px solid var(--border); }
+.nav .inner { display: flex; align-items: center; justify-content: space-between; width: 100%; max-width: 1280px; margin: 0 auto; padding: 0 24px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 660; letter-spacing: -0.015em; color: var(--text); font-size: 15.5px; }
+.brand:hover { text-decoration: none; }
+.brand .mark { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(140deg, var(--accent-bg), color-mix(in srgb, var(--accent-bg) 55%, #000)); box-shadow: inset 0 1px 0 rgba(255,255,255,.25); }
+.nav-links { display: flex; align-items: center; gap: 4px; }
+.nav-links a { color: var(--muted); font-size: 14.5px; font-weight: 500; padding: 8px 12px; border-radius: var(--r-sm); }
+.nav-links a:hover { color: var(--text); text-decoration: none; background: var(--bg-soft); }
+.menu-toggle { display: none; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--border-strong); color: var(--text); font: inherit; font-size: 14px; font-weight: 600; padding: 8px 14px; border-radius: var(--r-sm); cursor: pointer; }
+
+/* layout */
+.layout { max-width: 1280px; margin: 0 auto; display: grid; grid-template-columns: var(--side) minmax(0, 1fr); gap: 0; }
+.sidebar { border-right: 1px solid var(--border); padding: 28px 16px 64px; position: sticky; top: 64px; align-self: start; height: calc(100dvh - 64px); overflow-y: auto; }
+.sidebar .group { margin-bottom: 22px; }
+.sidebar .group h2 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); margin: 0 0 8px; padding: 0 10px; font-weight: 650; }
+.sidebar a { display: block; color: var(--muted); font-size: 14px; padding: 6px 10px; border-radius: 7px; line-height: 1.4; }
+.sidebar a:hover { color: var(--text); background: var(--bg-soft); text-decoration: none; }
+.sidebar a.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.content-wrap { padding: 40px 48px 96px; min-width: 0; }
+.content { max-width: 760px; }
+
+/* markdown */
+.md { font-size: 16px; }
+.md > *:first-child { margin-top: 0; }
+.md h1 { font-size: 2rem; letter-spacing: -0.03em; line-height: 1.15; margin: 0 0 8px; font-weight: 720; text-wrap: balance; }
+.md h2 { font-size: 1.45rem; letter-spacing: -0.02em; margin: 44px 0 14px; padding-top: 10px; font-weight: 680; border-top: 1px solid var(--border); scroll-margin-top: 84px; }
+.md h3 { font-size: 1.16rem; letter-spacing: -0.01em; margin: 30px 0 10px; font-weight: 650; scroll-margin-top: 84px; }
+.md h4 { font-size: 1rem; margin: 24px 0 8px; font-weight: 650; }
+.md p, .md li { color: var(--text); }
+.md p { margin: 14px 0; text-wrap: pretty; }
+.md a { font-weight: 500; }
+.md ul, .md ol { padding-left: 22px; margin: 14px 0; }
+.md li { margin: 6px 0; }
+.md li::marker { color: var(--faint); }
+.md strong { font-weight: 650; }
+.md code { font-size: 0.86em; background: var(--accent-soft); color: var(--accent); padding: 0.12em 0.42em; border-radius: 6px; }
+.md pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--r); padding: 16px 18px; overflow-x: auto; margin: 18px 0; }
+.md pre code { background: none; color: inherit; padding: 0; font-size: 13px; line-height: 1.7; }
+.md pre code.hljs { background: transparent; padding: 0; }
+.md blockquote { margin: 18px 0; padding: 4px 18px; border-left: 3px solid var(--accent); color: var(--muted); background: var(--accent-soft); border-radius: 0 8px 8px 0; }
+.md blockquote p { margin: 8px 0; }
+.md table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 0.92rem; display: block; overflow-x: auto; }
+.md th, .md td { text-align: left; padding: 10px 14px; border: 1px solid var(--border); }
+.md th { background: var(--bg-soft); font-weight: 640; }
+.md hr { border: none; border-top: 1px solid var(--border); margin: 36px 0; }
+.md img { max-width: 100%; height: auto; border-radius: 8px; }
+.md .mermaid { margin: 22px 0; text-align: center; }
+.docfoot { margin-top: 52px; padding-top: 22px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: 0.9rem; color: var(--muted); }
+
+/* states */
+.state { color: var(--muted); font-size: 0.95rem; padding: 8px 0; }
+.skeleton { height: 14px; border-radius: 6px; background: linear-gradient(90deg, var(--bg-soft), var(--border), var(--bg-soft)); background-size: 200% 100%; animation: sk 1.2s ease-in-out infinite; margin: 12px 0; }
+.skeleton.t { height: 30px; width: 55%; margin-bottom: 22px; }
+.skeleton.s { width: 90%; } .skeleton.s2 { width: 80%; }
+@keyframes sk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+
+@media (max-width: 900px) {
+  .menu-toggle { display: inline-flex; }
+  .nav-links a.hideable { display: none; }
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { position: fixed; inset: 64px 0 0 0; height: auto; z-index: 40; background: var(--bg); border-right: none; border-bottom: 1px solid var(--border); padding: 20px 20px 80px; transform: translateX(-100%); transition: transform .2s ease; }
+  .sidebar.open { transform: none; }
+  .content-wrap { padding: 28px 20px 80px; }
+  @media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#doc">Skip to content</a>
+
+<header class="nav">
+  <div class="inner">
+    <a class="brand" href="./" translate="no"><span class="mark" aria-hidden="true"></span>dbsc-toolkit</a>
+    <div class="nav-links">
+      <button class="menu-toggle" id="menuToggle" aria-expanded="false" aria-controls="sidebar">Menu</button>
+      <a class="hideable" href="./">Home</a>
+      <a class="hideable" href="https://www.npmjs.com/package/dbsc-toolkit">npm</a>
+      <a class="hideable" href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation"></nav>
+  <div class="content-wrap">
+    <article id="doc" class="content md" tabindex="-1" aria-live="polite" aria-busy="true">
+      <div class="skeleton t"></div>
+      <div class="skeleton s"></div>
+      <div class="skeleton s2"></div>
+      <div class="skeleton s"></div>
+    </article>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+(function () {
+  var RAW = "https://raw.githubusercontent.com/SulimanAbdulrazzaq/dbsc-toolkit/main/";
+  var BLOB = "https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/blob/main/";
+
+  var TREE = [
+    { group: "Start", items: [
+      ["docs/getting-started.md", "Getting Started"],
+      ["docs/integrating-existing-auth.md", "Add to Existing Auth"],
+      ["docs/usage.md", "Usage"],
+    ]},
+    { group: "Adapters", items: [
+      ["docs/adapters.md", "Adapters"],
+      ["docs/integration-recipes.md", "Integration Recipes"],
+    ]},
+    { group: "Guides", items: [
+      ["docs/per-request-signing.md", "Per-Request Signing"],
+      ["docs/bound-polyfill.md", "Bound Polyfill"],
+      ["docs/storage.md", "Storage"],
+      ["docs/deployment.md", "Deployment"],
+      ["docs/telemetry.md", "Telemetry"],
+      ["docs/troubleshooting.md", "Troubleshooting"],
+    ]},
+    { group: "Reference", items: [
+      ["docs/api-reference.md", "API Reference"],
+      ["docs/protocol.md", "Protocol"],
+      ["HOW-IT-WORKS.md", "How It Works"],
+    ]},
+    { group: "Security", items: [
+      ["docs/security/threat-model.md", "Threat Model"],
+      ["docs/security/best-practices.md", "Best Practices"],
+    ]},
+    { group: "Specification", items: [
+      ["spec/README.md", "Spec Overview"],
+      ["spec/01-overview.md", "01 Overview"],
+      ["spec/02-native-protocol.md", "02 Native Protocol"],
+      ["spec/03-bound-protocol.md", "03 Bound Protocol"],
+      ["spec/04-per-request-proof.md", "04 Per-Request Proof"],
+      ["spec/05-crypto.md", "05 Crypto"],
+      ["spec/06-storage-contract.md", "06 Storage Contract"],
+      ["spec/07-cookies.md", "07 Cookies"],
+      ["spec/08-errors.md", "08 Errors"],
+      ["spec/09-conformance.md", "09 Conformance"],
+    ]},
+    { group: "Deep Dives", items: [
+      ["docs/blog/dbsc-explained.md", "DBSC Explained"],
+      ["docs/blog/implementing-dbsc-on-express.md", "Implementing on Express"],
+      ["docs/blog/implementing-dbsc-server-side.md", "Server-Side Guide"],
+      ["docs/blog/what-dbsc-protects.md", "The Threat Boundary"],
+    ]},
+  ];
+
+  var KNOWN = {}; var TITLES = {};
+  TREE.forEach(function (g) { g.items.forEach(function (it) { KNOWN[it[0]] = true; TITLES[it[0]] = it[1]; }); });
+  var DEFAULT = "docs/getting-started.md";
+
+  var docEl = document.getElementById("doc");
+  var sidebar = document.getElementById("sidebar");
+  var menuToggle = document.getElementById("menuToggle");
+  var darkMQ = window.matchMedia("(prefers-color-scheme: dark)");
+
+  try {
+    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: darkMQ.matches ? "dark" : "neutral" });
+  } catch (e) {}
+
+  // build sidebar
+  TREE.forEach(function (g) {
+    var sec = document.createElement("div"); sec.className = "group";
+    var h = document.createElement("h2"); h.textContent = g.group; sec.appendChild(h);
+    g.items.forEach(function (it) {
+      var a = document.createElement("a");
+      a.href = "?doc=" + encodeURIComponent(it[0]);
+      a.textContent = it[1];
+      a.dataset.path = it[0];
+      a.addEventListener("click", function (ev) {
+        if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button === 1) return;
+        ev.preventDefault();
+        navigate(it[0], true);
+        closeSidebarMobile();
+      });
+      sec.appendChild(a);
+    });
+    sidebar.appendChild(sec);
+  });
+
+  function setActive(path) {
+    sidebar.querySelectorAll("a").forEach(function (a) {
+      var on = a.dataset.path === path;
+      a.classList.toggle("active", on);
+      if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+    });
+  }
+
+  function stripFrontMatter(md) {
+    if (md.slice(0, 4) === "---\n") {
+      var end = md.indexOf("\n---", 4);
+      if (end !== -1) {
+        var after = md.indexOf("\n", end + 1);
+        return after !== -1 ? md.slice(after + 1) : "";
+      }
+    }
+    return md;
+  }
+
+  function slug(s) { return s.toLowerCase().replace(/[^\w]+/g, "-").replace(/^-+|-+$/g, ""); }
+
+  function dirname(p) { var i = p.lastIndexOf("/"); return i === -1 ? "" : p.slice(0, i + 1); }
+  function resolvePath(base, rel) {
+    rel = rel.replace(/^\.\//, "");
+    var stack = (dirname(base) + rel).split("/");
+    var out = [];
+    stack.forEach(function (seg) {
+      if (seg === "..") out.pop();
+      else if (seg !== "." && seg !== "") out.push(seg);
+    });
+    return out.join("/");
+  }
+
+  function rewriteLinks(container, currentPath) {
+    container.querySelectorAll("a[href]").forEach(function (a) {
+      var href = a.getAttribute("href");
+      if (!href || href.charAt(0) === "#") return;
+      var docPath = null;
+      if (/^https?:\/\//i.test(href)) {
+        if (href.indexOf(BLOB) === 0 && /\.md(#|$)/i.test(href)) docPath = href.slice(BLOB.length).split("#")[0];
+      } else if (/\.md(#|$)/i.test(href)) {
+        docPath = resolvePath(currentPath, href.split("#")[0]);
+      }
+      if (docPath && KNOWN[docPath]) {
+        a.setAttribute("href", "?doc=" + encodeURIComponent(docPath));
+        a.addEventListener("click", function (ev) {
+          if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button === 1) return;
+          ev.preventDefault(); navigate(docPath, true);
+        });
+      } else if (docPath) {
+        a.setAttribute("href", BLOB + docPath);
+        a.setAttribute("target", "_blank"); a.setAttribute("rel", "noopener");
+      } else if (/^https?:\/\//i.test(href)) {
+        a.setAttribute("target", "_blank"); a.setAttribute("rel", "noopener");
+      }
+    });
+  }
+
+  function renderState(html) { docEl.innerHTML = html; }
+
+  function showSkeleton() {
+    docEl.setAttribute("aria-busy", "true");
+    renderState('<div class="skeleton t"></div><div class="skeleton s"></div><div class="skeleton s2"></div><div class="skeleton s"></div><div class="skeleton s2"></div>');
+  }
+
+  function load(path) {
+    showSkeleton();
+    fetch(RAW + path, { cache: "no-cache" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.text();
+    }).then(function (md) {
+      var html = marked.parse(stripFrontMatter(md), { gfm: true, breaks: false });
+      docEl.innerHTML = html;
+      // headings: ids + anchors
+      docEl.querySelectorAll("h2, h3").forEach(function (h) { if (!h.id) h.id = slug(h.textContent); });
+      // mermaid blocks
+      var mer = [];
+      docEl.querySelectorAll("pre code.language-mermaid").forEach(function (c) {
+        var div = document.createElement("div"); div.className = "mermaid"; div.textContent = c.textContent;
+        c.parentElement.replaceWith(div); mer.push(div);
+      });
+      // highlight the rest
+      docEl.querySelectorAll("pre code").forEach(function (c) {
+        if (!c.classList.contains("language-mermaid")) { try { hljs.highlightElement(c); } catch (e) {} }
+      });
+      if (mer.length) { try { mermaid.run({ nodes: mer }); } catch (e) {} }
+      rewriteLinks(docEl, path);
+      // footer
+      var foot = document.createElement("div"); foot.className = "docfoot";
+      foot.innerHTML = '<span>On this site, rendered from the repository.</span>' +
+        '<a href="' + BLOB + path + '" target="_blank" rel="noopener">Edit on GitHub</a>';
+      docEl.appendChild(foot);
+      docEl.setAttribute("aria-busy", "false");
+      document.title = (TITLES[path] || "Docs") + " - dbsc-toolkit";
+    }).catch(function (err) {
+      docEl.setAttribute("aria-busy", "false");
+      renderState('<h1>Could not load this page</h1><p class="state">' + String(err.message) +
+        '. The document may have moved. <a href="' + BLOB + path + '" target="_blank" rel="noopener">Open it on GitHub</a> or <a href="?doc=' + encodeURIComponent(DEFAULT) + '">return to Getting Started</a>.</p>');
+    });
+  }
+
+  function currentDocFromUrl() {
+    var p = new URLSearchParams(location.search).get("doc");
+    return p && KNOWN[p] ? p : DEFAULT;
+  }
+
+  function navigate(path, push) {
+    if (push) history.pushState({ doc: path }, "", "?doc=" + encodeURIComponent(path));
+    setActive(path);
+    load(path);
+    docEl.focus({ preventScroll: true });
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+
+  function closeSidebarMobile() {
+    if (sidebar.classList.contains("open")) { sidebar.classList.remove("open"); menuToggle.setAttribute("aria-expanded", "false"); }
+  }
+  menuToggle.addEventListener("click", function () {
+    var open = sidebar.classList.toggle("open");
+    menuToggle.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+
+  window.addEventListener("popstate", function () { var p = currentDocFromUrl(); setActive(p); load(p); });
+  if (darkMQ.addEventListener) darkMQ.addEventListener("change", function () { var p = currentDocFromUrl(); load(p); });
+
+  var start = currentDocFromUrl();
+  setActive(start);
+  load(start);
+})();
+</script>
+</body>
+</html>
