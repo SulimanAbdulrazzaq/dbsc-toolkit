@@ -3,6 +3,33 @@
   <url>
     <loc>https://sulimanabdulrazzaq.github.io/dbsc-toolkit/</loc>
     <changefreq>weekly</changefreq>
-    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://sulimanabdulrazzaq.github.io/dbsc-toolkit/express.html</loc>
+    <changefreq>weekly</changefreq>
+  </url>
+  <url>
+    <loc>https://sulimanabdulrazzaq.github.io/dbsc-toolkit/fastify.html</loc>
+    <changefreq>weekly</changefreq>
+  </url>
+  <url>
+    <loc>https://sulimanabdulrazzaq.github.io/dbsc-toolkit/hono.html</loc>
+    <changefreq>weekly</changefreq>
+  </url>
+  <url>
+    <loc>https://sulimanabdulrazzaq.github.io/dbsc-toolkit/nextjs.html</loc>
+    <changefreq>weekly</changefreq>
+  </url>
+  <url>
+    <loc>https://sulimanabdulrazzaq.github.io/dbsc-toolkit/nestjs.html</loc>
+    <changefreq>weekly</changefreq>
+  </url>
+  <url>
+    <loc>https://sulimanabdulrazzaq.github.io/dbsc-toolkit/koa.html</loc>
+    <changefreq>weekly</changefreq>
+  </url>
+  <url>
+    <loc>https://sulimanabdulrazzaq.github.io/dbsc-toolkit/sveltekit.html</loc>
+    <changefreq>weekly</changefreq>
   </url>
 </urlset>

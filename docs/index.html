@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="google-site-verification" content="V5kAcz-9nxiWlnN3Djzai3vT18xyFfd0bw7Xbc07SjM" />
 <title>DBSC for Node.js — Device Bound Session Credentials Server Library | dbsc-toolkit</title>
-<meta name="description" content="Server-side Device Bound Session Credentials (DBSC) for Node.js. Express, Fastify, Hono and Next.js middleware that binds session cookies to a hardware TPM key to stop cookie theft — plus a Web Crypto polyfill for Firefox and Safari.">
+<meta name="description" content="Server-side Device Bound Session Credentials (DBSC) for Node.js — works with any framework. Express, Fastify, Hono, Next.js, NestJS, Koa and SvelteKit adapters that bind session cookies to a hardware TPM key to stop cookie theft, plus a Web Crypto polyfill for Firefox and Safari.">
 <link rel="canonical" href="https://sulimanabdulrazzaq.github.io/dbsc-toolkit/">
 <meta name="robots" content="index, follow">
 
 <meta property="og:type" content="website">
 <meta property="og:title" content="DBSC for Node.js — Device Bound Session Credentials Server Library">
-<meta property="og:description" content="Bind session cookies to a hardware key so a stolen cookie can't be replayed. DBSC for Express, Fastify, Hono and Next.js, with a Web Crypto polyfill for every other browser.">
+<meta property="og:description" content="Bind session cookies to a hardware key so a stolen cookie can't be replayed. DBSC for Express, Fastify, Hono, Next.js, NestJS, Koa and SvelteKit — or any framework via the core — with a Web Crypto polyfill for every other browser.">
 <meta property="og:url" content="https://sulimanabdulrazzaq.github.io/dbsc-toolkit/">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="DBSC for Node.js — Device Bound Session Credentials Server Library">
@@ -22,13 +22,13 @@
   "@context": "https://schema.org",
   "@type": "SoftwareSourceCode",
   "name": "dbsc-toolkit",
-  "description": "Server-side Device Bound Session Credentials (DBSC) for Node.js, with Express, Fastify, Hono and Next.js adapters and a Web Crypto polyfill for non-Chromium browsers.",
+  "description": "Server-side Device Bound Session Credentials (DBSC) for Node.js, with Express, Fastify, Hono, Next.js, NestJS, Koa and SvelteKit adapters and a Web Crypto polyfill for non-Chromium browsers.",
   "codeRepository": "https://github.com/SulimanAbdulrazzaq/dbsc-toolkit",
   "programmingLanguage": "TypeScript",
   "runtimePlatform": "Node.js",
   "license": "https://www.apache.org/licenses/LICENSE-2.0",
   "author": { "@type": "Person", "name": "Suliman Abdulrazzaq" },
-  "keywords": "DBSC, Device Bound Session Credentials, Node.js, Express, Fastify, Hono, Next.js, cookie theft, session security, TPM, Web Crypto"
+  "keywords": "DBSC, Device Bound Session Credentials, Node.js, Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, cookie theft, session security, TPM, Web Crypto"
 }
 </script>
 
@@ -63,7 +63,7 @@ footer { margin: 56px 0 40px; padding-top: 24px; border-top: 1px solid #d0d7de; 
 
 <header>
   <h1>Device Bound Session Credentials (DBSC) for Node.js</h1>
-  <p class="sub">Bind session cookies to a hardware key so a stolen cookie can't be replayed on another device. A DBSC server library for Express, Fastify, Hono and Next.js — with a Web Crypto polyfill so Firefox and Safari are covered too.</p>
+  <p class="sub">Bind session cookies to a hardware key so a stolen cookie can't be replayed on another device. A DBSC server library that works with any Node.js framework — Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, or raw <code>node:http</code> — with a Web Crypto polyfill so Firefox and Safari are covered too.</p>
   <p class="cta">
     <a class="primary" href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit">View on GitHub</a>
     <a href="https://www.npmjs.com/package/dbsc-toolkit">npm: dbsc-toolkit</a>
@@ -100,8 +100,18 @@ app.post("/login", async (req, res) => {
   <div class="card"><h3>tier: none</h3><p>Unbound or stale. Your app decides what each tier is allowed to do via a single route guard.</p></div>
 </div>
 
-<h2>Framework adapters</h2>
-<p>The same core protocol ships as middleware for the main Node.js stacks: <strong>Express</strong>, <strong>Fastify</strong>, <strong>Hono</strong> (Node, Bun, Deno, Workers) and <strong>Next.js</strong> App Router. Storage adapters for in-memory, Redis and Postgres. There is also a <a href="https://www.npmjs.com/package/@dbsc-toolkit/better-auth">Better Auth plugin</a>.</p>
+<h2>Works with any framework</h2>
+<p>The same core protocol ships as a thin adapter for every major Node.js stack. Not on the list? The framework-agnostic core (<code>handleRegistration</code>, <code>handleRefresh</code>, <code>verifyBoundProof</code> + a <code>StorageAdapter</code>) wires into anything — any HTTP framework on Node works even without a dedicated adapter. Storage adapters for in-memory, Redis and Postgres, plus a <a href="https://www.npmjs.com/package/@dbsc-toolkit/better-auth">Better Auth plugin</a>.</p>
+<ul>
+  <li>DBSC for <a href="./express.html">Express</a></li>
+  <li>DBSC for <a href="./fastify.html">Fastify</a></li>
+  <li>DBSC for <a href="./hono.html">Hono</a> (Node, Bun, Deno, Workers)</li>
+  <li>DBSC for <a href="./nextjs.html">Next.js</a> (App Router)</li>
+  <li>DBSC for <a href="./nestjs.html">NestJS</a></li>
+  <li>DBSC for <a href="./koa.html">Koa</a></li>
+  <li>DBSC for <a href="./sveltekit.html">SvelteKit</a></li>
+  <li>Any other server — the generic <code>dbsc-toolkit/node</code> handler over raw <code>node:http</code></li>
+</ul>
 
 <h2>Documentation</h2>
 <ul>
