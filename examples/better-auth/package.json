@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@dbsc-toolkit/better-auth": "workspace:*",
-    "better-auth": "^1.2.0",
+    "better-auth": "^1.6.18",
     "better-sqlite3": "^12.10.0",
     "cookie-parser": "^1.4.7",
     "dbsc-toolkit": "workspace:*",
