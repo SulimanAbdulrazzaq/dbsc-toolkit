@@ -1,39 +1,75 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>DBSC Toolkit — JWT mode</title>
+<title>DBSC Toolkit JWT mode</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0c0e12">
 <style>
-  body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #1a1d24; line-height: 1.5; }
-  h1 { margin: 0 0 0.2rem; font-size: 1.5rem; }
-  p.lede { color: #5a6170; font-size: 0.95rem; }
-  .card { border: 1px solid #e1e4ea; border-radius: 8px; padding: 1rem 1.1rem; margin: 0.8rem 0; }
-  input { padding: 0.5rem 0.6rem; margin: 0 0.3rem 0.4rem 0; font-size: 0.95rem; border: 1px solid #e1e4ea; border-radius: 4px; width: 200px; max-width: 100%; }
-  button { padding: 0.5rem 0.95rem; font-size: 0.9rem; cursor: pointer; border: 1px solid #e1e4ea; background: white; border-radius: 4px; margin: 0 0.3rem 0.4rem 0; font-weight: 500; }
-  button.primary { background: #2b3a55; color: white; border-color: #2b3a55; }
-  pre { background: #0e1320; color: #e3e8f0; padding: 0.85rem 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.78rem; }
-  code { background: #f6f7f9; padding: 0.08rem 0.3rem; border-radius: 3px; font-size: 0.85em; }
-  a { color: #2b3a55; }
+  :root {
+    --bg: #0c0e12; --bg-1: #12151c; --bg-2: #171b24; --line: #242a36; --line-2: #2f3644;
+    --ink: #e7ecf3; --muted: #8a93a6; --faint: #5d6678; --accent: #34d399; --accent-ink: #052e1f; --accent-dim: #1f3b32;
+    --r: 10px; --r-sm: 7px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; }
+  body { font-family: var(--sans); max-width: 760px; margin: 0 auto; padding: 2.5rem 1.25rem 3rem; color: var(--ink); line-height: 1.55; background: radial-gradient(900px 420px at 80% -10%, rgba(52,211,153,0.06), transparent 60%), var(--bg); -webkit-font-smoothing: antialiased; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+  .mark { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.12em; color: var(--accent); border: 1px solid var(--accent-dim); background: rgba(52,211,153,0.06); padding: 0.2rem 0.5rem; border-radius: 999px; }
+  h1 { margin: 0.7rem 0 0.35rem; font-size: clamp(1.5rem, 4vw, 1.9rem); letter-spacing: -0.02em; }
+  p.lede { color: var(--muted); font-size: 0.95rem; max-width: 65ch; }
+  .back { font-family: var(--mono); font-size: 0.82rem; }
+  .card { border: 1px solid var(--line); border-radius: var(--r); padding: 1.05rem 1.15rem; margin: 1rem 0; background: var(--bg-1); }
+  .field-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.8rem; }
+  .field { display: flex; flex-direction: column; gap: 0.3rem; }
+  label { font-size: 0.78rem; color: var(--muted); font-weight: 500; }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  input { padding: 0.55rem 0.7rem; font-size: 16px; border: 1px solid var(--line); border-radius: var(--r-sm); width: 220px; max-width: 100%; background: var(--bg-2); color: var(--ink); font-family: var(--mono); }
+  input::placeholder { color: var(--faint); }
+  input:focus-visible { border-color: var(--accent); outline-offset: 0; }
+  button { padding: 0.5rem 0.9rem; font-size: 0.875rem; cursor: pointer; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink); border-radius: var(--r-sm); font-weight: 500; font-family: var(--sans); touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: transform 0.08s ease, background 0.16s ease; }
+  button:hover { background: var(--bg-1); border-color: var(--faint); }
+  button:active { transform: translateY(1px); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button.primary:hover { background: #2bbe89; }
+  pre { background: #0a0c10; color: #cfe3da; padding: 0.85rem 0.95rem; border-radius: var(--r-sm); overflow-x: auto; font-size: 0.78rem; line-height: 1.55; font-family: var(--mono); font-variant-numeric: tabular-nums; border: 1px solid var(--line); }
+  code { background: var(--bg-2); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.84em; font-family: var(--mono); color: #bcd; border: 1px solid var(--line); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
 <body>
-<h1>DBSC Toolkit — JWT mode</h1>
-<p class="lede">Stateless login: signed cookie, no server session row (NextAuth-JWT / iron-session / Lucia shape). <code>dbsc.bind(res, { userId })</code> is called with no id — the kit derives a stable one with <code>deriveSessionId</code> so refresh finds the same binding.</p>
+<span class="mark" translate="no">dbsc-toolkit</span>
+<span class="mark" translate="no">JWT mode</span>
+<h1>JWT-mode binding console</h1>
+<p class="lede">Stateless login: signed cookie, no server session row (NextAuth-JWT, iron-session, or Lucia shape). <code translate="no">dbsc.bind(res, { userId })</code> is called with no id, so the kit derives a stable one with <code translate="no">deriveSessionId</code> and refresh finds the same binding.</p>
 
-<p><a href="/">← back to the cookie-session demo</a></p>
+<p class="back"><a href="/">Back to the cookie-session console</a></p>
 
 <div class="card">
-  <input type="text" id="username" placeholder="username" autocomplete="username">
-  <input type="password" id="password" placeholder="password" autocomplete="current-password">
-  <br>
-  <button id="login-btn" class="primary">Sign in (JWT mode)</button>
-  <button id="me-btn">Check session (/me)</button>
-  <button id="profile-btn">GET /profile (signed)</button>
-  <button id="logout-btn">Sign out</button>
+  <div class="field-row">
+    <div class="field">
+      <label for="username">Username</label>
+      <input type="text" id="username" placeholder="ada" autocomplete="username" spellcheck="false" autocapitalize="none">
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input type="password" id="password" placeholder="password" autocomplete="current-password">
+    </div>
+  </div>
+  <div class="btn-row">
+    <button id="login-btn" class="primary">Sign in (JWT mode)</button>
+    <button id="me-btn">Check session (/me)</button>
+    <button id="profile-btn">GET /profile (signed)</button>
+    <button id="logout-btn">Sign out</button>
+  </div>
 </div>
 
-<pre id="out">(output appears here)</pre>
+<pre id="out">Sign in to see the output here.</pre>
 
 <script type="module">
   import { initBoundDbsc, wrapFetch, clearBoundKey } from "/dbsc-client/index.js";

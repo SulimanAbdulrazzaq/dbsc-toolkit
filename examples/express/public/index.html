@@ -1,198 +1,280 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>DBSC Toolkit — demo</title>
+<title>DBSC Toolkit demo console</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0c0e12">
 <style>
   :root {
-    --ink: #1a1d24;
-    --muted: #5a6170;
-    --line: #e1e4ea;
-    --bg-soft: #f6f7f9;
-    --accent: #2b3a55;
-    --ok: #1e7a3f;
-    --ok-bg: #e7f4ec;
-    --warn: #8a5b00;
-    --warn-bg: #fff3cd;
-    --bad: #a3231b;
-    --bad-bg: #fde2e1;
+    --bg: #0c0e12;
+    --bg-1: #12151c;
+    --bg-2: #171b24;
+    --line: #242a36;
+    --line-2: #2f3644;
+    --ink: #e7ecf3;
+    --muted: #8a93a6;
+    --faint: #5d6678;
+    --accent: #34d399;
+    --accent-ink: #052e1f;
+    --accent-dim: #1f3b32;
+    --ok: #34d399;
+    --bad: #f87171;
+    --warn: #fbbf24;
+    --r: 10px;
+    --r-sm: 7px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
   }
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, system-ui, "Segoe UI", sans-serif; max-width: 1180px; margin: 2rem auto; padding: 0 1rem; color: var(--ink); line-height: 1.5; }
-  /* Two columns on wide screens: scrollable content left, sticky output right.
-     Below 920px it collapses to one column and the output becomes a fixed
-     bottom panel so a result is always visible without scrolling. */
-  .layout { display: grid; grid-template-columns: minmax(0,1fr) 380px; gap: 2rem; align-items: start; }
-  .main { min-width: 0; }
-  .sidebar { position: sticky; top: 1.5rem; }
-  .output-panel { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .output-panel .ohead { display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 0.85rem; background: var(--bg-soft); border-bottom: 1px solid var(--line); font-size: 0.8rem; font-weight: 600; color: var(--muted); }
-  .output-panel .ohead button { margin: 0; padding: 0.2rem 0.5rem; font-size: 0.72rem; }
-  @media (max-width: 920px) {
-    .layout { grid-template-columns: 1fr; }
-    .sidebar { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 50; padding: 0; background: var(--ink); }
-    .sidebar .output-panel { border-radius: 0; border: 0; max-height: 42vh; display: flex; flex-direction: column; }
-    .output-panel .obody { overflow-y: auto; }
-    .main { padding-bottom: 44vh; }
+  html { color-scheme: dark; }
+  body {
+    font-family: var(--sans);
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2.5rem 1.25rem 3rem;
+    color: var(--ink);
+    line-height: 1.55;
+    background:
+      radial-gradient(1100px 480px at 78% -8%, rgba(52,211,153,0.07), transparent 60%),
+      var(--bg);
+    -webkit-font-smoothing: antialiased;
   }
-  h1 { margin: 0 0 0.2rem; font-size: 1.7rem; }
-  h2 { margin-top: 2.4rem; font-size: 1.15rem; }
-  .lede { color: var(--muted); font-size: 0.95rem; margin-bottom: 1.4rem; }
-  .browser-badge { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.6rem; border-radius: 4px; background: var(--bg-soft); border: 1px solid var(--line); font-size: 0.82rem; color: var(--muted); margin-bottom: 0.8rem; }
-  .browser-badge strong { color: var(--ink); }
-  .storage-badge { display: inline-block; padding: 0.3rem 0.6rem; border-radius: 4px; font-size: 0.82rem; margin-left: 0.4rem; }
-  .storage-badge.persistent { background: var(--ok-bg); color: #143a22; border: 1px solid #b6dcc3; }
-  .storage-badge.ephemeral { background: var(--warn-bg); color: var(--warn); border: 1px solid #f0d68a; }
-  .tier-banner { padding: 1rem 1.2rem; border-radius: 8px; margin: 1rem 0 2rem; border: 1px solid var(--line); background: var(--bg-soft); }
-  .tier-banner.dbsc { background: var(--ok-bg); border-color: #b6dcc3; }
-  .tier-banner.bound { background: #eef3fb; border-color: #c8d4e8; }
-  .tier-banner.none { background: var(--warn-bg); border-color: #f0d68a; }
-  .tier-banner.unbound { background: var(--bg-soft); }
-  .tier-banner .tier-label { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-  .tier-banner .tier-value { font-size: 1.4rem; font-weight: 700; margin: 0.15rem 0; }
-  .tier-banner.dbsc .tier-value { color: var(--ok); }
-  .tier-banner.bound .tier-value { color: #2b3a55; }
-  .tier-banner.none .tier-value { color: var(--warn); }
-  .tier-banner p { margin: 0; font-size: 0.9rem; }
-  .card { border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.1rem; margin: 0.8rem 0; }
-  .card h3 { margin: 0 0 0.4rem; font-size: 1rem; }
-  .card p { margin: 0 0 0.7rem; color: var(--muted); font-size: 0.88rem; }
-  input { padding: 0.5rem 0.6rem; margin: 0 0.3rem 0.4rem 0; font-size: 0.95rem; border: 1px solid var(--line); border-radius: 4px; width: 200px; max-width: 100%; }
-  button { padding: 0.5rem 0.95rem; font-size: 0.9rem; cursor: pointer; border: 1px solid var(--line); background: white; border-radius: 4px; margin: 0 0.3rem 0.4rem 0; font-weight: 500; }
-  button:hover { background: var(--bg-soft); }
-  button.primary { background: var(--accent); color: white; border-color: var(--accent); }
-  button.primary:hover { background: #1f2c43; }
-  button.attack { border-color: #d4a3a0; color: var(--bad); }
-  button.attack:hover { background: var(--bad-bg); }
-  .explain { font-size: 0.88rem; padding: 0.75rem 0.9rem; border-radius: 6px; margin: 0.5rem 0; line-height: 1.45; }
-  .explain.ok { background: var(--ok-bg); color: #143a22; border-left: 3px solid var(--ok); }
-  .explain.bad { background: var(--bad-bg); color: #6a1611; border-left: 3px solid var(--bad); }
-  .explain.info { background: var(--bg-soft); color: var(--ink); border-left: 3px solid var(--accent); }
-  pre { background: #0e1320; color: #e3e8f0; padding: 0.85rem 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.78rem; margin: 0.5rem 0; }
-  .output-panel pre { max-height: 60vh; overflow-y: auto; }
-  .advanced { margin-top: 1rem; }
-  .advanced summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; padding: 0.4rem 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .skip { position: absolute; left: -9999px; top: 0; background: var(--accent); color: var(--accent-ink); padding: 0.5rem 0.8rem; border-radius: var(--r-sm); z-index: 100; font-weight: 600; }
+  .skip:focus { left: 0.75rem; top: 0.75rem; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+
+  .masthead { display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap; }
+  .mark { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.12em; color: var(--accent); border: 1px solid var(--accent-dim); background: rgba(52,211,153,0.06); padding: 0.2rem 0.5rem; border-radius: 999px; }
+  h1 { margin: 0.7rem 0 0.35rem; font-size: clamp(1.6rem, 4vw, 2.15rem); letter-spacing: -0.02em; line-height: 1.1; }
+  h2 { margin: 2.6rem 0 0.4rem; font-size: 1.05rem; letter-spacing: -0.01em; }
+  .lede { color: var(--muted); font-size: 0.96rem; max-width: 65ch; margin: 0 0 1.4rem; }
+  .section-note { color: var(--muted); font-size: 0.9rem; max-width: 70ch; margin: 0 0 1rem; }
+
+  .badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1.1rem 0 0; }
+  .browser-badge, .storage-badge { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.35rem 0.65rem; border-radius: 999px; font-size: 0.8rem; font-family: var(--mono); border: 1px solid var(--line); background: var(--bg-1); color: var(--muted); }
+  .browser-badge strong { color: var(--ink); font-weight: 600; }
+  .storage-badge::before { content: ""; width: 7px; height: 7px; border-radius: 999px; background: var(--faint); }
+  .storage-badge.persistent { color: var(--accent); border-color: var(--accent-dim); }
+  .storage-badge.persistent::before { background: var(--accent); }
+  .storage-badge.ephemeral { color: var(--warn); border-color: #4a3c1a; }
+  .storage-badge.ephemeral::before { background: var(--warn); }
+
+  /* Two columns: console feed left, sticky output right. Collapses < 940px to
+     one column with a fixed bottom output dock. */
+  .layout { display: grid; grid-template-columns: minmax(0,1fr) 392px; gap: 2rem; align-items: start; margin-top: 1.6rem; }
+  .main { min-width: 0; }
+  .sidebar { position: sticky; top: 1.25rem; }
+
+  .tier-banner { padding: 1.1rem 1.25rem; border-radius: var(--r); margin: 1.2rem 0 2rem; border: 1px solid var(--line); background: var(--bg-1); position: relative; overflow: hidden; }
+  .tier-banner::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--faint); }
+  .tier-banner.dbsc::before, .tier-banner.bound::before { background: var(--accent); }
+  .tier-banner.none::before { background: var(--bad); }
+  .tier-label { font-family: var(--mono); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); }
+  .tier-value { font-family: var(--mono); font-size: 1.45rem; font-weight: 600; margin: 0.2rem 0; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .tier-banner.dbsc .tier-value, .tier-banner.bound .tier-value { color: var(--accent); }
+  .tier-banner.none .tier-value { color: var(--bad); }
+  .tier-banner p { margin: 0; font-size: 0.9rem; color: var(--muted); }
+
+  .card { border: 1px solid var(--line); border-radius: var(--r); padding: 1.05rem 1.15rem; margin: 0.75rem 0; background: var(--bg-1); transition: border-color 0.18s ease; }
+  .card:hover { border-color: var(--line-2); }
+  .card.danger { border-color: #3a2422; }
+  .card.danger:hover { border-color: #5a322e; }
+  .card h3 { margin: 0 0 0.35rem; font-size: 0.97rem; display: flex; align-items: center; gap: 0.5rem; }
+  .card h3 .verb { font-family: var(--mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; padding: 0.18rem 0.42rem; border-radius: 999px; }
+  .card h3 .verb.allow { color: var(--accent); background: rgba(52,211,153,0.08); border: 1px solid var(--accent-dim); }
+  .card h3 .verb.deny { color: var(--bad); background: rgba(248,113,113,0.07); border: 1px solid #3a2422; }
+  .card p { margin: 0 0 0.75rem; color: var(--muted); font-size: 0.88rem; }
+  .card p:last-of-type { margin-bottom: 0.8rem; }
+
+  .field-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.2rem 0 0.7rem; }
+  .field { display: flex; flex-direction: column; gap: 0.3rem; }
+  label { font-size: 0.78rem; color: var(--muted); font-weight: 500; }
+  input { padding: 0.55rem 0.7rem; font-size: 16px; border: 1px solid var(--line); border-radius: var(--r-sm); width: 220px; max-width: 100%; background: var(--bg-2); color: var(--ink); font-family: var(--mono); }
+  input::placeholder { color: var(--faint); }
+  input:focus-visible { border-color: var(--accent); outline-offset: 0; }
+
+  .btn-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  button { padding: 0.5rem 0.9rem; font-size: 0.875rem; cursor: pointer; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink); border-radius: var(--r-sm); font-weight: 500; font-family: var(--sans); touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: transform 0.08s ease, background 0.16s ease, border-color 0.16s ease; }
+  button:hover { background: var(--bg-1); border-color: var(--faint); }
+  button:active { transform: translateY(1px); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button.primary:hover { background: #2bbe89; border-color: #2bbe89; }
+  button.attack { color: var(--bad); border-color: #3a2422; background: rgba(248,113,113,0.05); }
+  button.attack:hover { background: rgba(248,113,113,0.1); border-color: #5a322e; }
+  button.ghost { background: transparent; }
+
+  .output-panel { border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: var(--bg-1); }
+  .output-panel .ohead { display: flex; align-items: center; justify-content: space-between; padding: 0.6rem 0.85rem; background: var(--bg-2); border-bottom: 1px solid var(--line); }
+  .output-panel .ohead .otitle { font-family: var(--mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 0.45rem; }
+  .output-panel .ohead .otitle::before { content: ""; width: 8px; height: 8px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 0 3px rgba(52,211,153,0.12); }
+  .output-panel .ohead button { padding: 0.22rem 0.55rem; font-size: 0.72rem; font-family: var(--mono); }
+  .output-panel .obody { padding: 0.7rem 0.75rem; }
+
+  .explain { font-size: 0.86rem; padding: 0.7rem 0.85rem; border-radius: var(--r-sm); margin: 0 0 0.6rem; line-height: 1.5; border: 1px solid var(--line); }
+  .explain.ok { background: rgba(52,211,153,0.06); color: #b8f0d8; border-color: var(--accent-dim); }
+  .explain.bad { background: rgba(248,113,113,0.06); color: #f9c8c8; border-color: #3a2422; }
+  .explain.info { background: var(--bg-2); color: var(--ink); border-color: var(--line-2); }
+  .explain code { background: rgba(255,255,255,0.06); }
+  .explain strong { color: var(--ink); }
+
+  pre { background: #0a0c10; color: #cfe3da; padding: 0.85rem 0.95rem; border-radius: var(--r-sm); overflow-x: auto; font-size: 0.78rem; line-height: 1.55; margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; border: 1px solid var(--line); }
+  .output-panel pre { max-height: 62vh; overflow-y: auto; overscroll-behavior: contain; }
+
+  .advanced { margin-top: 1.2rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+  .advanced summary { cursor: pointer; color: var(--muted); font-size: 0.88rem; font-family: var(--mono); letter-spacing: 0.02em; }
   .advanced summary:hover { color: var(--ink); }
-  .footnote { color: var(--muted); font-size: 0.83rem; margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
-  .footnote a { color: var(--accent); }
-  code { background: var(--bg-soft); padding: 0.08rem 0.3rem; border-radius: 3px; font-size: 0.85em; }
+  .advanced .btn-row { margin-top: 0.7rem; }
+
+  .footnote { color: var(--faint); font-size: 0.83rem; margin-top: 2.5rem; padding-top: 1.1rem; border-top: 1px solid var(--line); }
+
+  code { background: var(--bg-2); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.84em; font-family: var(--mono); color: #bcd; border: 1px solid var(--line); }
+
+  @media (max-width: 940px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 50; }
+    .sidebar .output-panel { border-radius: 0; border-width: 1px 0 0; max-height: 44vh; display: flex; flex-direction: column; box-shadow: 0 -16px 40px rgba(0,0,0,0.5); }
+    .sidebar .obody { overflow-y: auto; }
+    .main { padding-bottom: 46vh; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
 </style>
 </head>
 <body>
-<h1>DBSC Toolkit</h1>
-<p class="lede">A stolen session cookie pasted into another browser used to work. Today it gets a 403 — because the refresh, and every guarded request, needs a signature from a key that never left your device.</p>
+<a class="skip" href="#main">Skip to console</a>
 
-<div>
+<header class="masthead">
+  <span class="mark" translate="no">dbsc-toolkit</span>
+  <span class="mark" translate="no">cookie session</span>
+</header>
+<h1>Device-bound session console</h1>
+<p class="lede">A stolen session cookie pasted into another browser used to work. Here it gets a 403, because the refresh and every guarded request need a signature from a key that never left your device.</p>
+
+<div class="badges">
   <span class="browser-badge" id="browser-badge">Detecting browser…</span>
   <span class="storage-badge" id="storage-badge">checking storage…</span>
 </div>
 
 <div class="layout">
-<div class="main">
+<main class="main" id="main">
 
-<h2>Try it</h2>
-
+<h2>Sign in</h2>
 <div class="card">
-  <h3>1. Sign up, then sign in</h3>
-  <p>The cookie-session mode — <code>express-session</code> issues the id, <code>dbsc.bind()</code> binds it. <a href="/jwt.html">JWT mode is over here</a>.</p>
-  <input type="text" id="username" placeholder="username" autocomplete="username">
-  <input type="password" id="password" placeholder="password (min 6)" autocomplete="current-password">
-  <br>
-  <button id="signup-btn">Sign up</button>
-  <button id="login-btn" class="primary">Sign in</button>
+  <p>Cookie-session mode: <code translate="no">express-session</code> issues the id, <code translate="no">dbsc.bind()</code> binds it. <a href="/jwt.html">JWT mode is over here</a>.</p>
+  <div class="field-row">
+    <div class="field">
+      <label for="username">Username</label>
+      <input type="text" id="username" placeholder="ada" autocomplete="username" spellcheck="false" autocapitalize="none">
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input type="password" id="password" placeholder="min 6 chars" autocomplete="current-password">
+    </div>
+  </div>
+  <div class="btn-row">
+    <button id="signup-btn">Sign up</button>
+    <button id="login-btn" class="primary">Sign in</button>
+  </div>
 </div>
 
 <div class="tier-banner unbound" id="tier-banner">
   <div class="tier-label">Binding tier</div>
-  <div class="tier-value" id="tier-value">— sign in to start —</div>
+  <div class="tier-value" id="tier-value">awaiting sign-in</div>
   <p id="tier-explain">After sign-in, the kit binds your session to a device-resident key. The tier shown here tells you which kind.</p>
 </div>
 
-<h2>What DBSC defends against</h2>
-
-<p class="lede" style="margin-bottom: 0.8rem;">
-  Only the routes you put <code>requireProof()</code> in front of demand the proof header. In this demo that's <code>/profile</code> and <code>/payment</code> — your real app decides its own list (typically: payments, admin actions, password change, email change, 2FA enroll). Routes without the guard, like <code>/me</code>, accept the bare cookie like any normal app.
+<h2>What it defends against</h2>
+<p class="section-note">
+  Only the routes you put <code translate="no">requireProof()</code> in front of demand the proof header. Here that's <code translate="no">/profile</code> and <code translate="no">/payment</code>. Your real app picks its own list (payments, admin actions, password or email change, 2FA enroll). Unguarded routes like <code translate="no">/me</code> accept the bare cookie like any normal app.
 </p>
 
 <div class="card">
-  <h3>The legit request</h3>
-  <p>Your bound device signs a per-request proof. <code>requireProof()</code> verifies it, then the route runs.</p>
-  <button id="profile-btn" class="primary">GET /profile (signed)</button>
-  <button id="pay-btn" class="primary">POST /payment (signed body)</button>
+  <h3><span class="verb allow">allow</span> The legit request</h3>
+  <p>Your bound device signs a per-request proof. <code translate="no">requireProof()</code> verifies it, then the route runs.</p>
+  <div class="btn-row">
+    <button id="profile-btn" class="primary">GET /profile (signed)</button>
+    <button id="pay-btn" class="primary">POST /payment (signed body)</button>
+  </div>
 </div>
 
-<div class="card">
-  <h3>The stolen cookie</h3>
+<div class="card danger">
+  <h3><span class="verb deny">deny</span> The stolen cookie</h3>
   <p>An attacker exfiltrates the session cookie and pastes it into their browser. They have the cookie. They don't have the key.</p>
-  <button id="theft-btn" class="attack">Send bare fetch (no proof)</button>
+  <div class="btn-row"><button id="theft-btn" class="attack">Send bare fetch (no proof)</button></div>
 </div>
 
-<div class="card">
-  <h3>The tampered body</h3>
-  <p>An MITM sees the signed <code>{amount: 1}</code> and tries to rewrite it to <code>{amount: 1000}</code> mid-flight. The proof signs the body hash too.</p>
-  <button id="tamper-btn" class="attack">Replay proof with different body</button>
+<div class="card danger">
+  <h3><span class="verb deny">deny</span> The tampered body</h3>
+  <p>An MITM sees the signed <code translate="no">{amount: 1}</code> and tries to rewrite it to <code translate="no">{amount: 1000}</code> mid-flight. The proof signs the body hash too.</p>
+  <div class="btn-row"><button id="tamper-btn" class="attack">Replay proof with different body</button></div>
 </div>
 
-<div class="card">
-  <h3>The replayed request</h3>
-  <p>An attacker captures one valid signed request off the wire and tries to send it again. The optional replay cache (v2.8+) rejects the second arrival.</p>
-  <button id="replay-btn" class="attack">Send identical request twice</button>
+<div class="card danger">
+  <h3><span class="verb deny">deny</span> The replayed request</h3>
+  <p>An attacker captures one valid signed request off the wire and sends it again. The optional replay cache (v2.8+) rejects the second arrival.</p>
+  <div class="btn-row"><button id="replay-btn" class="attack">Send identical request twice</button></div>
 </div>
 
 <h2>DPoP: token binding (RFC 9449)</h2>
-<p class="lede">The same idea, applied to bearer tokens instead of cookies. The token is bound to a device key; every API call carries a fresh <code>DPoP</code> proof. A stolen bearer alone proves nothing.</p>
+<p class="section-note">The same idea applied to bearer tokens instead of cookies. The token is bound to a device key; every API call carries a fresh <code translate="no">DPoP</code> proof. A stolen bearer alone proves nothing.</p>
 
 <div class="card">
-  <h3>Bind a token to this device</h3>
-  <p>Generate a device key in the browser, then sign in. The server issues a bearer token carrying <code>cnf.jkt</code> — the key's thumbprint.</p>
-  <button id="dpop-login-btn" class="primary">Generate key + get bound token</button>
+  <h3><span class="verb allow">bind</span> Bind a token to this device</h3>
+  <p>Generate a device key in the browser, then sign in. The server issues a bearer token carrying <code translate="no">cnf.jkt</code>, the key's thumbprint.</p>
+  <div class="btn-row"><button id="dpop-login-btn" class="primary">Generate key + get bound token</button></div>
 </div>
 
 <div class="card">
-  <h3>Call the API with a proof</h3>
-  <p>Sign a <code>DPoP</code> proof over the method + URL with the device key, send it with the token. <code>requireDpop()</code> verifies both.</p>
-  <button id="dpop-call-btn" class="primary">GET /api/resource (token + proof)</button>
+  <h3><span class="verb allow">allow</span> Call the API with a proof</h3>
+  <p>Sign a <code translate="no">DPoP</code> proof over the method and URL with the device key, send it with the token. <code translate="no">requireDpop()</code> verifies both.</p>
+  <div class="btn-row"><button id="dpop-call-btn" class="primary">GET /api/resource (token + proof)</button></div>
 </div>
 
-<div class="card">
-  <h3>The stolen bearer token</h3>
-  <p>An attacker exfiltrates the bearer token and replays it with no proof — the way a stolen <code>Authorization</code> header travels today.</p>
-  <button id="dpop-steal-btn" class="attack">Send token, no proof</button>
+<div class="card danger">
+  <h3><span class="verb deny">deny</span> The stolen bearer token</h3>
+  <p>An attacker exfiltrates the bearer token and replays it with no proof, the way a stolen <code translate="no">Authorization</code> header travels today.</p>
+  <div class="btn-row"><button id="dpop-steal-btn" class="attack">Send token, no proof</button></div>
 </div>
 
 <h2>Session control</h2>
-<button id="me-btn">Check session (/me)</button>
-<button id="logout-btn">Sign out</button>
-<button id="clear-btn">Clear everything (cookies + IndexedDB)</button>
+<div class="btn-row">
+  <button id="me-btn">Check session (/me)</button>
+  <button id="logout-btn">Sign out</button>
+  <button id="clear-btn" class="ghost">Clear everything (cookies + IndexedDB)</button>
+</div>
 
 <details class="advanced">
-  <summary>Advanced — config, rate limit, cookie scope</summary>
-  <div style="padding: 0.5rem 0;">
+  <summary>Advanced: config, rate limit, cookie scope</summary>
+  <div class="btn-row">
     <button id="config-btn">Show active createDbsc options</button>
-    <button id="rl-btn">Trip the rate limiter (15× POST /dbsc/refresh)</button>
+    <button id="rl-btn">Trip the rate limiter (15x POST /dbsc/refresh)</button>
     <button id="scope-btn">Inspect cookieScope wire shape</button>
-    <button id="interceptor-btn">Install fetch interceptor → bare fetch /profile</button>
+    <button id="interceptor-btn">Install fetch interceptor, bare fetch /profile</button>
   </div>
 </details>
 
 <p class="footnote">
   Live demo for <a href="https://www.npmjs.com/package/dbsc-toolkit">dbsc-toolkit</a>.
-  Source: <a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit">github.com/SulimanAbdulrazzaq/dbsc-toolkit</a>.
+  Source on <a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit">GitHub</a>.
   This page uses cookie-session login; <a href="/jwt.html">JWT mode is on a separate page</a>.
 </p>
 
-</div><!-- /.main -->
+</main><!-- /.main -->
 
-<aside class="sidebar">
+<aside class="sidebar" aria-label="Request output">
   <div class="output-panel">
     <div class="ohead">
-      <span>Output</span>
-      <button id="clear-out">clear</button>
+      <span class="otitle">Output</span>
+      <button id="clear-out" class="ghost">clear</button>
     </div>
-    <div class="obody" style="padding: 0.6rem 0.7rem;">
-      <div id="explain"></div>
-      <pre id="out" style="margin:0;">Click any button — the result shows here.</pre>
+    <div class="obody">
+      <div id="explain" aria-live="polite"></div>
+      <pre id="out">Click any button. The result shows here.</pre>
     </div>
   </div>
 </aside>
@@ -203,7 +285,7 @@
   import { initBoundDbsc, wrapFetch, clearBoundKey } from "/dbsc-client/index.js";
   window.clearBoundKey = clearBoundKey;
   window.boundFetch = wrapFetch({ signBody: true });
-  // 8s probe window — Render cold starts can push native registration past
+  // 8s probe window: Render cold starts can push native registration past
   // the 5s default, which would let the polyfill win on a TPM-capable browser.
   window.initBoundDbsc = (opts = {}) => initBoundDbsc({ nativeProbeWindowMs: 8000, ...opts });
 </script>
@@ -236,10 +318,10 @@ async function showStorageBadge() {
     const el = $("storage-badge");
     if (c.storage === "redis") {
       el.className = "storage-badge persistent";
-      el.textContent = "Storage: Redis — survives restarts";
+      el.textContent = "Storage: Redis, survives restarts";
     } else {
       el.className = "storage-badge ephemeral";
-      el.textContent = "Storage: in-memory — wipes on restart (set REDIS_URL for persistence)";
+      el.textContent = "Storage: in-memory, wipes on restart (set REDIS_URL for persistence)";
     }
   } catch { /* */ }
 }
@@ -257,12 +339,12 @@ const TIER_COPY = {
 };
 
 function setTierFromOutcome(o) {
-  if (!o) return setTier("unbound", "—", "SDK returned no outcome.");
+  if (!o) return setTier("unbound", "idle", "SDK returned no outcome.");
   if (o.phase === "native-dbsc") return setTier("dbsc", ...TIER_COPY.dbsc);
   if (o.phase === "polyfill-bound") return setTier("bound", ...TIER_COPY.bound);
   if (o.phase === "unbound") return setTier("unbound", "unbound", "Sign in to start a binding.");
   if (o.phase === "error") return setTier("none", "error", "SDK error: " + o.error);
-  setTier("unbound", "—", "Unknown outcome.");
+  setTier("unbound", "idle", "Unknown outcome.");
 }
 
 function show(data) {
@@ -275,7 +357,7 @@ function explain(kind, text) {
 
 function clearExplain() { $("explain").innerHTML = ""; }
 
-$("clear-out").onclick = () => { clearExplain(); $("out").textContent = "Click any button — the result shows here."; };
+$("clear-out").onclick = () => { clearExplain(); $("out").textContent = "Click any button. The result shows here."; };
 
 async function plainFetch(method, path, body, extraHeaders) {
   const headers = extraHeaders ? { ...extraHeaders } : (body ? { "Content-Type": "application/json" } : {});
@@ -322,7 +404,7 @@ $("profile-btn").onclick = async () => {
   const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
   show({ method: "GET", path: "/profile", status: r.status, body: b });
   if (r.status === 200) explain("ok", "The signed proof header verified against your bound key. <code>requireProof()</code> let the request through.");
-  else explain("bad", "Proof check failed — see body for the reason code.");
+  else explain("bad", "Proof check failed. See body for the reason code.");
 };
 
 $("pay-btn").onclick = async () => {
@@ -341,7 +423,7 @@ $("pay-btn").onclick = async () => {
 $("theft-btn").onclick = async () => {
   const r = await plainFetch("GET", "/profile");
   show(r);
-  if (r.status === 403) explain("ok", "<strong>Defended.</strong> The cookie reached the server but no proof header was sent — <code>requireProof()</code> returned 403 <code>PROOF_MISSING</code>. This is what a stolen cookie pasted into a different browser sees.");
+  if (r.status === 403) explain("ok", "<strong>Defended.</strong> The cookie reached the server but no proof header was sent. <code>requireProof()</code> returned 403 <code>PROOF_MISSING</code>. This is what a stolen cookie pasted into a different browser sees.");
   else if (r.status === 401) explain("info", "Sign in first, then click this button.");
   else explain("bad", "Unexpected status. Check the body.");
 };
@@ -357,7 +439,7 @@ $("tamper-btn").onclick = async () => {
     method: "POST", headers: { "Content-Type": "application/octet-stream" },
     body: JSON.stringify({ amount: 1, to: "merchant" }),
   });
-  if (!capturedProof) return show({ error: "no proof captured — sign in first" });
+  if (!capturedProof) return show({ error: "no proof captured, sign in first" });
   const r = await plainFetch("POST", "/payment",
     JSON.stringify({ amount: 1000, to: "attacker" }),
     { "Content-Type": "application/octet-stream", "X-Dbsc-Bound-Proof": capturedProof },
@@ -375,12 +457,12 @@ $("replay-btn").onclick = async () => {
     return new Response(null, { status: 200 });
   };
   await wrapFetch({ fetch: capture })("/profile", { method: "GET" });
-  if (!capturedProof) return show({ error: "no proof captured — sign in first" });
+  if (!capturedProof) return show({ error: "no proof captured, sign in first" });
   const first = await plainFetch("GET", "/profile", null, { "X-Dbsc-Bound-Proof": capturedProof });
   const second = await plainFetch("GET", "/profile", null, { "X-Dbsc-Bound-Proof": capturedProof });
   show({ path: "/profile, same proof replayed twice", first: { status: first.status, body: first.body }, second: { status: second.status, body: second.body } });
   if (second.status === 403) explain("ok", "<strong>Defended.</strong> The replay cache (v2.8+) recorded the first proof. The second arrival of the same proof bytes returned 403 <code>PROOF_REPLAY</code>.");
-  else explain("info", "The first request succeeded. The second succeeded too — replay cache is off, or the v2.8 cache isn't wired here.");
+  else explain("info", "The first request succeeded. The second succeeded too. Replay cache is off, or the v2.8 cache isn't wired here.");
 };
 
 // DPoP demo. A self-contained Web Crypto implementation of the client half of
@@ -450,16 +532,16 @@ $("dpop-call-btn").onclick = async () => {
   const r = await plainFetch("GET", "/api/resource", null, { Authorization: "DPoP " + dpopToken, DPoP: proof });
   show(r);
   if (r.status === 200) explain("ok", "The DPoP proof verified against the embedded key, and that key's thumbprint matched the token's <code>cnf.jkt</code>. <code>requireDpop()</code> let the call through.");
-  else explain("bad", "Proof check failed — see the reason code.");
+  else explain("bad", "Proof check failed. See the reason code.");
 };
 
 $("dpop-steal-btn").onclick = async () => {
   clearExplain();
   if (!dpopToken) return show({ error: "get a bound token first" });
-  // The attacker has the bearer, not the device key — so no proof.
+  // The attacker has the bearer, not the device key, so no proof.
   const r = await plainFetch("GET", "/api/resource", null, { Authorization: "DPoP " + dpopToken });
   show(r);
-  if (r.status === 401) explain("ok", "<strong>Defended.</strong> The stolen bearer reached the server but no <code>DPoP</code> proof was sent — <code>requireDpop()</code> returned 401 <code>invalid_dpop_proof</code>. The token alone is worthless without the device key.");
+  if (r.status === 401) explain("ok", "<strong>Defended.</strong> The stolen bearer reached the server but no <code>DPoP</code> proof was sent. <code>requireDpop()</code> returned 401 <code>invalid_dpop_proof</code>. The token alone is worthless without the device key.");
   else explain("bad", "Unexpected status. Check the body.");
 };
 
@@ -492,7 +574,7 @@ $("logout-btn").onclick = async () => {
   const r = await plainFetch("POST", "/logout");
   show(r);
   if (typeof window.clearBoundKey === "function") await window.clearBoundKey().catch(() => {});
-  setTier("unbound", "—", "Signed out. Key cleared from IndexedDB.");
+  setTier("unbound", "idle", "Signed out. Key cleared from IndexedDB.");
 };
 
 $("clear-btn").onclick = async () => {
@@ -520,7 +602,7 @@ $("clear-btn").onclick = async () => {
   }
 
   show({ cleared, note: "Cookies wiped, IndexedDB key dropped, server-side binding revoked. Reload if anything looks stuck." });
-  setTier("unbound", "—", "Cleared. Sign in fresh to start over.");
+  setTier("unbound", "idle", "Cleared. Sign in fresh to start over.");
 };
 
 (async function init() {

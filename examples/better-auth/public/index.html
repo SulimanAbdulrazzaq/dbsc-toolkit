@@ -1,154 +1,232 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>DBSC + Better Auth — demo</title>
+<title>DBSC + Better Auth demo console</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0c0e12">
 <style>
   :root {
-    --ink: #1a1d24;
-    --muted: #5a6170;
-    --line: #e1e4ea;
-    --bg-soft: #f6f7f9;
-    --accent: #2b3a55;
-    --ok: #1e7a3f;
-    --ok-bg: #e7f4ec;
-    --warn: #8a5b00;
-    --warn-bg: #fff3cd;
-    --bad: #a3231b;
-    --bad-bg: #fde2e1;
+    --bg: #0c0e12;
+    --bg-1: #12151c;
+    --bg-2: #171b24;
+    --line: #242a36;
+    --line-2: #2f3644;
+    --ink: #e7ecf3;
+    --muted: #8a93a6;
+    --faint: #5d6678;
+    --accent: #34d399;
+    --accent-ink: #052e1f;
+    --accent-dim: #1f3b32;
+    --bad: #f87171;
+    --warn: #fbbf24;
+    --r: 10px;
+    --r-sm: 7px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
   }
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, system-ui, "Segoe UI", sans-serif; max-width: 1160px; margin: 2rem auto; padding: 0 1rem; color: var(--ink); line-height: 1.5; }
-  /* Two columns on wide screens: scrollable content left, sticky output right.
-     Below 920px it collapses and the output becomes a fixed bottom panel so a
-     result is always visible without scrolling. */
-  .layout { display: grid; grid-template-columns: minmax(0,1fr) 380px; gap: 2rem; align-items: start; }
-  .main { min-width: 0; }
-  .sidebar { position: sticky; top: 1.5rem; }
-  .output-panel { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .output-panel .ohead { display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 0.85rem; background: var(--bg-soft); border-bottom: 1px solid var(--line); font-size: 0.8rem; font-weight: 600; color: var(--muted); }
-  .output-panel .ohead button { margin: 0; padding: 0.2rem 0.5rem; font-size: 0.72rem; }
-  .output-panel pre { max-height: 60vh; overflow-y: auto; }
-  @media (max-width: 920px) {
-    .layout { grid-template-columns: 1fr; }
-    .sidebar { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 50; padding: 0; background: var(--ink); }
-    .sidebar .output-panel { border-radius: 0; border: 0; max-height: 42vh; display: flex; flex-direction: column; }
-    .output-panel .obody { overflow-y: auto; }
-    .main { padding-bottom: 44vh; }
+  html { color-scheme: dark; }
+  body {
+    font-family: var(--sans);
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2.5rem 1.25rem 3rem;
+    color: var(--ink);
+    line-height: 1.55;
+    background:
+      radial-gradient(1100px 480px at 78% -8%, rgba(52,211,153,0.07), transparent 60%),
+      var(--bg);
+    -webkit-font-smoothing: antialiased;
   }
-  h1 { margin: 0 0 0.2rem; font-size: 1.7rem; }
-  h2 { margin-top: 2.4rem; font-size: 1.15rem; }
-  .lede { color: var(--muted); font-size: 0.95rem; margin-bottom: 1.5rem; }
-  .badge { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
-  .tier-banner { padding: 1rem 1.2rem; border-radius: 8px; margin: 1rem 0 2rem; border: 1px solid var(--line); background: var(--bg-soft); }
-  .tier-banner.dbsc { background: var(--ok-bg); border-color: #b6dcc3; }
-  .tier-banner.bound { background: #eef3fb; border-color: #c8d4e8; }
-  .tier-banner.none { background: var(--warn-bg); border-color: #f0d68a; }
-  .tier-banner.unbound { background: var(--bg-soft); }
-  .tier-banner .tier-label { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-  .tier-banner .tier-value { font-size: 1.4rem; font-weight: 700; margin: 0.15rem 0; }
-  .tier-banner.dbsc .tier-value { color: var(--ok); }
-  .tier-banner.bound .tier-value { color: #2b3a55; }
-  .tier-banner.none .tier-value { color: var(--warn); }
-  .tier-banner .tier-explain { font-size: 0.9rem; color: var(--ink); margin: 0; }
-  .browser-badge { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.6rem; border-radius: 4px; background: var(--bg-soft); border: 1px solid var(--line); font-size: 0.82rem; color: var(--muted); margin-bottom: 1rem; }
-  .browser-badge strong { color: var(--ink); }
-  .card { border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.1rem; margin: 0.8rem 0; }
-  .card h3 { margin: 0 0 0.4rem; font-size: 1rem; }
-  .card p { margin: 0 0 0.7rem; color: var(--muted); font-size: 0.88rem; }
-  input { padding: 0.5rem 0.6rem; margin: 0 0.3rem 0.4rem 0; font-size: 0.95rem; border: 1px solid var(--line); border-radius: 4px; width: 200px; max-width: 100%; }
-  button { padding: 0.5rem 0.95rem; font-size: 0.9rem; cursor: pointer; border: 1px solid var(--line); background: white; border-radius: 4px; margin: 0 0.3rem 0.4rem 0; font-weight: 500; }
-  button:hover { background: var(--bg-soft); }
-  button.primary { background: var(--accent); color: white; border-color: var(--accent); }
-  button.primary:hover { background: #1f2c43; }
-  button.attack { border-color: #d4a3a0; color: var(--bad); }
-  button.attack:hover { background: var(--bad-bg); }
-  .explain { font-size: 0.88rem; padding: 0.75rem 0.9rem; border-radius: 6px; margin: 0.5rem 0; line-height: 1.45; }
-  .explain.ok { background: var(--ok-bg); color: #143a22; border-left: 3px solid var(--ok); }
-  .explain.bad { background: var(--bad-bg); color: #6a1611; border-left: 3px solid var(--bad); }
-  .explain.info { background: var(--bg-soft); color: var(--ink); border-left: 3px solid var(--accent); }
-  pre { background: #0e1320; color: #e3e8f0; padding: 0.85rem 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.78rem; margin: 0.5rem 0; }
-  .footnote { color: var(--muted); font-size: 0.83rem; margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
-  .footnote a { color: var(--accent); }
-  code { background: var(--bg-soft); padding: 0.08rem 0.3rem; border-radius: 3px; font-size: 0.85em; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .skip { position: absolute; left: -9999px; top: 0; background: var(--accent); color: var(--accent-ink); padding: 0.5rem 0.8rem; border-radius: var(--r-sm); z-index: 100; font-weight: 600; }
+  .skip:focus { left: 0.75rem; top: 0.75rem; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+
+  .masthead { display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap; }
+  .mark { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.12em; color: var(--accent); border: 1px solid var(--accent-dim); background: rgba(52,211,153,0.06); padding: 0.2rem 0.5rem; border-radius: 999px; }
+  h1 { margin: 0.7rem 0 0.35rem; font-size: clamp(1.6rem, 4vw, 2.15rem); letter-spacing: -0.02em; line-height: 1.1; }
+  h2 { margin: 2.6rem 0 0.4rem; font-size: 1.05rem; letter-spacing: -0.01em; }
+  .lede { color: var(--muted); font-size: 0.96rem; max-width: 65ch; margin: 0 0 1.4rem; }
+  .section-note { color: var(--muted); font-size: 0.9rem; max-width: 70ch; margin: 0 0 1rem; }
+
+  .badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1.1rem 0 0; }
+  .browser-badge { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.35rem 0.65rem; border-radius: 999px; font-size: 0.8rem; font-family: var(--mono); border: 1px solid var(--line); background: var(--bg-1); color: var(--muted); }
+  .browser-badge strong { color: var(--ink); font-weight: 600; }
+
+  .layout { display: grid; grid-template-columns: minmax(0,1fr) 392px; gap: 2rem; align-items: start; margin-top: 1.6rem; }
+  .main { min-width: 0; }
+  .sidebar { position: sticky; top: 1.25rem; }
+
+  .tier-banner { padding: 1.1rem 1.25rem; border-radius: var(--r); margin: 1.2rem 0 2rem; border: 1px solid var(--line); background: var(--bg-1); position: relative; overflow: hidden; }
+  .tier-banner::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--faint); }
+  .tier-banner.dbsc::before, .tier-banner.bound::before { background: var(--accent); }
+  .tier-banner.none::before { background: var(--bad); }
+  .tier-label { font-family: var(--mono); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); }
+  .tier-value { font-family: var(--mono); font-size: 1.45rem; font-weight: 600; margin: 0.2rem 0; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .tier-banner.dbsc .tier-value, .tier-banner.bound .tier-value { color: var(--accent); }
+  .tier-banner.none .tier-value { color: var(--bad); }
+  .tier-explain { margin: 0; font-size: 0.9rem; color: var(--muted); }
+
+  .card { border: 1px solid var(--line); border-radius: var(--r); padding: 1.05rem 1.15rem; margin: 0.75rem 0; background: var(--bg-1); transition: border-color 0.18s ease; }
+  .card:hover { border-color: var(--line-2); }
+  .card.danger { border-color: #3a2422; }
+  .card.danger:hover { border-color: #5a322e; }
+  .card h3 { margin: 0 0 0.35rem; font-size: 0.97rem; display: flex; align-items: center; gap: 0.5rem; }
+  .card h3 .verb { font-family: var(--mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; padding: 0.18rem 0.42rem; border-radius: 999px; }
+  .card h3 .verb.allow { color: var(--accent); background: rgba(52,211,153,0.08); border: 1px solid var(--accent-dim); }
+  .card h3 .verb.deny { color: var(--bad); background: rgba(248,113,113,0.07); border: 1px solid #3a2422; }
+  .card p { margin: 0 0 0.75rem; color: var(--muted); font-size: 0.88rem; }
+  .card p:last-of-type { margin-bottom: 0.8rem; }
+
+  .field-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.2rem 0 0.7rem; }
+  .field { display: flex; flex-direction: column; gap: 0.3rem; }
+  label { font-size: 0.78rem; color: var(--muted); font-weight: 500; }
+  input { padding: 0.55rem 0.7rem; font-size: 16px; border: 1px solid var(--line); border-radius: var(--r-sm); width: 220px; max-width: 100%; background: var(--bg-2); color: var(--ink); font-family: var(--mono); }
+  input::placeholder { color: var(--faint); }
+  input:focus-visible { border-color: var(--accent); outline-offset: 0; }
+
+  .btn-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  button { padding: 0.5rem 0.9rem; font-size: 0.875rem; cursor: pointer; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink); border-radius: var(--r-sm); font-weight: 500; font-family: var(--sans); touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: transform 0.08s ease, background 0.16s ease, border-color 0.16s ease; }
+  button:hover { background: var(--bg-1); border-color: var(--faint); }
+  button:active { transform: translateY(1px); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button.primary:hover { background: #2bbe89; border-color: #2bbe89; }
+  button.attack { color: var(--bad); border-color: #3a2422; background: rgba(248,113,113,0.05); }
+  button.attack:hover { background: rgba(248,113,113,0.1); border-color: #5a322e; }
+  button.ghost { background: transparent; }
+
+  .output-panel { border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: var(--bg-1); }
+  .output-panel .ohead { display: flex; align-items: center; justify-content: space-between; padding: 0.6rem 0.85rem; background: var(--bg-2); border-bottom: 1px solid var(--line); }
+  .output-panel .ohead .otitle { font-family: var(--mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 0.45rem; }
+  .output-panel .ohead .otitle::before { content: ""; width: 8px; height: 8px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 0 3px rgba(52,211,153,0.12); }
+  .output-panel .ohead button { padding: 0.22rem 0.55rem; font-size: 0.72rem; font-family: var(--mono); }
+  .output-panel .obody { padding: 0.7rem 0.75rem; }
+
+  .explain { font-size: 0.86rem; padding: 0.7rem 0.85rem; border-radius: var(--r-sm); margin: 0 0 0.6rem; line-height: 1.5; border: 1px solid var(--line); }
+  .explain.ok { background: rgba(52,211,153,0.06); color: #b8f0d8; border-color: var(--accent-dim); }
+  .explain.bad { background: rgba(248,113,113,0.06); color: #f9c8c8; border-color: #3a2422; }
+  .explain.info { background: var(--bg-2); color: var(--ink); border-color: var(--line-2); }
+  .explain code { background: rgba(255,255,255,0.06); }
+  .explain strong { color: var(--ink); }
+
+  pre { background: #0a0c10; color: #cfe3da; padding: 0.85rem 0.95rem; border-radius: var(--r-sm); overflow-x: auto; font-size: 0.78rem; line-height: 1.55; margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; border: 1px solid var(--line); }
+  .output-panel pre { max-height: 62vh; overflow-y: auto; overscroll-behavior: contain; }
+
+  .footnote { color: var(--faint); font-size: 0.83rem; margin-top: 2.5rem; padding-top: 1.1rem; border-top: 1px solid var(--line); }
+  code { background: var(--bg-2); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.84em; font-family: var(--mono); color: #bcd; border: 1px solid var(--line); }
+
+  @media (max-width: 940px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 50; }
+    .sidebar .output-panel { border-radius: 0; border-width: 1px 0 0; max-height: 44vh; display: flex; flex-direction: column; box-shadow: 0 -16px 40px rgba(0,0,0,0.5); }
+    .sidebar .obody { overflow-y: auto; }
+    .main { padding-bottom: 46vh; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
 </style>
 </head>
 <body>
-<h1>DBSC + Better Auth</h1>
-<p class="lede">A stolen session cookie pasted into another browser used to work. Today it gets a 403 — because the refresh, and every guarded request, needs a signature from a key that never left your device.</p>
+<a class="skip" href="#main">Skip to console</a>
 
-<div class="browser-badge" id="browser-badge">Detecting browser…</div>
+<header class="masthead">
+  <span class="mark" translate="no">@dbsc-toolkit/better-auth</span>
+  <span class="mark" translate="no">plugin</span>
+</header>
+<h1>Better Auth binding console</h1>
+<p class="lede">A stolen session cookie pasted into another browser used to work. Here it gets a 403, because the refresh and every guarded request need a signature from a key that never left your device.</p>
+
+<div class="badges">
+  <span class="browser-badge" id="browser-badge">Detecting browser…</span>
+</div>
 
 <div class="layout">
-<div class="main">
+<main class="main" id="main">
 
-<h2>Try it</h2>
-
+<h2>Sign in</h2>
 <div class="card">
-  <h3>1. Sign up or sign in</h3>
-  <p>Better Auth handles the auth. The plugin attaches a <code>Secure-Session-Registration</code> header to the response.</p>
-  <input type="email" id="email" placeholder="email" autocomplete="username">
-  <input type="password" id="password" placeholder="password (min 8)" autocomplete="current-password">
-  <input type="text" id="name" placeholder="name (signup only)">
-  <br>
-  <button id="signup-btn">Sign up</button>
-  <button id="login-btn" class="primary">Sign in</button>
+  <p>Better Auth handles the auth. The plugin attaches a <code translate="no">Secure-Session-Registration</code> header to the response.</p>
+  <div class="field-row">
+    <div class="field">
+      <label for="email">Email</label>
+      <input type="email" id="email" placeholder="ada@example.com" autocomplete="username" spellcheck="false" autocapitalize="none">
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input type="password" id="password" placeholder="min 8 chars" autocomplete="current-password">
+    </div>
+    <div class="field">
+      <label for="name">Name (signup only)</label>
+      <input type="text" id="name" placeholder="Ada Lovelace" autocomplete="name">
+    </div>
+  </div>
+  <div class="btn-row">
+    <button id="signup-btn">Sign up</button>
+    <button id="login-btn" class="primary">Sign in</button>
+  </div>
 </div>
 
 <div class="tier-banner unbound" id="tier-banner">
   <div class="tier-label">Binding tier</div>
-  <div class="tier-value" id="tier-value">— sign in to start —</div>
+  <div class="tier-value" id="tier-value">awaiting sign-in</div>
   <p class="tier-explain" id="tier-explain">Once you sign in, the plugin binds your session to a device-resident key. The tier shown here tells you which kind.</p>
 </div>
 
-<h2>What DBSC defends against</h2>
-
-<p class="lede" style="margin-bottom: 0.8rem;">
-  Only the routes you put <code>dbsc.requireProof()</code> in front of demand the proof header. In this demo that's <code>/api/profile</code> and <code>/api/payment</code> — your real app decides its own list (typically: payments, admin actions, password change, email change, 2FA enroll). Routes without the guard, like <code>/api/me</code>, accept the bare cookie like any normal app.
+<h2>What it defends against</h2>
+<p class="section-note">
+  Only the routes you put <code translate="no">dbsc.requireProof()</code> in front of demand the proof header. Here that's <code translate="no">/api/profile</code> and <code translate="no">/api/payment</code>. Your real app picks its own list (payments, admin actions, password or email change, 2FA enroll). Unguarded routes like <code translate="no">/api/me</code> accept the bare cookie like any normal app.
 </p>
 
 <div class="card">
-  <h3>The legit request</h3>
-  <p>Your bound device signs a per-request proof. <code>requireProof()</code> verifies it, then the route runs.</p>
-  <button id="profile-btn" class="primary">GET /api/profile (signed)</button>
-  <button id="pay-btn" class="primary">POST /api/payment (signed body)</button>
+  <h3><span class="verb allow">allow</span> The legit request</h3>
+  <p>Your bound device signs a per-request proof. <code translate="no">requireProof()</code> verifies it, then the route runs.</p>
+  <div class="btn-row">
+    <button id="profile-btn" class="primary">GET /api/profile (signed)</button>
+    <button id="pay-btn" class="primary">POST /api/payment (signed body)</button>
+  </div>
 </div>
 
-<div class="card">
-  <h3>The stolen cookie</h3>
+<div class="card danger">
+  <h3><span class="verb deny">deny</span> The stolen cookie</h3>
   <p>An attacker exfiltrates your session cookie and pastes it into their browser. They have the cookie. They don't have the key.</p>
-  <button id="theft-btn" class="attack">Send bare fetch (no proof)</button>
+  <div class="btn-row"><button id="theft-btn" class="attack">Send bare fetch (no proof)</button></div>
 </div>
 
-<div class="card">
-  <h3>The tampered body</h3>
-  <p>An MITM sees you sign <code>{amount: 1}</code> and tries to rewrite it to <code>{amount: 1000}</code> mid-flight. The proof signs the body hash too.</p>
-  <button id="tamper-btn" class="attack">Replay proof with different body</button>
+<div class="card danger">
+  <h3><span class="verb deny">deny</span> The tampered body</h3>
+  <p>An MITM sees you sign <code translate="no">{amount: 1}</code> and tries to rewrite it to <code translate="no">{amount: 1000}</code> mid-flight. The proof signs the body hash too.</p>
+  <div class="btn-row"><button id="tamper-btn" class="attack">Replay proof with different body</button></div>
 </div>
 
 <h2>Session control</h2>
-<button id="me-btn">Check session (/api/me)</button>
-<button id="logout-btn">Sign out</button>
-<button id="clear-btn">Clear everything (cookies + IndexedDB)</button>
+<div class="btn-row">
+  <button id="me-btn">Check session (/api/me)</button>
+  <button id="logout-btn">Sign out</button>
+  <button id="clear-btn" class="ghost">Clear everything (cookies + IndexedDB)</button>
+</div>
 
 <p class="footnote">
-  This is the live demo for <a href="https://www.npmjs.com/package/@dbsc-toolkit/better-auth">@dbsc-toolkit/better-auth</a>.
-  Source: <a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit">github.com/SulimanAbdulrazzaq/dbsc-toolkit</a>.
-  Powered by <a href="https://better-auth.com">Better Auth</a> + <code>dbsc-toolkit</code>.
+  Live demo for <a href="https://www.npmjs.com/package/@dbsc-toolkit/better-auth">@dbsc-toolkit/better-auth</a>.
+  Source on <a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit">GitHub</a>.
+  Powered by <a href="https://better-auth.com">Better Auth</a> and <code translate="no">dbsc-toolkit</code>.
 </p>
 
-</div><!-- /.main -->
+</main><!-- /.main -->
 
-<aside class="sidebar">
+<aside class="sidebar" aria-label="Request output">
   <div class="output-panel">
     <div class="ohead">
-      <span>Output</span>
-      <button id="clear-out">clear</button>
+      <span class="otitle">Output</span>
+      <button id="clear-out" class="ghost">clear</button>
     </div>
-    <div class="obody" style="padding: 0.6rem 0.7rem;">
-      <div id="explain"></div>
-      <pre id="out" style="margin:0;">Click any button — the result shows here.</pre>
+    <div class="obody">
+      <div id="explain" aria-live="polite"></div>
+      <pre id="out">Click any button. The result shows here.</pre>
     </div>
   </div>
 </aside>
@@ -192,16 +270,16 @@ function setTier(state, label, explain) {
 const TIER_COPY = {
   dbsc: ["dbsc", "Hardware-bound. The private key lives in your TPM (Windows) or Secure Enclave (Apple Silicon macOS). JavaScript can't touch it; neither can malware that's not running as you."],
   bound: ["bound", "Software-bound via Web Crypto. The private key sits in IndexedDB with extractable=false, so even XSS can't export it. Works on Firefox, Safari, and Chromium without TPM."],
-  none: ["none", "No binding yet. Registration may still be in flight — give it a second."],
+  none: ["none", "No binding yet. Registration may still be in flight, give it a second."],
 };
 
 function setTierFromOutcome(o) {
-  if (!o) return setTier("unbound", "—", "SDK returned no outcome.");
+  if (!o) return setTier("unbound", "idle", "SDK returned no outcome.");
   if (o.phase === "native-dbsc") return setTier("dbsc", ...TIER_COPY.dbsc);
   if (o.phase === "polyfill-bound") return setTier("bound", ...TIER_COPY.bound);
   if (o.phase === "unbound") return setTier("unbound", "unbound", "Sign in to start a binding.");
   if (o.phase === "error") return setTier("none", "error", "SDK error: " + o.error);
-  setTier("unbound", "—", "Unknown outcome.");
+  setTier("unbound", "idle", "Unknown outcome.");
 }
 
 function show(data) {
@@ -214,7 +292,7 @@ function explain(kind, text) {
 
 function clearExplain() { $("explain").innerHTML = ""; }
 
-$("clear-out").onclick = () => { clearExplain(); $("out").textContent = "Click any button — the result shows here."; };
+$("clear-out").onclick = () => { clearExplain(); $("out").textContent = "Click any button. The result shows here."; };
 
 async function plainFetch(method, path, body, extraHeaders) {
   const headers = extraHeaders ? { ...extraHeaders } : (body ? { "Content-Type": "application/json" } : {});
@@ -270,7 +348,7 @@ $("profile-btn").onclick = async () => {
   const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
   show({ method: "GET", path: "/api/profile", status: r.status, body: b });
   if (r.status === 200) explain("ok", "The signed proof header verified against your bound key. <code>requireProof()</code> let the request through.");
-  else explain("bad", "The proof check failed — see body for the reason code.");
+  else explain("bad", "The proof check failed. See body for the reason code.");
 };
 
 $("pay-btn").onclick = async () => {
@@ -289,7 +367,7 @@ $("pay-btn").onclick = async () => {
 $("theft-btn").onclick = async () => {
   const r = await plainFetch("GET", "/api/profile");
   show(r);
-  if (r.status === 403) explain("ok", "<strong>Defended.</strong> The cookie reached the server but no proof header was sent — <code>requireProof()</code> returned 403 <code>PROOF_MISSING</code>. This is what a stolen cookie pasted into a different browser sees.");
+  if (r.status === 403) explain("ok", "<strong>Defended.</strong> The cookie reached the server but no proof header was sent. <code>requireProof()</code> returned 403 <code>PROOF_MISSING</code>. This is what a stolen cookie pasted into a different browser sees.");
   else if (r.status === 401) explain("info", "Sign in first, then click this button.");
   else explain("bad", "Unexpected status. Check the body.");
 };
@@ -307,7 +385,7 @@ $("tamper-btn").onclick = async () => {
     headers: { "Content-Type": "application/octet-stream" },
     body: JSON.stringify({ amount: 1, to: "merchant" }),
   });
-  if (!capturedProof) return show({ error: "no proof captured — sign in first" });
+  if (!capturedProof) return show({ error: "no proof captured, sign in first" });
   const r = await plainFetch("POST", "/api/payment",
     JSON.stringify({ amount: 1000, to: "attacker" }),
     { "Content-Type": "application/octet-stream", "X-Dbsc-Bound-Proof": capturedProof },
@@ -322,7 +400,7 @@ $("logout-btn").onclick = async () => {
   const r = await plainFetch("POST", "/api/auth/sign-out");
   show(r);
   if (typeof window.clearBoundKey === "function") await window.clearBoundKey().catch(() => {});
-  setTier("unbound", "—", "Signed out. Key cleared from IndexedDB.");
+  setTier("unbound", "idle", "Signed out. Key cleared from IndexedDB.");
 };
 
 $("clear-btn").onclick = async () => {
@@ -350,8 +428,8 @@ $("clear-btn").onclick = async () => {
     try { await window.clearBoundKey(); cleared.indexedDB = true; } catch { /* */ }
   }
 
-  show({ cleared, note: "Reload the page if anything looks stuck — server-side rows for the old session may still exist until they expire." });
-  setTier("unbound", "—", "Cleared. Sign up fresh to start over.");
+  show({ cleared, note: "Reload the page if anything looks stuck. Server-side rows for the old session may still exist until they expire." });
+  setTier("unbound", "idle", "Cleared. Sign up fresh to start over.");
 };
 
 (async function init() {
