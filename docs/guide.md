@@ -157,7 +157,7 @@ One script tag. As of v2.7, the SDK is required on every browser including Chrom
 </script>
 ```
 
-Validation rejects the obvious footguns at install time: empty prefixes, bare `"/"`, absolute URL prefixes, prefixes missing the leading `/`. See [request-signing.md](./request-signing.md#bulk-install-with-installfetchinterceptor-v28).
+Validation rejects the obvious footguns at install time: empty prefixes, bare `"/"`, absolute URL prefixes, prefixes missing the leading `/`. See [request-signing.md](./request-signing.md#bulk-install-with-installfetchinterceptor-v2-8).
 
 ---
 
@@ -175,11 +175,11 @@ Validation rejects the obvious footguns at install time: empty prefixes, bare `"
 | `clientPath` | `"/dbsc-client"` | Where `install()` serves the browser SDK. Omit it → served at `/dbsc-client`. Pass `false` to not serve it (e.g. you bundle the SDK yourself). |
 | `sessionTtl` | `86400000` (24 h) | Lifetime of the DBSC session row. Omit it → 24 h. |
 | `rateLimiter` | `NoopRateLimiter` (no limiting) | `/dbsc/registration` and `/dbsc/refresh` are unauthenticated by design. Without a real limiter they are unthrottled attack surface — **wire one for production.** |
-| `replayCache` (v2.8+) | `NoopReplayCache` (no replay check) | Optional same-second replay defense. Without it, an MITM that captures one valid signed proof off the wire can replay it for up to the timestamp window. With `new RedisReplayCache(redis)` the second arrival 403s as `PROOF_REPLAY`. Default is fine for passive-cookie-theft threat models; turn it on for active MITM, log-spillage exposure, or regulatory replay rejection. See [request-signing.md](./request-signing.md#closing-the-replay-window-v28). |
+| `replayCache` (v2.8+) | `NoopReplayCache` (no replay check) | Optional same-second replay defense. Without it, an MITM that captures one valid signed proof off the wire can replay it for up to the timestamp window. With `new RedisReplayCache(redis)` the second arrival 403s as `PROOF_REPLAY`. Default is fine for passive-cookie-theft threat models; turn it on for active MITM, log-spillage exposure, or regulatory replay rejection. See [request-signing.md](./request-signing.md#closing-the-replay-window-v2-8). |
 | `cookieScope` (v2.9+) | `"host"` | `"host"` uses `__Host-` cookies — origin-locked, strongest. `"site"` switches to `__Secure-` + a `Domain` attribute so an app split across `app.example.com` / `api.example.com` can share the binding. `"site"` requires `cookieDomain` and `secure: true` — passing it wrong throws at construction. Prefer host scope when same-origin (or proxying `/dbsc/*` through one origin) is workable. See [recipes.md](./recipes.md#multi-subdomain-apps-cookiescope-site). |
 | `cookieDomain` (v2.9+) | — | Required and only valid when `cookieScope: "site"`. The registrable apex (e.g. `"example.com"`, no leading dot). |
 | `onEvent` | none (events dropped) | Telemetry callback. Without it you get no `session_stolen` / `verification_failure` / `polyfill_missing` alerts. Strongly recommended in production. |
-| `autoBind` | none | Transparent rollout hook — see [below](#variant-autobind). Omit it → binding happens only via your explicit `dbsc.bind()` call in `/login`. |
+| `autoBind` | none | Transparent rollout hook — see [below](#variant-autobind-transparent-rollout-no-login-change). Omit it → binding happens only via your explicit `dbsc.bind()` call in `/login`. |
 | `registrationPath` / `refreshPath` / `bound*Path` | the `/dbsc/*` and `/dbsc-bound/*` defaults | Only change these if those paths collide with your own routes. |
 
 `requireProof()` itself takes no required arguments. Optional `requireProof({ allowDbscWithoutProof, timestampWindowMs, storage })` covers edge cases; `requireProof()` is the normal call.

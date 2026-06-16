@@ -23,7 +23,7 @@ Mitigation, three layers as of v2.7:
 
 3. **Tier demotion on failed refresh.** When the attacker's browser auto-refreshes (Chrome does this whenever the bound cookie is gone), the TPM-signed JWS check fails because the attacker's device has no matching key. The library demotes the stored tier to `"none"` before re-throwing. From that moment every adapter and every route sees the demoted tier.
 
-Application code must call `requireProof()` on sensitive routes for layer 1 to apply — see [best-practices.md](./best-practices.md#enforcing-the-tier--the-part-that-actually-defends).
+Application code must call `requireProof()` on sensitive routes for layer 1 to apply — see [best-practices.md](./best-practices.md#enforcing-the-tier-the-part-that-actually-defends).
 
 Residual risk: layer 1 collapses the window to zero on guarded routes — a stolen cookie 403s immediately. Routes not guarded by `requireProof()` still rely on layers 2 and 3, so they retain up to `boundCookieTtl` seconds of attacker access on the first request before degrading. Pre-2.7, even guarded routes had that window on Chromium — see CHANGELOG 2.7.0.
 

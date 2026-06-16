@@ -13,7 +13,7 @@ The one concept every recipe shares: **DBSC binds to a `sessionId` string.** Wit
 | `iron-session` | [iron-session](#iron-session) | `deriveSessionId({ userId: session.userId })` |
 | Lucia | [Lucia](#lucia) | `session.id` (DB mode) or `deriveSessionId` (stateless) |
 | Raw JWT cookie, hand-rolled | [NextAuth JWT](#nextauth-in-jwt-mode) | `deriveSessionId({ userId: claims.sub })` |
-| OAuth / SSO login | [OAuth callback](#oauth--sso-callback) | whichever of the above your app uses |
+| OAuth / SSO login | [OAuth callback](#oauth-sso-callback) | whichever of the above your app uses |
 
 ---
 
@@ -259,7 +259,7 @@ const dbsc = createDbsc({
 });
 ```
 
-Setup, atomicity, and TTL details: [request-signing.md](./request-signing.md#closing-the-replay-window-v28).
+Setup, atomicity, and TTL details: [request-signing.md](./request-signing.md#closing-the-replay-window-v2-8).
 
 ---
 
