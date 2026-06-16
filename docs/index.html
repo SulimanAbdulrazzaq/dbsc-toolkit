@@ -8,8 +8,7 @@
 <meta name="description" content="Server-side Device Bound Session Credentials (DBSC) for Node.js, on any framework. Express, Fastify, Hono, Next.js, NestJS, Koa and SvelteKit adapters that bind session cookies to a hardware TPM key to stop cookie theft, plus a Web Crypto polyfill for Firefox and Safari.">
 <link rel="canonical" href="https://sulimanabdulrazzaq.github.io/dbsc-toolkit/">
 <meta name="robots" content="index, follow">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0a0d12" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#0a0d12">
 
 <meta property="og:type" content="website">
 <meta property="og:title" content="DBSC for Node.js - Device Bound Session Credentials Server Library">
@@ -36,49 +35,28 @@
 
 <style>
 :root {
-  color-scheme: light dark;
-  --bg: #ffffff;
-  --bg-soft: #f7f9fb;
-  --panel: #ffffff;
-  --text: #0e1319;
-  --muted: #586573;
-  --faint: #8a94a2;
-  --border: #e6eaef;
-  --border-strong: #d3dae2;
-  --accent: #0b8049;
-  --accent-bg: #0b8049;
-  --on-accent: #ffffff;
-  --accent-soft: rgba(11, 128, 73, 0.08);
-  --accent-line: rgba(11, 128, 73, 0.22);
-  --danger: #c33a4d;
-  --danger-soft: rgba(195, 58, 77, 0.09);
-  --code-bg: #f7f9fb;
-  --shadow: 0 1px 2px rgba(16,24,33,.04), 0 12px 32px -16px rgba(16,24,33,.18);
+  color-scheme: dark;
+  --bg: #0a0d12;
+  --bg-soft: #0e131b;
+  --panel: #11161f;
+  --text: #e9eef4;
+  --muted: #99a4b3;
+  --faint: #69737f;
+  --border: #1c242f;
+  --border-strong: #2a3340;
+  --accent: #4ce29a;
+  --accent-bg: #2ec47e;
+  --on-accent: #04130b;
+  --accent-soft: rgba(76, 226, 154, 0.10);
+  --accent-line: rgba(76, 226, 154, 0.26);
+  --danger: #f47282;
+  --danger-soft: rgba(244, 114, 130, 0.12);
+  --code-bg: #0d121a;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 16px 40px -20px rgba(0,0,0,.6);
   --r: 14px;
   --r-sm: 9px;
   --maxw: 1080px;
   --s1: 8px; --s2: 16px; --s3: 24px; --s4: 40px; --s5: 64px; --s6: 96px;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0a0d12;
-    --bg-soft: #0e131b;
-    --panel: #11161f;
-    --text: #e9eef4;
-    --muted: #99a4b3;
-    --faint: #69737f;
-    --border: #1c242f;
-    --border-strong: #2a3340;
-    --accent: #4ce29a;
-    --accent-bg: #2ec47e;
-    --on-accent: #04130b;
-    --accent-soft: rgba(76, 226, 154, 0.10);
-    --accent-line: rgba(76, 226, 154, 0.26);
-    --danger: #f47282;
-    --danger-soft: rgba(244, 114, 130, 0.12);
-    --code-bg: #0d121a;
-    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 16px 40px -20px rgba(0,0,0,.6);
-  }
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; scroll-padding-top: 88px; -webkit-text-size-adjust: 100%; }
@@ -263,12 +241,12 @@ section.alt { background: var(--bg-soft); border-top: 1px solid var(--border); b
 <section class="hero">
   <div class="wrap">
     <div>
-      <span class="tagpill"><span class="v">v2.11</span> Device Bound Session Credentials for Node.js</span>
+      <span class="tagpill"><span class="v">v2.12</span> Device Bound Session Credentials for Node.js</span>
       <h1>Stop stolen session cookies from being <span class="em">replayed.</span></h1>
-      <p class="lead">The cookie still copies. The device key it needs to refresh doesn’t. A session lifted to another machine dies on the next request.</p>
+      <p class="lead">The cookie still copies. The device key it needs to refresh does not. A session lifted to another machine dies on the next request.</p>
       <div class="cta">
-        <a class="btn btn-primary" href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit#readme">Get Started</a>
-        <a class="btn btn-ghost" href="./docs.html">Read the Docs</a>
+        <a class="btn btn-primary" href="./docs.html?doc=docs/getting-started.md">Get started</a>
+        <a class="btn btn-ghost" href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit">View on GitHub</a>
       </div>
     </div>
     <div class="exchange reveal" role="img" aria-label="The real device gets 200 OK; the same cookie replayed from another machine gets 403 rejected.">
@@ -297,7 +275,7 @@ section.alt { background: var(--bg-soft); border-top: 1px solid var(--border); b
 
 <section class="alt" id="why">
   <div class="wrap">
-    <h2 class="h2 reveal">A Session Cookie Trusts Whoever Holds It</h2>
+    <h2 class="h2 reveal">A session cookie trusts whoever holds it</h2>
     <p class="sec-lead reveal">That single property drives most account takeovers. Infostealer malware lifts the cookie off disk, the attacker pastes it into their own browser, and they are you. No password, no MFA prompt. DBSC binds the session to a key that never leaves the device, so a copied cookie has nothing to sign with.</p>
     <div class="panel reveal" style="max-width:760px;">
       <div class="bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span class="fname">the mechanism</span></div>
@@ -316,22 +294,22 @@ tier: <span class="tok-s">"none"</span>  <span class="tok-c">// replay rejected,
 
 <section id="how">
   <div class="wrap">
-    <h2 class="h2 reveal">How the Binding Holds</h2>
+    <h2 class="h2 reveal">How the binding holds</h2>
     <p class="sec-lead reveal">The server is reactive. It sets one header after login and answers two endpoints; the browser drives the rest. You never write the protocol routes.</p>
     <div class="steps reveal">
       <div class="step">
         <div class="lab">Register</div>
-        <h3>Key Born in Hardware</h3>
+        <h3>Key born in hardware</h3>
         <p>At login the browser creates an EC P-256 keypair in the TPM or Secure Enclave and registers the public half. The private key never leaves the chip.</p>
       </div>
       <div class="step">
         <div class="lab">Refresh</div>
-        <h3>Proof Every Cycle</h3>
+        <h3>Proof every cycle</h3>
         <p>The bound cookie is short-lived. Before each renewal the browser signs a fresh server challenge. A device without the key cannot refresh.</p>
       </div>
       <div class="step">
         <div class="lab">Guard</div>
-        <h3>One Call per Route</h3>
+        <h3>One call per route</h3>
         <p><code translate="no">requireProof()</code> demands a per-request signature on sensitive routes, closing the gap between refreshes. Same guard on every browser.</p>
       </div>
     </div>
@@ -340,8 +318,8 @@ tier: <span class="tok-s">"none"</span>  <span class="tok-c">// replay rejected,
 
 <section class="alt" id="tiers">
   <div class="wrap">
-    <h2 class="h2 reveal">Every Browser, One Server</h2>
-    <p class="sec-lead reveal">Native DBSC is Chromium-only today. The Web Crypto polyfill covers the rest, so you read one <code translate="no">tier</code> and don’t branch per browser. Run native-only with <code translate="no">bound: false</code>.</p>
+    <h2 class="h2 reveal">Every browser, one server</h2>
+    <p class="sec-lead reveal">Native DBSC is Chromium-only today. The Web Crypto polyfill covers the rest, so you read one <code translate="no">tier</code> and don't branch per browser. Run native-only with <code translate="no">bound: false</code>.</p>
     <table class="tiers reveal">
       <thead>
         <tr><th scope="col">Tier</th><th scope="col">Where the key lives</th><th scope="col">Remote cookie theft</th><th scope="col">On-device infostealer</th></tr>
@@ -357,7 +335,7 @@ tier: <span class="tok-s">"none"</span>  <span class="tok-c">// replay rejected,
 
 <section id="frameworks">
   <div class="wrap">
-    <h2 class="h2 reveal">DBSC for Any Node.js Framework</h2>
+    <h2 class="h2 reveal">DBSC for any Node.js framework</h2>
     <p class="sec-lead reveal">Every adapter is a thin shell over the same framework-agnostic core. Pick yours, or wire the core into anything when no adapter exists.</p>
     <div class="fwgrid">
 
@@ -403,7 +381,7 @@ export default dbsc.middleware();
 
       <article class="fw reveal" id="koa">
         <div class="fwhead"><h3>DBSC for Koa</h3><span class="imp" translate="no">dbsc-toolkit/koa</span></div>
-        <p>Middleware over Koa’s raw request and response objects.</p>
+        <p>Middleware over Koa's raw request and response objects.</p>
 <pre><code translate="no">const dbsc = createDbsc({ storage });
 dbsc.install(app);
 await dbsc.bind(ctx, sessionId, { userId });</code></pre>
@@ -418,7 +396,7 @@ export const handle = dbscHandle({ storage });
       </article>
 
       <article class="fw reveal span2" id="node">
-        <div class="fwhead"><h3>Any Other Server, via raw node:http or the core</h3><span class="imp" translate="no">dbsc-toolkit/node</span></div>
+        <div class="fwhead"><h3>Any other server, via raw node:http or the core</h3><span class="imp" translate="no">dbsc-toolkit/node</span></div>
         <p>No adapter for your framework? The generic <code translate="no">node:http</code> handler works with any server that exposes the Node request and response objects, and the framework-agnostic core (<code translate="no">handleRegistration</code>, <code translate="no">handleRefresh</code>, <code translate="no">verifyBoundProof</code> plus a <code translate="no">StorageAdapter</code>) wires into anything.</p>
 <pre><code translate="no">const handle = dbsc.handler();
 createServer(async (req, res) => {
@@ -434,10 +412,10 @@ createServer(async (req, res) => {
 <section class="alt install" id="install">
   <div class="wrap">
     <div class="reveal">
-      <h2 class="h2">Install and Bind in Minutes</h2>
+      <h2 class="h2">Install and bind in minutes</h2>
       <p class="sec-lead" style="margin-bottom:24px;">One dependency, optional framework and storage peers. Memory storage to start; Redis or Postgres for production.</p>
       <div class="copybox"><span class="cmd" translate="no">npm install dbsc-toolkit</span></div>
-      <a class="btn btn-primary" href="./docs.html?doc=docs/getting-started.md">Read the Quickstart</a>
+      <a class="btn btn-primary" href="https://www.npmjs.com/package/dbsc-toolkit">View on npm</a>
     </div>
     <div class="panel reveal">
       <div class="bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span class="fname">payment.js</span></div>
@@ -452,22 +430,22 @@ app.<span class="tok-f">post</span>(<span class="tok-s">"/payment"</span>, dbsc.
 
 <section id="learn">
   <div class="wrap">
-    <h2 class="h2 reveal">Learn the Protocol</h2>
+    <h2 class="h2 reveal">Learn the protocol</h2>
     <p class="sec-lead reveal">Full documentation on this site, plus deep dives written from shipping it against real hardware.</p>
     <div class="learn">
       <a class="lc reveal" href="./docs.html?doc=docs/getting-started.md">
-        <h3>Getting Started</h3>
+        <h3>Getting started</h3>
         <p>Zero to a bound session on Express in under five minutes, with the failure modes called out.</p>
         <span class="go">Open guide</span>
       </a>
       <a class="lc reveal" href="./docs.html?doc=docs/blog/dbsc-explained.md">
-        <h3>How DBSC Works</h3>
+        <h3>How DBSC works</h3>
         <p>The whole protocol end to end, framework-free. Registration, refresh, the tier model, and what it protects.</p>
         <span class="go">Read the explainer</span>
       </a>
       <a class="lc reveal" href="./docs.html?doc=docs/blog/what-dbsc-protects.md">
-        <h3>The Threat Boundary</h3>
-        <p>What DBSC stops and what it doesn’t. An honest read you can hand to a security review.</p>
+        <h3>The threat boundary</h3>
+        <p>What DBSC stops and what it doesn't. An honest read you can hand to a security review.</p>
         <span class="go">See the limits</span>
       </a>
     </div>
@@ -476,19 +454,19 @@ app.<span class="tok-f">post</span>(<span class="tok-s">"/payment"</span>, dbsc.
 
 <section class="alt" id="spec">
   <div class="wrap">
-    <h2 class="h2 reveal">A Spec, Not Just a Library</h2>
+    <h2 class="h2 reveal">A spec, not just a library</h2>
     <p class="sec-lead reveal">The wire protocol is written up as a language-neutral specification with round-trip test vectors. Node is the reference implementation; the spec is what lets a conforming DBSC server be built in any language.</p>
     <div class="cred">
       <div class="reveal">
-        <div class="big">Language-Neutral Spec</div>
+        <div class="big">Language-neutral spec</div>
         <p>Header grammar, JWS and JSON shapes, the storage and cookie contracts, and error codes. <a href="./docs.html?doc=spec/README.md">Read the spec</a></p>
       </div>
       <div class="reveal">
-        <div class="big">Round-Trip Test Vectors</div>
+        <div class="big">Round-trip test vectors</div>
         <p>Known inputs and expected outputs, so any implementation self-checks without a browser. <a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/tree/main/spec/vectors">Test vectors</a></p>
       </div>
       <div class="reveal">
-        <div class="big">Verified End to End</div>
+        <div class="big">Verified end to end</div>
         <p>Tested against Chrome 147 on real TPM 2.0 hardware, including the refresh cycle. <a href="./docs.html?doc=docs/blog/dbsc-explained.md">How it works</a></p>
       </div>
     </div>

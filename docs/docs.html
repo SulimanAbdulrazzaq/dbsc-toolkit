@@ -6,34 +6,22 @@
 <title>Docs - dbsc-toolkit | Device Bound Session Credentials for Node.js</title>
 <meta name="description" content="Documentation for dbsc-toolkit: getting started, framework adapters, per-request signing, storage, deployment, the language-neutral DBSC spec, and security guides.">
 <link rel="canonical" href="https://sulimanabdulrazzaq.github.io/dbsc-toolkit/docs.html">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0a0d12" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#0a0d12">
 
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://raw.githubusercontent.com" crossorigin>
-<link rel="stylesheet" media="(prefers-color-scheme: light)" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11/styles/github.min.css">
-<link rel="stylesheet" media="(prefers-color-scheme: dark)" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11/styles/github-dark.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11/styles/github-dark.min.css">
 
 <style>
 :root {
-  color-scheme: light dark;
-  --bg: #ffffff; --bg-soft: #f7f9fb; --panel: #ffffff;
-  --text: #0e1319; --muted: #586573; --faint: #8a94a2;
-  --border: #e6eaef; --border-strong: #d3dae2;
-  --accent: #0b8049; --accent-bg: #0b8049; --on-accent: #ffffff;
-  --accent-soft: rgba(11,128,73,.08);
-  --code-bg: #f7f9fb;
+  color-scheme: dark;
+  --bg: #0a0d12; --bg-soft: #0e131b; --panel: #11161f;
+  --text: #e9eef4; --muted: #99a4b3; --faint: #69737f;
+  --border: #1c242f; --border-strong: #2a3340;
+  --accent: #4ce29a; --accent-bg: #2ec47e; --on-accent: #04130b;
+  --accent-soft: rgba(76,226,154,.10);
+  --code-bg: #0d121a;
   --r: 12px; --r-sm: 9px; --side: 264px;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0a0d12; --bg-soft: #0e131b; --panel: #11161f;
-    --text: #e9eef4; --muted: #99a4b3; --faint: #69737f;
-    --border: #1c242f; --border-strong: #2a3340;
-    --accent: #4ce29a; --accent-bg: #2ec47e; --on-accent: #04130b;
-    --accent-soft: rgba(76,226,154,.10);
-    --code-bg: #0d121a;
-  }
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; scroll-padding-top: 84px; }
@@ -205,10 +193,8 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
   var docEl = document.getElementById("doc");
   var sidebar = document.getElementById("sidebar");
   var menuToggle = document.getElementById("menuToggle");
-  var darkMQ = window.matchMedia("(prefers-color-scheme: dark)");
-
   try {
-    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: darkMQ.matches ? "dark" : "neutral" });
+    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "dark" });
   } catch (e) {}
 
   // build sidebar
@@ -354,7 +340,6 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
   });
 
   window.addEventListener("popstate", function () { var p = currentDocFromUrl(); setActive(p); load(p); });
-  if (darkMQ.addEventListener) darkMQ.addEventListener("change", function () { var p = currentDocFromUrl(); load(p); });
 
   var start = currentDocFromUrl();
   setActive(start);
