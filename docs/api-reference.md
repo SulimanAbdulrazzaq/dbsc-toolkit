@@ -126,13 +126,13 @@ interface AutoBindResult {
 }
 ```
 
-`bound` (default `true`) toggles the Web Crypto polyfill. Set `false` to run native DBSC only (Chromium 145+): the `/dbsc-bound/challenge`, `/dbsc-bound/registration`, and `/dbsc-bound/refresh` routes are not mounted (`/dbsc-bound/state` still answers `phase: "unbound"` so a loaded client SDK stands down), non-Chromium browsers stay at `tier: "none"`, and `requireProof()` auto-relaxes so a native `dbsc`-tier session passes without a per-request bound proof. Use it only when you can mandate a Chromium build with a hardware key store; for general-audience apps the polyfill is what covers Firefox / Safari. See [bound-polyfill.md](./bound-polyfill.md#disabling-the-polyfill-bound-false).
+`bound` (default `true`) toggles the Web Crypto polyfill. Set `false` to run native DBSC only (Chromium 145+): the `/dbsc-bound/challenge`, `/dbsc-bound/registration`, and `/dbsc-bound/refresh` routes are not mounted (`/dbsc-bound/state` still answers `phase: "unbound"` so a loaded client SDK stands down), non-Chromium browsers stay at `tier: "none"`, and `requireProof()` auto-relaxes so a native `dbsc`-tier session passes without a per-request bound proof. Use it only when you can mandate a Chromium build with a hardware key store; for general-audience apps the polyfill is what covers Firefox / Safari. See [polyfill.md](./polyfill.md#disabling-the-polyfill-bound-false).
 
-`autoBind` is the transparent-migration hook. The middleware calls it on every request that does not carry the bound cookie yet, passing the framework-native request. Return a `{ sessionId, userId }` to start binding, or `null` to skip. See [integrating-existing-auth.md](./integrating-existing-auth.md).
+`autoBind` is the transparent-migration hook. The middleware calls it on every request that does not carry the bound cookie yet, passing the framework-native request. Return a `{ sessionId, userId }` to start binding, or `null` to skip. See [guide.md](./guide.md).
 
 `refreshGraceMs` (2.5.0+) extends the freshness check. A bound cookie's freshness lapses at `lastRefreshAt + boundCookieTtl`, but the browser's next `/dbsc/refresh` lands a short moment later — during that gap a `/me`-style poll would see `tier: "none"`. The middleware keeps the previous tier until `lastRefreshAt + boundCookieTtl + refreshGraceMs`. Default 30000 ms. Set `0` to demote the instant freshness lapses (use on routes that tolerate no grace).
 
-`cookieScope` (2.9.0+) picks the cookie-prefix model. `"host"` (default) keeps the `__Host-` prefix — origin-locked, no `Domain` attribute, strongest. `"site"` switches to `__Secure-` and emits `Domain=<cookieDomain>`, so an app spread across `app.example.com` and `api.example.com` can share one binding. `"site"` requires `cookieDomain` (the registrable apex, no leading dot) and `secure: true`; passing either wrong throws at `dbsc()` / `createDbsc()` construction so the misconfiguration cannot reach a request. `__Secure-` cookies do not carry `__Host-`'s protection against a sibling subdomain setting or overwriting the cookie — prefer host scope when a same-origin deployment (or proxying `/dbsc/*` + `/dbsc-bound/*` through one origin) is workable. See [integration-recipes.md](./integration-recipes.md#multi-subdomain-cookiescope-site).
+`cookieScope` (2.9.0+) picks the cookie-prefix model. `"host"` (default) keeps the `__Host-` prefix — origin-locked, no `Domain` attribute, strongest. `"site"` switches to `__Secure-` and emits `Domain=<cookieDomain>`, so an app spread across `app.example.com` and `api.example.com` can share one binding. `"site"` requires `cookieDomain` (the registrable apex, no leading dot) and `secure: true`; passing either wrong throws at `dbsc()` / `createDbsc()` construction so the misconfiguration cannot reach a request. `__Secure-` cookies do not carry `__Host-`'s protection against a sibling subdomain setting or overwriting the cookie — prefer host scope when a same-origin deployment (or proxying `/dbsc/*` + `/dbsc-bound/*` through one origin) is workable. See [recipes.md](./recipes.md#multi-subdomain-apps-cookiescope-site).
 
 ### Cookie-scope helpers (for adapter authors)
 
@@ -174,7 +174,7 @@ function deriveSessionId(input: DeriveSessionIdInput): Promise<string>;
 
 Produces a stable, deterministic, opaque `sessionId` for `bindSession()` when the caller has no server-side session row to take an id from — JWT-mode NextAuth, iron-session, Lucia stateless, raw JWT cookies. Same input always returns the same id. SHA-256 of `${namespace}.${userId}.${deviceHint ?? ""}`, base64url-encoded.
 
-**`deviceHint` matters for multi-device users.** Without it, the same `userId` always derives the same id — so a user on two browsers collides on one binding, and the second browser fails to register. Pass a per-device value as `deviceHint`. You normally don't call `deriveSessionId` directly: the `createDbsc` kit's `bind(res, { userId })` does it for you and **auto-manages a `__Host-dbsc-device` cookie** as the `deviceHint`, so each browser binds independently with no extra code. See [integration-recipes.md](./integration-recipes.md).
+**`deviceHint` matters for multi-device users.** Without it, the same `userId` always derives the same id — so a user on two browsers collides on one binding, and the second browser fails to register. Pass a per-device value as `deviceHint`. You normally don't call `deriveSessionId` directly: the `createDbsc` kit's `bind(res, { userId })` does it for you and **auto-manages a `__Host-dbsc-device` cookie** as the `deviceHint`, so each browser binds independently with no extra code. See [recipes.md](./recipes.md).
 
 ### Route protection
 
@@ -290,7 +290,7 @@ interface SkippedEntry { reason: SkippedReason; sessionId?: string }
 function parseSessionSkippedHeader(headers: Record<string, string | string[] | undefined>): SkippedEntry[];
 ```
 
-`buildChallengeHeader` takes an optional `sessionId` that becomes a `;id="..."` parameter on the header value. Chromium 146+ requires it on `Secure-Session-Challenge` responses or it silently drops the challenge.
+`buildChallengeHeader` takes an optional `sessionId` that becomes a `;id="..."` parameter on the header value. Chromium 145+ requires it on `Secure-Session-Challenge` responses or it silently drops the challenge.
 
 `parseSessionSkippedHeader` reads the browser's diagnostic header that explains why a request arrived without the bound credential. See [troubleshooting.md](./troubleshooting.md) for what each reason means.
 
@@ -343,7 +343,7 @@ function handleBoundRefresh(req: BoundRefreshRequest, storage: StorageAdapter): 
 // Web Crypto signature verification helper used by both handlers, exposed for adapters.
 function verifyP256Signature(jwk: JsonWebKey, signatureB64Url: string, message: string): Promise<boolean>;
 
-// Per-request signing — see docs/per-request-signing.md.
+// Per-request signing — see docs/request-signing.md.
 // Throws DbscVerificationError on any failure; the caller decides the HTTP status.
 const BOUND_PROOF_HEADER = "X-Dbsc-Bound-Proof";
 interface VerifyBoundProofRequest {
@@ -357,7 +357,7 @@ function verifyBoundProof(req: VerifyBoundProofRequest, storage: StorageAdapter)
 function parseProofHeader(s: string): { ts: number; sig: string } | null;
 ```
 
-The bound polyfill protocol is documented in [bound-polyfill.md](./bound-polyfill.md). The per-request signing flow is documented in [per-request-signing.md](./per-request-signing.md). `ErrorCodes` entries added across releases: `MISSING_PROOF`, `MALFORMED_PROOF` (v2.1.0+), `PROOF_REPLAY`, `KEY_NOT_FOUND_NATIVE`, `KEY_NOT_FOUND_BOUND` (v2.8+).
+The bound polyfill protocol is documented in [polyfill.md](./polyfill.md). The per-request signing flow is documented in [request-signing.md](./request-signing.md). `ErrorCodes` entries added across releases: `MISSING_PROOF`, `MALFORMED_PROOF` (v2.1.0+), `PROOF_REPLAY`, `KEY_NOT_FOUND_NATIVE`, `KEY_NOT_FOUND_BOUND` (v2.8+).
 
 ### Telemetry
 
@@ -465,7 +465,7 @@ function bindSession(
   opts: BindSessionOptions,
 ): Promise<void>;
 
-// Per-request signing gate for sensitive routes — see docs/per-request-signing.md.
+// Per-request signing gate for sensitive routes — see docs/request-signing.md.
 interface RequireBoundProofOptions {
   storage: StorageAdapter;
   allowDbscWithoutProof?: boolean;   // v2.7+ default: false — every tier must prove
@@ -714,7 +714,7 @@ Generic raw `node:http`. No `install()` — branch on the handler's boolean retu
 
 ## `dbsc-toolkit/client`
 
-Browser-side SDK for the bound polyfill. Load on every page that needs `tier: "bound"` on non-Chromium browsers; Chromium 146+ users see no effect (the SDK detects the native binding and steps back).
+Browser-side SDK for the bound polyfill. Load on every page that needs `tier: "bound"` on non-Chromium browsers; Chromium 145+ users see no effect (the SDK detects the native binding and steps back).
 
 ```ts
 interface InitBoundDbscOptions {
@@ -742,7 +742,7 @@ function stopBoundDbsc(): void;
 // Drops the IndexedDB key record. Call after logout (2.3.0+).
 function clearBoundKey(): Promise<void>;
 
-// Per-request signing for sensitive routes — see docs/per-request-signing.md.
+// Per-request signing for sensitive routes — see docs/request-signing.md.
 // Returns a NEW fetch-shaped function. Do not assign to globalThis.fetch.
 interface WrapFetchOptions {
   fetch?: typeof fetch;
@@ -785,7 +785,7 @@ installFetchInterceptor({ pathPrefixes: ["/api/secure/"] });
 // from now on `fetch("/api/secure/...")` carries the proof header.
 ```
 
-See [bound-polyfill.md](./bound-polyfill.md) for the wire protocol and threat coverage.
+See [polyfill.md](./polyfill.md) for the wire protocol and threat coverage.
 
 ---
 

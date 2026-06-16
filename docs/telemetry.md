@@ -145,7 +145,7 @@ Wire it to a dashboard counter and a low-volume alert. A spike in `polyfill_miss
 
 The library does not depend on OpenTelemetry, but the event shapes map cleanly onto OTel attributes. Suggested span/metric attribute names:
 
-```
+```text
 dbsc.session_id    = event.sessionId
 dbsc.tier          = event.tier
 dbsc.event_type    = event.type

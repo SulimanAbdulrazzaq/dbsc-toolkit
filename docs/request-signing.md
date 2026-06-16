@@ -1,6 +1,6 @@
 # Per-request signing
 
-Native DBSC signs the *refresh* of the session, not every request, and the TPM key Chrome holds is never exposed to JavaScript — so without a second mechanism, a stolen cookie pasted into another browser works as the legitimate user until the refresh cycle catches up. The bound polyfill ([docs/bound-polyfill.md](./bound-polyfill.md)) closes that window by signing every request with a key in IndexedDB.
+Native DBSC signs the *refresh* of the session, not every request, and the TPM key Chrome holds is never exposed to JavaScript — so without a second mechanism, a stolen cookie pasted into another browser works as the legitimate user until the refresh cycle catches up. The bound polyfill ([docs/polyfill.md](./polyfill.md)) closes that window by signing every request with a key in IndexedDB.
 
 As of v2.7, **Chromium sessions register the polyfill key alongside the TPM key**, so every guarded request — on every tier, on every browser — carries a signed proof. The TPM key keeps doing the background refresh; the polyfill key handles per-request enforcement. v2.8 adds an optional replay cache that rejects a second arrival of the same proof bytes, closing the captured-proof gap that the ±5-minute timestamp window leaves open.
 
@@ -18,7 +18,7 @@ For small apps, the per-call `wrapFetch(...)` shape stays the recommended defaul
 
 ## How it works
 
-```
+```text
 Client (Firefox or Safari, tier: "bound")
   ┌─────────────────────────────────────────────────────────┐
   │ wrapFetch()                                             │
@@ -71,7 +71,7 @@ app.post("/settings/email", requireBoundProof({ storage }), emailHandler);
 
 As of v2.7 the default for `allowDbscWithoutProof` is `false`: Chromium sessions must carry the proof header on guarded routes, exactly like every other browser. The v2.7 client SDK co-registers a polyfill ECDSA key on Chromium alongside the TPM key, and `wrapFetch` signs every guarded request with the polyfill key — the TPM key continues to drive `/dbsc/refresh` in the background. The legacy v2.6 default of `true` left a refresh-cycle replay window open on Chromium (a stolen cookie passed `requireProof()` until the next refresh failed signature verification); pass `allowDbscWithoutProof: true` to reinstate that behavior if your Chromium clients cannot ship the v2.7 SDK.
 
-Running with `bound: false` (native-only mode) flips this implicitly: with the polyfill off there is no bound key to verify a per-request proof against, so `requireProof()` auto-relaxes the `dbsc` tier — equivalent to `allowDbscWithoutProof: true`, but you don't set it. The session relies on the refresh-cycle binding only. An explicit `allowDbscWithoutProof` still takes precedence. See [bound-polyfill.md](./bound-polyfill.md#disabling-the-polyfill-bound-false).
+Running with `bound: false` (native-only mode) flips this implicitly: with the polyfill off there is no bound key to verify a per-request proof against, so `requireProof()` auto-relaxes the `dbsc` tier — equivalent to `allowDbscWithoutProof: true`, but you don't set it. The session relies on the refresh-cycle binding only. An explicit `allowDbscWithoutProof` still takes precedence. See [polyfill.md](./polyfill.md#disabling-the-polyfill-bound-false).
 
 ### Server, Fastify / Hono / Next.js
 
@@ -156,7 +156,7 @@ Proof failures emit `verification_failure` events with `reason` set to one of:
 - `SIGNATURE_INVALID` — header parsed but the signature did not verify, or the timestamp was outside the window.
 - `KEY_NOT_FOUND` — no `BoundKey` stored for the session id. Usually means the storage row was wiped between registration and this call (Memory storage on a restarted server).
 
-A sustained spike of `MISSING_PROOF` or `SIGNATURE_INVALID` on a single session id is a credible cookie-theft signal. The plain bound-tier `session_stolen` event already fires on refresh-signature mismatch; this gives you a second, earlier signal at request time.
+A sustained spike of `MISSING_PROOF` or `SIGNATURE_INVALID` on a single session id is a credible cookie-theft signal. The plain bound-tier `session_stolen` event already fires on refresh-signature mismatch; this gives you a second, earlier signal at request time. For wiring `onEvent` and alert recipes in general, see [telemetry.md](./telemetry.md).
 
 ## Body signing setup (v2.3.0+)
 

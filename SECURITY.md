@@ -56,7 +56,7 @@ v2.9.4 closed two small audit findings: the native `/dbsc/registration` and `/db
 
 `cookieScope: "site"` switches the binding cookies from `__Host-` to `__Secure-` with an explicit `Domain` attribute, so an app split across `app.example.com` and `api.example.com` can share one binding. The trade-off is that `__Secure-` cookies do not carry `__Host-`'s protection against a sibling subdomain setting or overwriting the cookie. Only enable `cookieScope: "site"` when a same-origin layout (or proxying `/dbsc/*` and `/dbsc-bound/*` through one origin) is genuinely not workable. Construction-time validation rejects the obviously-wrong combinations; the residual trade-off is the one described.
 
-See [docs/security/threat-model.md](./docs/security/threat-model.md) for the STRIDE analysis and [docs/bound-polyfill.md](./docs/bound-polyfill.md) for the per-attack threat table.
+See [docs/security/threat-model.md](./docs/security/threat-model.md) for the STRIDE analysis and [docs/polyfill.md](./docs/polyfill.md) for the per-attack threat table.
 
 ## Dependency policy
 

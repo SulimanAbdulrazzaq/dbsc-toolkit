@@ -44,7 +44,7 @@ Cluster mode works the same way — pass an `ioredis.Cluster` instance instead o
 
 Key shape (with default prefix):
 
-```
+```text
 dbsc:session:<id>            JSON-encoded Session, EXPIRE = expiresAt
 dbsc:key:<sessionId>         JSON-encoded BoundKey, EXPIRE matches session
 dbsc:challenge:<jti>         JSON-encoded Challenge, EXPIRE = 5 min
@@ -140,7 +140,7 @@ createDbsc({
 
 The cache is keyed under `dbsc:proof:` by default. Override via the constructor: `new RedisReplayCache(redis, "myapp:proof:")`. Entries expire automatically via Redis TTL — no background GC.
 
-There is no Postgres replay-cache adapter yet. Postgres-only deployments either accept the default no-op cache or pair with Redis for the cache. See [docs/per-request-signing.md](./per-request-signing.md#closing-the-replay-window-v28) for the threat model.
+There is no Postgres replay-cache adapter yet. Postgres-only deployments either accept the default no-op cache or pair with Redis for the cache. See [docs/request-signing.md](./request-signing.md#closing-the-replay-window-v2-8) for the threat model.
 
 If you implement your own:
 

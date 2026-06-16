@@ -9,6 +9,7 @@
 <link rel="canonical" href="https://sulimanabdulrazzaq.github.io/dbsc-toolkit/">
 <meta name="robots" content="index, follow">
 <meta name="theme-color" content="#ffffff" id="theme-color-meta">
+<script>try{var t=localStorage.getItem("dbsc-theme");if(t==="dark"||t==="light")document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
 
 <meta property="og:type" content="website">
 <meta property="og:title" content="DBSC for Node.js - Device Bound Session Credentials Server Library">
@@ -119,9 +120,10 @@ p { text-wrap: pretty; }
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: var(--r-sm); border: 1px solid var(--border-strong); background: var(--panel); color: var(--muted); cursor: pointer; margin-left: 6px; touch-action: manipulation; }
 .icon-btn:hover { color: var(--text); border-color: var(--accent); }
 .icon-btn svg { width: 17px; height: 17px; }
+.icon-btn .sun { display: block; }
 .icon-btn .moon { display: none; }
 [data-theme="dark"] .icon-btn .sun { display: none; }
-[data-theme="dark"] .icon-btn .moon { display: inline; }
+[data-theme="dark"] .icon-btn .moon { display: block; }
 @media (max-width: 720px) { .nav-links a.hideable { display: none; } }
 
 /* buttons */
@@ -280,7 +282,7 @@ p { text-wrap: pretty; }
       <h1>Stop stolen session cookies from being <span class="em">replayed.</span></h1>
       <p class="lead">The cookie still copies. The device key it needs to refresh does not. A session lifted to another machine dies on the next request.</p>
       <div class="cta">
-        <a class="btn btn-primary" href="./docs.html?doc=docs/getting-started.md">Get started</a>
+        <a class="btn btn-primary" href="./docs.html?doc=docs/quickstart.md">Get started</a>
         <a class="btn btn-ghost" href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit">View on GitHub</a>
       </div>
     </div>
@@ -491,7 +493,7 @@ app.<span class="tok-f">post</span>(<span class="tok-s">"/payment"</span>, dbsc.
     <h2 class="h2 reveal">Learn the protocol</h2>
     <p class="sec-lead reveal">Full documentation on this site, plus deep dives written from shipping it against real hardware.</p>
     <div class="learn">
-      <a class="lc reveal" href="./docs.html?doc=docs/getting-started.md">
+      <a class="lc reveal" href="./docs.html?doc=docs/quickstart.md">
         <h3>Getting started</h3>
         <p>Zero to a bound session on Express in under five minutes, with the failure modes called out.</p>
         <span class="go">Open guide</span>
@@ -547,15 +549,20 @@ app.<span class="tok-f">post</span>(<span class="tok-s">"/payment"</span>, dbsc.
 </footer>
 
 <script>
-  // Theme toggle. Default light, per-visit (not persisted), OS ignored.
+  // Theme toggle. Default light, choice saved in localStorage, OS ignored.
   (function () {
     var meta = document.getElementById("theme-color-meta");
     var btn = document.getElementById("theme-toggle");
+    var dark0 = document.documentElement.getAttribute("data-theme") === "dark";
+    if (meta) meta.setAttribute("content", dark0 ? "#0a0d12" : "#ffffff");
+    btn.setAttribute("aria-pressed", String(dark0));
     btn.addEventListener("click", function () {
       var dark = document.documentElement.getAttribute("data-theme") === "dark";
-      document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
+      var next = dark ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
       if (meta) meta.setAttribute("content", dark ? "#ffffff" : "#0a0d12");
       btn.setAttribute("aria-pressed", String(!dark));
+      try { localStorage.setItem("dbsc-theme", next); } catch (e) {}
     });
   })();
 

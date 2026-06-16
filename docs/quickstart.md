@@ -1,10 +1,10 @@
-# Getting started
+# Quickstart
 
-This guide takes a fresh Express project from zero to a working DBSC-protected session in under five minutes.
+This guide takes a fresh Express project from zero to a working DBSC-protected session in under five minutes. For the full integration onto an app that already has auth, read [the guide](./guide.md) next.
 
 ## What DBSC does for you
 
-When a user logs in on a supported Chromium browser (Chrome, Edge, Brave, Opera, Arc — Chromium 146+ on Windows or macOS), the browser generates an EC P-256 keypair inside the device's hardware key store (TPM on Windows, Secure Enclave on Apple Silicon macOS). The public key goes to your server. Your server binds the user's session to that key. Every ten minutes the browser automatically refreshes the bound cookie by signing a server-issued challenge with the private key — which never leaves the hardware. If a stolen cookie is replayed from a different device, refresh fails because the attacker has no matching key. The session dies within one refresh cycle.
+When a user logs in on a supported Chromium browser (Chrome, Edge, Brave, Opera, Arc — Chromium 145+ on Windows or macOS), the browser generates an EC P-256 keypair inside the device's hardware key store (TPM on Windows, Secure Enclave on Apple Silicon macOS). The public key goes to your server. Your server binds the user's session to that key. Every ten minutes the browser automatically refreshes the bound cookie by signing a server-issued challenge with the private key — which never leaves the hardware. If a stolen cookie is replayed from a different device, refresh fails because the attacker has no matching key. The session dies within one refresh cycle.
 
 On Firefox, Safari, and other browsers without native DBSC support, the Web Crypto polyfill provides equivalent session binding with a non-extractable key in IndexedDB — approximately every modern browser can reach `tier: "bound"`.
 
@@ -35,6 +35,8 @@ npm install dbsc-toolkit express
 npm install ioredis        # if using Redis storage
 npm install pg             # if using Postgres storage
 ```
+
+The package is ESM-only and ships compiled JavaScript plus type definitions, so it runs in a plain JavaScript project with no TypeScript setup — import it from an ES module (`"type": "module"` or a `.mjs` file). A CommonJS app uses dynamic `import()`. Details in the [FAQ](./faq.md).
 
 ## Minimum working server
 
@@ -82,7 +84,7 @@ For local-only HTTP testing, set `secure: false` in the middleware options. The 
 
 ## Verify it works
 
-1. Open the demo in any Chromium 146+ browser (Chrome, Edge, Brave, Opera) over HTTPS.
+1. Open the demo in any Chromium 145+ browser (Chrome, Edge, Brave, Opera) over HTTPS.
 2. Open DevTools → Network. Hit `POST /login`.
 3. Within one second, look for a second request: `POST /dbsc/registration` initiated by the browser itself (you did not write a fetch for it).
 4. That request carries `Secure-Session-Response: <jws>` with the device public key signed by its private key.
@@ -100,10 +102,10 @@ From this point forward your application code never has to think about DBSC. The
 ## Next steps
 
 - Not on Express? The same flow ships for Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, and raw `node:http` — or wire the framework-agnostic core into anything. See [adapters](./adapters.md).
-- Bolting DBSC onto an existing app with its own session cookie? See [integrating with existing auth](./integrating-existing-auth.md).
+- Bolting DBSC onto an existing app with its own session cookie? See [the guide](./guide.md).
 - Switch to a real storage adapter — see [storage](./storage.md).
 - Read [protocol](./protocol.md) to understand exactly what Chrome and the server exchange.
-- Gate sensitive operations with `requireProof()` — one no-argument guard that requires a bound device + a per-request proof, works on every browser. See [usage.md](./usage.md) and [per-request-signing.md](./per-request-signing.md) for the threat boundary.
+- Gate sensitive operations with `requireProof()` — one no-argument guard that requires a bound device + a per-request proof, works on every browser. See [the guide](./guide.md) and [request signing](./request-signing.md) for the threat boundary.
 - Wire telemetry — see [telemetry](./telemetry.md).
 - Handing out bearer/access tokens for an API? Bind them to a device key with the optional DPoP layer (RFC 9449) — see [dpop](./dpop.md).
 - Going to production — see [deployment](./deployment.md) and [security best practices](./security/best-practices.md).

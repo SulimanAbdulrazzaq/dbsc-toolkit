@@ -1,6 +1,6 @@
 # The bound polyfill
 
-DBSC works only on Chromium 146+. Firefox, Safari, and older Chromium ignore the registration headers entirely, so sessions on those browsers would otherwise stay at `tier: "none"`. The bound polyfill closes that gap: it does the same cryptographic refresh-signing using Web Crypto + IndexedDB, with no biometric prompt and no user interaction.
+DBSC works only on Chromium 145+. Firefox, Safari, and older Chromium ignore the registration headers entirely, so sessions on those browsers would otherwise stay at `tier: "none"`. The bound polyfill closes that gap: it does the same cryptographic refresh-signing using Web Crypto + IndexedDB, with no biometric prompt and no user interaction.
 
 Sessions bound via the polyfill carry `tier: "bound"`. They share storage, cookies, and the freshness check with native DBSC. The only differences are where the private key lives and how the proofs travel.
 
@@ -111,7 +111,7 @@ A failed signature with a stored key still present demotes `session.tier` to `"n
 
 ## Where the key lives on the client
 
-```
+```text
 indexedDB.open("dbsc-toolkit") → objectStore("bound") → key "key-record"
   → { sessionId: string, keyPair: CryptoKeyPair }
 ```
@@ -150,7 +150,7 @@ Consumers should await this instead of polling `/me` for the tier — that polli
 
 The bound tier signs *refresh* requests but not every individual request. Between refreshes, the cookie alone is the credential — a copy of it pasted into another browser will work as the legitimate user until the next refresh fails. Native DBSC has the same window in principle but Chromium enforces the cookie-to-key association browser-side, so the cookie naturally dies on a profile that has no DBSC state. The bound polyfill lives in JavaScript and has no equivalent enforcement.
 
-If you need same-time stolen-cookie protection on Firefox / Safari for specific sensitive routes (payment, admin, password change), v2.1.0 ships per-request signing as an opt-in feature: `wrapFetch()` on the client signs every outgoing request, `requireBoundProof()` on the server verifies. v2.3.0 adds opt-in body signing (`signBody: true`) so an MITM cannot substitute the request body within the timestamp window. Use it only where it matters — see [per-request-signing.md](./per-request-signing.md) for the full design, threat boundary, and integration recipe.
+If you need same-time stolen-cookie protection on Firefox / Safari for specific sensitive routes (payment, admin, password change), v2.1.0 ships per-request signing as an opt-in feature: `wrapFetch()` on the client signs every outgoing request, `requireBoundProof()` on the server verifies. v2.3.0 adds opt-in body signing (`signBody: true`) so an MITM cannot substitute the request body within the timestamp window. Use it only where it matters — see [request-signing.md](./request-signing.md) for the full design, threat boundary, and integration recipe.
 
 ## Clearing the key on logout (v2.3.0+)
 

@@ -7,6 +7,7 @@
 <meta name="description" content="Documentation for dbsc-toolkit: getting started, framework adapters, per-request signing, storage, deployment, the language-neutral DBSC spec, and security guides.">
 <link rel="canonical" href="https://sulimanabdulrazzaq.github.io/dbsc-toolkit/docs.html">
 <meta name="theme-color" content="#ffffff" id="theme-color-meta">
+<script>try{var t=localStorage.getItem("dbsc-theme");if(t==="dark"||t==="light")document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
 
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://raw.githubusercontent.com" crossorigin>
@@ -55,9 +56,10 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: var(--r-sm); border: 1px solid var(--border-strong); background: var(--panel); color: var(--muted); cursor: pointer; margin-left: 4px; touch-action: manipulation; }
 .icon-btn:hover { color: var(--text); border-color: var(--accent); }
 .icon-btn svg { width: 17px; height: 17px; }
+.icon-btn .sun { display: block; }
 .icon-btn .moon { display: none; }
 [data-theme="dark"] .icon-btn .sun { display: none; }
-[data-theme="dark"] .icon-btn .moon { display: inline; }
+[data-theme="dark"] .icon-btn .moon { display: block; }
 .menu-toggle { display: none; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--border-strong); color: var(--text); font: inherit; font-size: 14px; font-weight: 600; padding: 8px 14px; border-radius: var(--r-sm); cursor: pointer; }
 
 /* layout */
@@ -65,11 +67,23 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
 .sidebar { border-right: 1px solid var(--border); padding: 28px 16px 64px; position: sticky; top: 64px; align-self: start; height: calc(100dvh - 64px); overflow-y: auto; }
 .sidebar .group { margin-bottom: 22px; }
 .sidebar .group h2 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); margin: 0 0 8px; padding: 0 10px; font-weight: 650; }
-.sidebar a { display: block; color: var(--muted); font-size: 14px; padding: 6px 10px; border-radius: 7px; line-height: 1.4; }
+.sidebar a { display: block; color: var(--muted); font-size: 14px; padding: 6px 10px; border-radius: 7px; line-height: 1.4; transition: color .12s ease, background .12s ease; }
 .sidebar a:hover { color: var(--text); background: var(--bg-soft); text-decoration: none; }
-.sidebar a.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
-.content-wrap { padding: 40px 48px 96px; min-width: 0; }
-.content { max-width: 760px; }
+.sidebar a.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; box-shadow: inset 2px 0 0 var(--accent); }
+@media (prefers-reduced-motion: reduce) { .sidebar a { transition: none; } }
+.content-wrap { padding: 40px 48px 96px; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 40px; }
+.content { max-width: 760px; min-width: 0; }
+/* per-page table of contents (right rail) */
+.toc { display: none; }
+@media (min-width: 1180px) {
+  .content-wrap { grid-template-columns: minmax(0, 1fr) 200px; }
+  .toc { display: block; position: sticky; top: 88px; align-self: start; max-height: calc(100dvh - 112px); overflow-y: auto; font-size: 13px; border-left: 1px solid var(--border); padding-left: 18px; }
+  .toc.empty { display: none; }
+  .toc .toc-title { text-transform: uppercase; letter-spacing: .08em; font-size: 11px; font-weight: 650; color: var(--faint); margin: 0 0 10px; }
+  .toc a { display: block; color: var(--muted); padding: 4px 0; line-height: 1.4; border-left: 2px solid transparent; margin-left: -18px; padding-left: 16px; }
+  .toc a:hover { color: var(--text); text-decoration: none; }
+  .toc a.active { color: var(--accent); border-left-color: var(--accent); font-weight: 550; }
+}
 
 /* markdown */
 .md { font-size: 16px; }
@@ -146,6 +160,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
       <div class="skeleton s2"></div>
       <div class="skeleton s"></div>
     </article>
+    <nav class="toc" id="toc" aria-label="On this page"></nav>
   </div>
 </div>
 
@@ -159,18 +174,18 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
 
   var TREE = [
     { group: "Start", items: [
-      ["docs/getting-started.md", "Getting Started"],
-      ["docs/integrating-existing-auth.md", "Add to Existing Auth"],
-      ["docs/usage.md", "Usage"],
+      ["docs/quickstart.md", "Quickstart"],
+      ["docs/guide.md", "The Guide"],
+      ["docs/faq.md", "FAQ"],
     ]},
-    { group: "Adapters", items: [
-      ["docs/adapters.md", "Adapters"],
-      ["docs/integration-recipes.md", "Integration Recipes"],
-    ]},
-    { group: "Guides", items: [
-      ["docs/per-request-signing.md", "Per-Request Signing"],
+    { group: "Integrate", items: [
+      ["docs/adapters.md", "Framework Adapters"],
+      ["docs/recipes.md", "Integration Recipes"],
+      ["docs/request-signing.md", "Per-Request Signing"],
+      ["docs/polyfill.md", "Bound Polyfill"],
       ["docs/dpop.md", "DPoP (RFC 9449)"],
-      ["docs/bound-polyfill.md", "Bound Polyfill"],
+    ]},
+    { group: "Operate", items: [
       ["docs/storage.md", "Storage"],
       ["docs/deployment.md", "Deployment"],
       ["docs/telemetry.md", "Telemetry"],
@@ -208,7 +223,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
 
   var KNOWN = {}; var TITLES = {};
   TREE.forEach(function (g) { g.items.forEach(function (it) { KNOWN[it[0]] = true; TITLES[it[0]] = it[1]; }); });
-  var DEFAULT = "docs/getting-started.md";
+  var DEFAULT = "docs/quickstart.md";
 
   var docEl = document.getElementById("doc");
   var sidebar = document.getElementById("sidebar");
@@ -219,19 +234,25 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
   }
   initMermaid();
 
-  // Theme toggle. Default light, per-visit (not persisted), OS ignored. Swaps
-  // the highlight.js stylesheet and mermaid theme, then re-renders the doc.
+  // Theme toggle. Default light, choice saved in localStorage, OS ignored.
+  // Swaps the highlight.js stylesheet and mermaid theme, then re-renders.
   (function () {
     var meta = document.getElementById("theme-color-meta");
     var hlLight = document.getElementById("hl-light");
     var hlDark = document.getElementById("hl-dark");
     var btn = document.getElementById("theme-toggle");
+    var dark0 = isDark();
+    if (meta) meta.setAttribute("content", dark0 ? "#0a0d12" : "#ffffff");
+    hlLight.disabled = dark0; hlDark.disabled = !dark0;
+    btn.setAttribute("aria-pressed", String(dark0));
     btn.addEventListener("click", function () {
       var dark = isDark();
-      document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
+      var next = dark ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
       if (meta) meta.setAttribute("content", dark ? "#ffffff" : "#0a0d12");
       hlLight.disabled = !dark; hlDark.disabled = dark;
       btn.setAttribute("aria-pressed", String(!dark));
+      try { localStorage.setItem("dbsc-theme", next); } catch (e) {}
       initMermaid();
       load(currentDocFromUrl());
     });
@@ -322,6 +343,55 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
     renderState('<div class="skeleton t"></div><div class="skeleton s"></div><div class="skeleton s2"></div><div class="skeleton s"></div><div class="skeleton s2"></div>');
   }
 
+  var tocEl = document.getElementById("toc");
+  var tocLinks = [];
+  var spyTicking = false;
+
+  function buildToc() {
+    var heads = docEl.querySelectorAll("h2");
+    tocLinks = [];
+    if (heads.length < 2) { tocEl.className = "toc empty"; tocEl.textContent = ""; return; }
+    tocEl.className = "toc";
+    tocEl.textContent = "";
+    var title = document.createElement("p");
+    title.className = "toc-title";
+    title.textContent = "On this page";
+    tocEl.appendChild(title);
+    heads.forEach(function (h) {
+      if (!h.id) h.id = slug(h.textContent);
+      var link = document.createElement("a");
+      link.setAttribute("href", "#");
+      link.dataset.id = h.id;
+      link.textContent = h.textContent;
+      tocEl.appendChild(link);
+    });
+    tocLinks = Array.prototype.slice.call(tocEl.querySelectorAll("a"));
+    tocLinks.forEach(function (a) {
+      a.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        var t = document.getElementById(a.dataset.id);
+        if (t) { t.scrollIntoView({ behavior: "smooth", block: "start" }); history.replaceState(null, "", "#" + a.dataset.id); }
+      });
+    });
+    spy();
+  }
+
+  function spy() {
+    if (!tocLinks.length) return;
+    var top = 100, current = tocLinks[0].dataset.id;
+    tocLinks.forEach(function (a) {
+      var el = document.getElementById(a.dataset.id);
+      if (el && el.getBoundingClientRect().top <= top) current = a.dataset.id;
+    });
+    tocLinks.forEach(function (a) { a.classList.toggle("active", a.dataset.id === current); });
+  }
+
+  window.addEventListener("scroll", function () {
+    if (spyTicking) return;
+    spyTicking = true;
+    requestAnimationFrame(function () { spy(); spyTicking = false; });
+  }, { passive: true });
+
   function load(path) {
     showSkeleton();
     fetch(RAW + path, { cache: "no-cache" }).then(function (r) {
@@ -344,17 +414,35 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
       });
       if (mer.length) { try { mermaid.run({ nodes: mer }); } catch (e) {} }
       rewriteLinks(docEl, path);
+      buildToc();
       // footer
       var foot = document.createElement("div"); foot.className = "docfoot";
-      foot.innerHTML = '<span>On this site, rendered from the repository.</span>' +
-        '<a href="' + BLOB + path + '" target="_blank" rel="noopener">Edit on GitHub</a>';
+      var fnote = document.createElement("span");
+      fnote.textContent = "On this site, rendered from the repository.";
+      var edit = document.createElement("a");
+      edit.setAttribute("href", BLOB + path);
+      edit.setAttribute("target", "_blank");
+      edit.setAttribute("rel", "noopener");
+      edit.textContent = "Edit on GitHub";
+      foot.appendChild(fnote); foot.appendChild(edit);
       docEl.appendChild(foot);
       docEl.setAttribute("aria-busy", "false");
       document.title = (TITLES[path] || "Docs") + " - dbsc-toolkit";
     }).catch(function (err) {
       docEl.setAttribute("aria-busy", "false");
-      renderState('<h1>Could not load this page</h1><p class="state">' + String(err.message) +
-        '. The document may have moved. <a href="' + BLOB + path + '" target="_blank" rel="noopener">Open it on GitHub</a> or <a href="?doc=' + encodeURIComponent(DEFAULT) + '">return to Getting Started</a>.</p>');
+      tocEl.className = "toc empty"; tocEl.textContent = "";
+      docEl.textContent = "";
+      var h = document.createElement("h1"); h.textContent = "Could not load this page";
+      var p = document.createElement("p"); p.className = "state";
+      p.appendChild(document.createTextNode(String(err.message) + ". The document may have moved. "));
+      var gh = document.createElement("a");
+      gh.setAttribute("href", BLOB + path); gh.setAttribute("target", "_blank"); gh.setAttribute("rel", "noopener");
+      gh.textContent = "Open it on GitHub";
+      var back = document.createElement("a");
+      back.setAttribute("href", "?doc=" + encodeURIComponent(DEFAULT));
+      back.textContent = "return to the Quickstart";
+      p.appendChild(gh); p.appendChild(document.createTextNode(" or ")); p.appendChild(back); p.appendChild(document.createTextNode("."));
+      docEl.appendChild(h); docEl.appendChild(p);
     });
   }
 
