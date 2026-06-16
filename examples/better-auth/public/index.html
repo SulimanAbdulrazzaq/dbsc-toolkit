@@ -19,7 +19,24 @@
     --bad-bg: #fde2e1;
   }
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, system-ui, "Segoe UI", sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: var(--ink); line-height: 1.5; }
+  body { font-family: -apple-system, system-ui, "Segoe UI", sans-serif; max-width: 1160px; margin: 2rem auto; padding: 0 1rem; color: var(--ink); line-height: 1.5; }
+  /* Two columns on wide screens: scrollable content left, sticky output right.
+     Below 920px it collapses and the output becomes a fixed bottom panel so a
+     result is always visible without scrolling. */
+  .layout { display: grid; grid-template-columns: minmax(0,1fr) 380px; gap: 2rem; align-items: start; }
+  .main { min-width: 0; }
+  .sidebar { position: sticky; top: 1.5rem; }
+  .output-panel { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .output-panel .ohead { display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 0.85rem; background: var(--bg-soft); border-bottom: 1px solid var(--line); font-size: 0.8rem; font-weight: 600; color: var(--muted); }
+  .output-panel .ohead button { margin: 0; padding: 0.2rem 0.5rem; font-size: 0.72rem; }
+  .output-panel pre { max-height: 60vh; overflow-y: auto; }
+  @media (max-width: 920px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 50; padding: 0; background: var(--ink); }
+    .sidebar .output-panel { border-radius: 0; border: 0; max-height: 42vh; display: flex; flex-direction: column; }
+    .output-panel .obody { overflow-y: auto; }
+    .main { padding-bottom: 44vh; }
+  }
   h1 { margin: 0 0 0.2rem; font-size: 1.7rem; }
   h2 { margin-top: 2.4rem; font-size: 1.15rem; }
   .lede { color: var(--muted); font-size: 0.95rem; margin-bottom: 1.5rem; }
@@ -62,6 +79,9 @@
 <p class="lede">A stolen session cookie pasted into another browser used to work. Today it gets a 403 — because the refresh, and every guarded request, needs a signature from a key that never left your device.</p>
 
 <div class="browser-badge" id="browser-badge">Detecting browser…</div>
+
+<div class="layout">
+<div class="main">
 
 <h2>Try it</h2>
 
@@ -107,9 +127,6 @@
   <button id="tamper-btn" class="attack">Replay proof with different body</button>
 </div>
 
-<div id="explain"></div>
-<pre id="out">(output appears here)</pre>
-
 <h2>Session control</h2>
 <button id="me-btn">Check session (/api/me)</button>
 <button id="logout-btn">Sign out</button>
@@ -120,6 +137,23 @@
   Source: <a href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit">github.com/SulimanAbdulrazzaq/dbsc-toolkit</a>.
   Powered by <a href="https://better-auth.com">Better Auth</a> + <code>dbsc-toolkit</code>.
 </p>
+
+</div><!-- /.main -->
+
+<aside class="sidebar">
+  <div class="output-panel">
+    <div class="ohead">
+      <span>Output</span>
+      <button id="clear-out">clear</button>
+    </div>
+    <div class="obody" style="padding: 0.6rem 0.7rem;">
+      <div id="explain"></div>
+      <pre id="out" style="margin:0;">Click any button — the result shows here.</pre>
+    </div>
+  </div>
+</aside>
+
+</div><!-- /.layout -->
 
 <!-- init.js is the plugin's auto-generated shim. It imports the SDK, points it
      at /api/auth/dbsc-bound/*, and exposes window.initDbsc / boundFetch /
@@ -179,6 +213,8 @@ function explain(kind, text) {
 }
 
 function clearExplain() { $("explain").innerHTML = ""; }
+
+$("clear-out").onclick = () => { clearExplain(); $("out").textContent = "Click any button — the result shows here."; };
 
 async function plainFetch(method, path, body, extraHeaders) {
   const headers = extraHeaders ? { ...extraHeaders } : (body ? { "Content-Type": "application/json" } : {});
