@@ -18,7 +18,7 @@ For small apps, the per-call `wrapFetch(...)` shape stays the recommended defaul
 
 ## How it works
 
-```
+```text
 Client (Firefox or Safari, tier: "bound")
   ┌─────────────────────────────────────────────────────────┐
   │ wrapFetch()                                             │
@@ -156,7 +156,7 @@ Proof failures emit `verification_failure` events with `reason` set to one of:
 - `SIGNATURE_INVALID` — header parsed but the signature did not verify, or the timestamp was outside the window.
 - `KEY_NOT_FOUND` — no `BoundKey` stored for the session id. Usually means the storage row was wiped between registration and this call (Memory storage on a restarted server).
 
-A sustained spike of `MISSING_PROOF` or `SIGNATURE_INVALID` on a single session id is a credible cookie-theft signal. The plain bound-tier `session_stolen` event already fires on refresh-signature mismatch; this gives you a second, earlier signal at request time.
+A sustained spike of `MISSING_PROOF` or `SIGNATURE_INVALID` on a single session id is a credible cookie-theft signal. The plain bound-tier `session_stolen` event already fires on refresh-signature mismatch; this gives you a second, earlier signal at request time. For wiring `onEvent` and alert recipes in general, see [telemetry.md](./telemetry.md).
 
 ## Body signing setup (v2.3.0+)
 

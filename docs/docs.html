@@ -67,11 +67,23 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
 .sidebar { border-right: 1px solid var(--border); padding: 28px 16px 64px; position: sticky; top: 64px; align-self: start; height: calc(100dvh - 64px); overflow-y: auto; }
 .sidebar .group { margin-bottom: 22px; }
 .sidebar .group h2 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); margin: 0 0 8px; padding: 0 10px; font-weight: 650; }
-.sidebar a { display: block; color: var(--muted); font-size: 14px; padding: 6px 10px; border-radius: 7px; line-height: 1.4; }
+.sidebar a { display: block; color: var(--muted); font-size: 14px; padding: 6px 10px; border-radius: 7px; line-height: 1.4; transition: color .12s ease, background .12s ease; }
 .sidebar a:hover { color: var(--text); background: var(--bg-soft); text-decoration: none; }
-.sidebar a.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
-.content-wrap { padding: 40px 48px 96px; min-width: 0; }
-.content { max-width: 760px; }
+.sidebar a.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; box-shadow: inset 2px 0 0 var(--accent); }
+@media (prefers-reduced-motion: reduce) { .sidebar a { transition: none; } }
+.content-wrap { padding: 40px 48px 96px; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 40px; }
+.content { max-width: 760px; min-width: 0; }
+/* per-page table of contents (right rail) */
+.toc { display: none; }
+@media (min-width: 1180px) {
+  .content-wrap { grid-template-columns: minmax(0, 1fr) 200px; }
+  .toc { display: block; position: sticky; top: 88px; align-self: start; max-height: calc(100dvh - 112px); overflow-y: auto; font-size: 13px; border-left: 1px solid var(--border); padding-left: 18px; }
+  .toc.empty { display: none; }
+  .toc .toc-title { text-transform: uppercase; letter-spacing: .08em; font-size: 11px; font-weight: 650; color: var(--faint); margin: 0 0 10px; }
+  .toc a { display: block; color: var(--muted); padding: 4px 0; line-height: 1.4; border-left: 2px solid transparent; margin-left: -18px; padding-left: 16px; }
+  .toc a:hover { color: var(--text); text-decoration: none; }
+  .toc a.active { color: var(--accent); border-left-color: var(--accent); font-weight: 550; }
+}
 
 /* markdown */
 .md { font-size: 16px; }
@@ -148,6 +160,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
       <div class="skeleton s2"></div>
       <div class="skeleton s"></div>
     </article>
+    <nav class="toc" id="toc" aria-label="On this page"></nav>
   </div>
 </div>
 
@@ -165,15 +178,17 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
       ["docs/guide.md", "The Guide"],
       ["docs/faq.md", "FAQ"],
     ]},
-    { group: "Guides", items: [
+    { group: "Integrate", items: [
       ["docs/adapters.md", "Framework Adapters"],
       ["docs/recipes.md", "Integration Recipes"],
       ["docs/request-signing.md", "Per-Request Signing"],
       ["docs/polyfill.md", "Bound Polyfill"],
       ["docs/dpop.md", "DPoP (RFC 9449)"],
+    ]},
+    { group: "Operate", items: [
       ["docs/storage.md", "Storage"],
-      ["docs/telemetry.md", "Telemetry"],
       ["docs/deployment.md", "Deployment"],
+      ["docs/telemetry.md", "Telemetry"],
       ["docs/troubleshooting.md", "Troubleshooting"],
     ]},
     { group: "Reference", items: [
@@ -328,6 +343,48 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
     renderState('<div class="skeleton t"></div><div class="skeleton s"></div><div class="skeleton s2"></div><div class="skeleton s"></div><div class="skeleton s2"></div>');
   }
 
+  var tocEl = document.getElementById("toc");
+  var tocLinks = [];
+  var spyTicking = false;
+
+  function buildToc() {
+    var heads = docEl.querySelectorAll("h2");
+    tocLinks = [];
+    if (heads.length < 2) { tocEl.className = "toc empty"; tocEl.innerHTML = ""; return; }
+    tocEl.className = "toc";
+    var html = '<p class="toc-title">On this page</p>';
+    heads.forEach(function (h) {
+      if (!h.id) h.id = slug(h.textContent);
+      html += '<a href="#" data-id="' + h.id + '">' + h.textContent + "</a>";
+    });
+    tocEl.innerHTML = html;
+    tocLinks = Array.prototype.slice.call(tocEl.querySelectorAll("a"));
+    tocLinks.forEach(function (a) {
+      a.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        var t = document.getElementById(a.dataset.id);
+        if (t) { t.scrollIntoView({ behavior: "smooth", block: "start" }); history.replaceState(null, "", "#" + a.dataset.id); }
+      });
+    });
+    spy();
+  }
+
+  function spy() {
+    if (!tocLinks.length) return;
+    var top = 100, current = tocLinks[0].dataset.id;
+    tocLinks.forEach(function (a) {
+      var el = document.getElementById(a.dataset.id);
+      if (el && el.getBoundingClientRect().top <= top) current = a.dataset.id;
+    });
+    tocLinks.forEach(function (a) { a.classList.toggle("active", a.dataset.id === current); });
+  }
+
+  window.addEventListener("scroll", function () {
+    if (spyTicking) return;
+    spyTicking = true;
+    requestAnimationFrame(function () { spy(); spyTicking = false; });
+  }, { passive: true });
+
   function load(path) {
     showSkeleton();
     fetch(RAW + path, { cache: "no-cache" }).then(function (r) {
@@ -350,6 +407,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
       });
       if (mer.length) { try { mermaid.run({ nodes: mer }); } catch (e) {} }
       rewriteLinks(docEl, path);
+      buildToc();
       // footer
       var foot = document.createElement("div"); foot.className = "docfoot";
       foot.innerHTML = '<span>On this site, rendered from the repository.</span>' +

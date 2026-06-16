@@ -44,7 +44,7 @@ Cluster mode works the same way — pass an `ioredis.Cluster` instance instead o
 
 Key shape (with default prefix):
 
-```
+```text
 dbsc:session:<id>            JSON-encoded Session, EXPIRE = expiresAt
 dbsc:key:<sessionId>         JSON-encoded BoundKey, EXPIRE matches session
 dbsc:challenge:<jti>         JSON-encoded Challenge, EXPIRE = 5 min

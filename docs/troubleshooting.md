@@ -47,7 +47,7 @@ const fastify = Fastify({ trustProxy: true });  // Fastify
 
 Hono and Next.js derive origin from the runtime's request URL and don't need a flag.
 
-**Registration response shape is wrong for Chromium 146+.** The endpoint must return 200 with this exact shape:
+**Registration response shape is wrong for Chromium 145+.** The endpoint must return 200 with this exact shape:
 
 ```json
 {
@@ -294,7 +294,7 @@ state, worth paging on.
 
 ## When to file a bug
 
-If you see a `MALFORMED_JWS` or `INVALID_JWK` from a normal Chromium 146+ client (Chrome, Edge, Brave) with no middleware in between, it's likely a Chromium bug. File at <https://crbug.com> with the net-export log attached.
+If you see a `MALFORMED_JWS` or `INVALID_JWK` from a normal Chromium 145+ client (Chrome, Edge, Brave) with no middleware in between, it's likely a Chromium bug. File at <https://crbug.com> with the net-export log attached.
 
 For library bugs, open an issue at <https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/issues> with:
 

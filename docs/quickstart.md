@@ -4,7 +4,7 @@ This guide takes a fresh Express project from zero to a working DBSC-protected s
 
 ## What DBSC does for you
 
-When a user logs in on a supported Chromium browser (Chrome, Edge, Brave, Opera, Arc — Chromium 146+ on Windows or macOS), the browser generates an EC P-256 keypair inside the device's hardware key store (TPM on Windows, Secure Enclave on Apple Silicon macOS). The public key goes to your server. Your server binds the user's session to that key. Every ten minutes the browser automatically refreshes the bound cookie by signing a server-issued challenge with the private key — which never leaves the hardware. If a stolen cookie is replayed from a different device, refresh fails because the attacker has no matching key. The session dies within one refresh cycle.
+When a user logs in on a supported Chromium browser (Chrome, Edge, Brave, Opera, Arc — Chromium 145+ on Windows or macOS), the browser generates an EC P-256 keypair inside the device's hardware key store (TPM on Windows, Secure Enclave on Apple Silicon macOS). The public key goes to your server. Your server binds the user's session to that key. Every ten minutes the browser automatically refreshes the bound cookie by signing a server-issued challenge with the private key — which never leaves the hardware. If a stolen cookie is replayed from a different device, refresh fails because the attacker has no matching key. The session dies within one refresh cycle.
 
 On Firefox, Safari, and other browsers without native DBSC support, the Web Crypto polyfill provides equivalent session binding with a non-extractable key in IndexedDB — approximately every modern browser can reach `tier: "bound"`.
 
@@ -84,7 +84,7 @@ For local-only HTTP testing, set `secure: false` in the middleware options. The 
 
 ## Verify it works
 
-1. Open the demo in any Chromium 146+ browser (Chrome, Edge, Brave, Opera) over HTTPS.
+1. Open the demo in any Chromium 145+ browser (Chrome, Edge, Brave, Opera) over HTTPS.
 2. Open DevTools → Network. Hit `POST /login`.
 3. Within one second, look for a second request: `POST /dbsc/registration` initiated by the browser itself (you did not write a fetch for it).
 4. That request carries `Secure-Session-Response: <jws>` with the device public key signed by its private key.

@@ -1,10 +1,10 @@
 # Protocol reference
 
-The exact wire format Chromium 146+ (Chrome, Edge, Brave, Opera, Arc, etc.) speaks. Everything in this document is a verbatim record of what crosses the network — what headers, what JSON shapes, what status codes. Verified against Chrome 147 on Windows; other Chromium-based browsers inherit the same implementation.
+The exact wire format Chromium 145+ (Chrome, Edge, Brave, Opera, Arc, etc.) speaks. Everything in this document is a verbatim record of what crosses the network — what headers, what JSON shapes, what status codes. Verified against Chrome 147 on Windows; other Chromium-based browsers inherit the same implementation.
 
 ## Header names
 
-Chromium 146+ renamed every header during the W3C draft cycle. The old names work as fallback in some adapter code, but everything new uses the `Secure-Session-*` prefix. The session ID header on refresh requests is the odd one out: `Sec-Secure-Session-Id` — both prefixes.
+Chromium 145+ renamed every header during the W3C draft cycle. The old names work as fallback in some adapter code, but everything new uses the `Secure-Session-*` prefix. The session ID header on refresh requests is the odd one out: `Sec-Secure-Session-Id` — both prefixes.
 
 | Direction | Header | Purpose |
 |-----------|--------|---------|
@@ -17,7 +17,7 @@ Legacy `Sec-Session-*` variants are also accepted by the library's `readSessionR
 
 ## Registration flow
 
-```
+```text
 1. POST /login (your own auth route)
    Server → Browser:
      Status: 200
@@ -63,7 +63,7 @@ Legacy `Sec-Session-*` variants are also accepted by the library's `readSessionR
 
 ## Refresh flow
 
-```
+```text
 1. Bound cookie expires (default 10 min)
    Chrome removes __Host-dbsc-session from the cookie jar.
 
@@ -156,7 +156,7 @@ Required fields: `session_identifier`, `scope` (with `include_site`), `credentia
 
 ### Registration JWS (browser → server, on first POST to `/dbsc/registration`)
 
-```
+```text
 Header (Base64url):
 {
   "alg": "ES256",
@@ -181,7 +181,7 @@ The server validates the self-signature (the JWS proves possession of the privat
 
 ### Refresh JWS (browser → server, on second POST to `/dbsc/refresh` after challenge)
 
-```
+```text
 Header (Base64url):
 {
   "alg": "ES256",

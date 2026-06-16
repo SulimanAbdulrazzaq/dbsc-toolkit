@@ -14,7 +14,7 @@ DBSC requires HTTPS. The `__Host-` cookie prefix that the library uses by defaul
 
 The library sets the bound cookie with these attributes by default:
 
-```
+```text
 HttpOnly; Secure; SameSite=Lax; Path=/
 ```
 
