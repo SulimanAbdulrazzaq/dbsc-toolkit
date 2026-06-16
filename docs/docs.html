@@ -350,14 +350,21 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
   function buildToc() {
     var heads = docEl.querySelectorAll("h2");
     tocLinks = [];
-    if (heads.length < 2) { tocEl.className = "toc empty"; tocEl.innerHTML = ""; return; }
+    if (heads.length < 2) { tocEl.className = "toc empty"; tocEl.textContent = ""; return; }
     tocEl.className = "toc";
-    var html = '<p class="toc-title">On this page</p>';
+    tocEl.textContent = "";
+    var title = document.createElement("p");
+    title.className = "toc-title";
+    title.textContent = "On this page";
+    tocEl.appendChild(title);
     heads.forEach(function (h) {
       if (!h.id) h.id = slug(h.textContent);
-      html += '<a href="#" data-id="' + h.id + '">' + h.textContent + "</a>";
+      var link = document.createElement("a");
+      link.setAttribute("href", "#");
+      link.dataset.id = h.id;
+      link.textContent = h.textContent;
+      tocEl.appendChild(link);
     });
-    tocEl.innerHTML = html;
     tocLinks = Array.prototype.slice.call(tocEl.querySelectorAll("a"));
     tocLinks.forEach(function (a) {
       a.addEventListener("click", function (ev) {
@@ -410,15 +417,32 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
       buildToc();
       // footer
       var foot = document.createElement("div"); foot.className = "docfoot";
-      foot.innerHTML = '<span>On this site, rendered from the repository.</span>' +
-        '<a href="' + BLOB + path + '" target="_blank" rel="noopener">Edit on GitHub</a>';
+      var fnote = document.createElement("span");
+      fnote.textContent = "On this site, rendered from the repository.";
+      var edit = document.createElement("a");
+      edit.setAttribute("href", BLOB + path);
+      edit.setAttribute("target", "_blank");
+      edit.setAttribute("rel", "noopener");
+      edit.textContent = "Edit on GitHub";
+      foot.appendChild(fnote); foot.appendChild(edit);
       docEl.appendChild(foot);
       docEl.setAttribute("aria-busy", "false");
       document.title = (TITLES[path] || "Docs") + " - dbsc-toolkit";
     }).catch(function (err) {
       docEl.setAttribute("aria-busy", "false");
-      renderState('<h1>Could not load this page</h1><p class="state">' + String(err.message) +
-        '. The document may have moved. <a href="' + BLOB + path + '" target="_blank" rel="noopener">Open it on GitHub</a> or <a href="?doc=' + encodeURIComponent(DEFAULT) + '">return to the Quickstart</a>.</p>');
+      tocEl.className = "toc empty"; tocEl.textContent = "";
+      docEl.textContent = "";
+      var h = document.createElement("h1"); h.textContent = "Could not load this page";
+      var p = document.createElement("p"); p.className = "state";
+      p.appendChild(document.createTextNode(String(err.message) + ". The document may have moved. "));
+      var gh = document.createElement("a");
+      gh.setAttribute("href", BLOB + path); gh.setAttribute("target", "_blank"); gh.setAttribute("rel", "noopener");
+      gh.textContent = "Open it on GitHub";
+      var back = document.createElement("a");
+      back.setAttribute("href", "?doc=" + encodeURIComponent(DEFAULT));
+      back.textContent = "return to the Quickstart";
+      p.appendChild(gh); p.appendChild(document.createTextNode(" or ")); p.appendChild(back); p.appendChild(document.createTextNode("."));
+      docEl.appendChild(h); docEl.appendChild(p);
     });
   }
 
