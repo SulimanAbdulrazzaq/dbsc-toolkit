@@ -1,6 +1,6 @@
-# Getting started
+# Quickstart
 
-This guide takes a fresh Express project from zero to a working DBSC-protected session in under five minutes.
+This guide takes a fresh Express project from zero to a working DBSC-protected session in under five minutes. For the full integration onto an app that already has auth, read [the guide](./guide.md) next.
 
 ## What DBSC does for you
 
@@ -35,6 +35,8 @@ npm install dbsc-toolkit express
 npm install ioredis        # if using Redis storage
 npm install pg             # if using Postgres storage
 ```
+
+The package is ESM-only and ships compiled JavaScript plus type definitions, so it runs in a plain JavaScript project with no TypeScript setup — import it from an ES module (`"type": "module"` or a `.mjs` file). A CommonJS app uses dynamic `import()`. Details in the [FAQ](./faq.md).
 
 ## Minimum working server
 
@@ -100,10 +102,10 @@ From this point forward your application code never has to think about DBSC. The
 ## Next steps
 
 - Not on Express? The same flow ships for Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, and raw `node:http` — or wire the framework-agnostic core into anything. See [adapters](./adapters.md).
-- Bolting DBSC onto an existing app with its own session cookie? See [integrating with existing auth](./integrating-existing-auth.md).
+- Bolting DBSC onto an existing app with its own session cookie? See [the guide](./guide.md).
 - Switch to a real storage adapter — see [storage](./storage.md).
 - Read [protocol](./protocol.md) to understand exactly what Chrome and the server exchange.
-- Gate sensitive operations with `requireProof()` — one no-argument guard that requires a bound device + a per-request proof, works on every browser. See [usage.md](./usage.md) and [per-request-signing.md](./per-request-signing.md) for the threat boundary.
+- Gate sensitive operations with `requireProof()` — one no-argument guard that requires a bound device + a per-request proof, works on every browser. See [the guide](./guide.md) and [request signing](./request-signing.md) for the threat boundary.
 - Wire telemetry — see [telemetry](./telemetry.md).
 - Handing out bearer/access tokens for an API? Bind them to a device key with the optional DPoP layer (RFC 9449) — see [dpop](./dpop.md).
 - Going to production — see [deployment](./deployment.md) and [security best practices](./security/best-practices.md).

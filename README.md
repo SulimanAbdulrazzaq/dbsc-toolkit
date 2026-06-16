@@ -120,7 +120,7 @@ Load the polyfill in your HTML so non-Chromium browsers reach `tier: "bound"`:
 </script>
 ```
 
-Full walk-through, failure modes, and migration timeline: **[docs/getting-started.md](./docs/getting-started.md)** and **[docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md)**.
+Full walk-through, failure modes, and migration timeline: **[docs/quickstart.md](./docs/quickstart.md)** and **[docs/guide.md](./docs/guide.md)**.
 
 ### Any framework
 
@@ -264,10 +264,10 @@ The wire protocol is documented as a language-neutral spec in [`spec/`](./spec/)
 
 - **Protocol spec (language-neutral):** [spec/](./spec/) · [conformance](./spec/09-conformance.md) · [test vectors](./spec/vectors)
 - **Concepts & protocol:** [HOW-IT-WORKS.md](./HOW-IT-WORKS.md)
-- **Getting started:** [docs/getting-started.md](./docs/getting-started.md)
-- **Add to an existing app:** [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md)
-- **Per-request signing & replay cache:** [docs/per-request-signing.md](./docs/per-request-signing.md)
-- **Bound polyfill wire protocol:** [docs/bound-polyfill.md](./docs/bound-polyfill.md)
+- **Getting started:** [docs/quickstart.md](./docs/quickstart.md)
+- **Add to an existing app:** [docs/guide.md](./docs/guide.md)
+- **Per-request signing & replay cache:** [docs/request-signing.md](./docs/request-signing.md)
+- **Bound polyfill wire protocol:** [docs/polyfill.md](./docs/polyfill.md)
 - **API reference:** [docs/api-reference.md](./docs/api-reference.md)
 - **Adapters (+ build your own):** [docs/adapters.md](./docs/adapters.md)
 - **Storage:** [docs/storage.md](./docs/storage.md) · **Deployment:** [docs/deployment.md](./docs/deployment.md)

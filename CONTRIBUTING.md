@@ -27,7 +27,7 @@ The shape is consistent: `src/core/protocol/` is native DBSC, `src/core/bound/` 
 | You changed... | Also update |
 |---|---|
 | A header name or value | `src/core/protocol/headers.ts` + every adapter (`src/{express,fastify,hono,nextjs}/index.ts`) + `examples/express/src/server.js` + `docs/protocol.md` |
-| A cookie name or scope | `src/core/cookies/options.ts` + every adapter + `docs/api-reference.md` + the cookie-scope section of `docs/integration-recipes.md` |
+| A cookie name or scope | `src/core/cookies/options.ts` + every adapter + `docs/api-reference.md` + the cookie-scope section of `docs/recipes.md` |
 | A public type | `src/core/types.ts` + `docs/api-reference.md` |
 | A storage method signature | `src/core/types.ts` (the interface) + all three adapters in `src/storage/` + any custom-adapter guidance in `docs/adapters.md` |
 | Anything user-visible | `README.md` + `CHANGELOG.md` (new `## [X.Y.Z]` entry — see release flow below) |

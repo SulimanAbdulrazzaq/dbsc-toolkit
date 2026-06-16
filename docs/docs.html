@@ -161,21 +161,19 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
 
   var TREE = [
     { group: "Start", items: [
-      ["docs/getting-started.md", "Getting Started"],
-      ["docs/integrating-existing-auth.md", "Add to Existing Auth"],
-      ["docs/usage.md", "Usage"],
-    ]},
-    { group: "Adapters", items: [
-      ["docs/adapters.md", "Adapters"],
-      ["docs/integration-recipes.md", "Integration Recipes"],
+      ["docs/quickstart.md", "Quickstart"],
+      ["docs/guide.md", "The Guide"],
+      ["docs/faq.md", "FAQ"],
     ]},
     { group: "Guides", items: [
-      ["docs/per-request-signing.md", "Per-Request Signing"],
+      ["docs/adapters.md", "Framework Adapters"],
+      ["docs/recipes.md", "Integration Recipes"],
+      ["docs/request-signing.md", "Per-Request Signing"],
+      ["docs/polyfill.md", "Bound Polyfill"],
       ["docs/dpop.md", "DPoP (RFC 9449)"],
-      ["docs/bound-polyfill.md", "Bound Polyfill"],
       ["docs/storage.md", "Storage"],
-      ["docs/deployment.md", "Deployment"],
       ["docs/telemetry.md", "Telemetry"],
+      ["docs/deployment.md", "Deployment"],
       ["docs/troubleshooting.md", "Troubleshooting"],
     ]},
     { group: "Reference", items: [
@@ -210,7 +208,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
 
   var KNOWN = {}; var TITLES = {};
   TREE.forEach(function (g) { g.items.forEach(function (it) { KNOWN[it[0]] = true; TITLES[it[0]] = it[1]; }); });
-  var DEFAULT = "docs/getting-started.md";
+  var DEFAULT = "docs/quickstart.md";
 
   var docEl = document.getElementById("doc");
   var sidebar = document.getElementById("sidebar");
@@ -362,7 +360,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consola
     }).catch(function (err) {
       docEl.setAttribute("aria-busy", "false");
       renderState('<h1>Could not load this page</h1><p class="state">' + String(err.message) +
-        '. The document may have moved. <a href="' + BLOB + path + '" target="_blank" rel="noopener">Open it on GitHub</a> or <a href="?doc=' + encodeURIComponent(DEFAULT) + '">return to Getting Started</a>.</p>');
+        '. The document may have moved. <a href="' + BLOB + path + '" target="_blank" rel="noopener">Open it on GitHub</a> or <a href="?doc=' + encodeURIComponent(DEFAULT) + '">return to the Quickstart</a>.</p>');
     });
   }
 

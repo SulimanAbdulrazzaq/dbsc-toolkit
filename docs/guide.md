@@ -1,6 +1,10 @@
-# Integrating with an existing auth system
+# The guide — wire DBSC into your app
 
-Most production sites already have a working session story: a login route, a session store, a `sid` cookie, middleware that reads it — Reddit, YouTube, ChatGPT, and friends all do. **None of that changes to add DBSC.** You add a second cookie bound to the device and one guard on sensitive routes. This page is the full step-by-step.
+This is the core how-to: from `npm install` to a guarded route, end to end. If you just want to see it run first, [Quickstart](./quickstart.md) gets a fresh Express app working in five minutes; come back here for the full integration.
+
+Most production sites already have a working session story: a login route, a session store, a `sid` cookie, middleware that reads it — Reddit, YouTube, ChatGPT, and friends all do. **None of that changes to add DBSC.** You add a second cookie bound to the device and one guard on sensitive routes.
+
+> **Plain JavaScript, not TypeScript?** It works exactly the same — the package ships compiled JS plus optional type files. The one constraint is that it's ESM-only. See the [FAQ](./faq.md) for the two-line answer.
 
 ## The mental model
 
@@ -84,7 +88,7 @@ app.post("/login", async (req, res) => {
 
 `dbsc.bind` writes the DBSC session row, issues a challenge, sets the registration header, and sets the short-lived cookies the browser needs. Chrome triggers `/dbsc/registration` on its own within ~1s.
 
-**No server-side session id?** JWT-mode NextAuth, iron-session, Lucia-stateless apps have no `sid`. Call `dbsc.bind(res, { userId: user.id })` with **no** id — the kit derives a stable one and manages a `__Host-dbsc-device` cookie so each browser of the same user binds independently. (Next.js: pass `req` too — `dbsc.bind(res, { userId, req })`.) Per-system recipes: [integration-recipes.md](./integration-recipes.md).
+**No server-side session id?** JWT-mode NextAuth, iron-session, Lucia-stateless apps have no `sid`. Call `dbsc.bind(res, { userId: user.id })` with **no** id — the kit derives a stable one and manages a `__Host-dbsc-device` cookie so each browser of the same user binds independently. (Next.js: pass `req` too — `dbsc.bind(res, { userId, req })`.) Per-system recipes: [recipes.md](./recipes.md).
 
 **OAuth / SSO login** (Google, GitHub): same `dbsc.bind(...)` call, placed in the callback after you resolve the external profile to a user, before the redirect.
 
@@ -114,7 +118,14 @@ app.post("/logout", async (req, res) => {
 });
 ```
 
-`revoke()` deletes the DBSC session row and bound key and clears `__Host-dbsc-session`.
+`revoke()` deletes the DBSC session row and bound key and clears `__Host-dbsc-session`. On the client, drop the IndexedDB polyfill key in the same logout handler so it doesn't linger until the next login detects the mismatch:
+
+```js
+import { clearBoundKey } from "dbsc-toolkit/client";
+
+await fetch("/logout", { method: "POST", credentials: "include" });
+await clearBoundKey();
+```
 
 ## Step 7 — Load the browser SDK
 
@@ -146,7 +157,7 @@ One script tag. As of v2.7, the SDK is required on every browser including Chrom
 </script>
 ```
 
-Validation rejects the obvious footguns at install time: empty prefixes, bare `"/"`, absolute URL prefixes, prefixes missing the leading `/`. See [per-request-signing.md](./per-request-signing.md#bulk-install-with-installfetchinterceptor-v28).
+Validation rejects the obvious footguns at install time: empty prefixes, bare `"/"`, absolute URL prefixes, prefixes missing the leading `/`. See [request-signing.md](./request-signing.md#bulk-install-with-installfetchinterceptor-v28).
 
 ---
 
@@ -164,8 +175,8 @@ Validation rejects the obvious footguns at install time: empty prefixes, bare `"
 | `clientPath` | `"/dbsc-client"` | Where `install()` serves the browser SDK. Omit it → served at `/dbsc-client`. Pass `false` to not serve it (e.g. you bundle the SDK yourself). |
 | `sessionTtl` | `86400000` (24 h) | Lifetime of the DBSC session row. Omit it → 24 h. |
 | `rateLimiter` | `NoopRateLimiter` (no limiting) | `/dbsc/registration` and `/dbsc/refresh` are unauthenticated by design. Without a real limiter they are unthrottled attack surface — **wire one for production.** |
-| `replayCache` (v2.8+) | `NoopReplayCache` (no replay check) | Optional same-second replay defense. Without it, an MITM that captures one valid signed proof off the wire can replay it for up to the timestamp window. With `new RedisReplayCache(redis)` the second arrival 403s as `PROOF_REPLAY`. Default is fine for passive-cookie-theft threat models; turn it on for active MITM, log-spillage exposure, or regulatory replay rejection. See [per-request-signing.md](./per-request-signing.md#closing-the-replay-window-v28). |
-| `cookieScope` (v2.9+) | `"host"` | `"host"` uses `__Host-` cookies — origin-locked, strongest. `"site"` switches to `__Secure-` + a `Domain` attribute so an app split across `app.example.com` / `api.example.com` can share the binding. `"site"` requires `cookieDomain` and `secure: true` — passing it wrong throws at construction. Prefer host scope when same-origin (or proxying `/dbsc/*` through one origin) is workable. See [integration-recipes.md](./integration-recipes.md#multi-subdomain-apps-cookiescope-site). |
+| `replayCache` (v2.8+) | `NoopReplayCache` (no replay check) | Optional same-second replay defense. Without it, an MITM that captures one valid signed proof off the wire can replay it for up to the timestamp window. With `new RedisReplayCache(redis)` the second arrival 403s as `PROOF_REPLAY`. Default is fine for passive-cookie-theft threat models; turn it on for active MITM, log-spillage exposure, or regulatory replay rejection. See [request-signing.md](./request-signing.md#closing-the-replay-window-v28). |
+| `cookieScope` (v2.9+) | `"host"` | `"host"` uses `__Host-` cookies — origin-locked, strongest. `"site"` switches to `__Secure-` + a `Domain` attribute so an app split across `app.example.com` / `api.example.com` can share the binding. `"site"` requires `cookieDomain` and `secure: true` — passing it wrong throws at construction. Prefer host scope when same-origin (or proxying `/dbsc/*` through one origin) is workable. See [recipes.md](./recipes.md#multi-subdomain-apps-cookiescope-site). |
 | `cookieDomain` (v2.9+) | — | Required and only valid when `cookieScope: "site"`. The registrable apex (e.g. `"example.com"`, no leading dot). |
 | `onEvent` | none (events dropped) | Telemetry callback. Without it you get no `session_stolen` / `verification_failure` / `polyfill_missing` alerts. Strongly recommended in production. |
 | `autoBind` | none | Transparent rollout hook — see [below](#variant-autobind). Omit it → binding happens only via your explicit `dbsc.bind()` call in `/login`. |

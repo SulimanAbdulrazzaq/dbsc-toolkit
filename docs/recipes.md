@@ -47,7 +47,7 @@ app.post("/settings/email", express.raw({ type: "*/*" }), requireProof(), emailH
 
 `req.session.id` is stable for the life of the session — `express-session` does not rotate it, even with `rolling: true` (rolling resets the cookie's `Max-Age`, not the id). Bind to it directly.
 
-Deep dive: [integrating-existing-auth.md](./integrating-existing-auth.md).
+Deep dive: [guide.md](./guide.md).
 
 ---
 
@@ -328,10 +328,10 @@ if (outcome.phase === "native-dbsc" || outcome.phase === "polyfill-bound") {
 - **Native mobile apps.** DBSC is a browser feature — there is no DBSC outside a web context. Use passkeys / WebAuthn, or platform attestation (Play Integrity, App Attest).
 - **Server-to-server APIs.** DBSC binds a *browser session* to a device. For service-to-service auth use mTLS or signed tokens.
 - **API keys / PATs.** DBSC binds sessions, not long-lived credentials. Rotate and scope keys the normal way.
-- **Universally, on every route.** `requireProof()` costs ~1 ms of crypto per call on each side. Gate it on the routes that matter — payment, password change, admin, settings — not the public feed. See [per-request-signing.md](./per-request-signing.md).
+- **Universally, on every route.** `requireProof()` costs ~1 ms of crypto per call on each side. Gate it on the routes that matter — payment, password change, admin, settings — not the public feed. See [request-signing.md](./request-signing.md).
 
 ---
 
 ## Rollout
 
-Don't switch everything on in one deploy. The staged rollout — observe tier in logs first, then gate settings routes, then payment, then enable alerts — is in [integrating-existing-auth.md](./integrating-existing-auth.md#migration-timeline).
+Don't switch everything on in one deploy. The staged rollout — observe tier in logs first, then gate settings routes, then payment, then enable alerts — is in [guide.md](./guide.md#migration-timeline).
