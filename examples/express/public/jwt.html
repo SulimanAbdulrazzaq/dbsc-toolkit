@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#ffffff" id="theme-color-meta">
+<script>try{var t=localStorage.getItem("dbsc-theme");if(t==="dark"||t==="light")document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
 <style>
   :root {
     --bg: #ffffff; --bg-1: #f6f8fa; --bg-2: #eef1f5; --line: #e2e6ec; --line-2: #d2d9e0;
@@ -50,9 +51,10 @@
   .theme-toggle { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: var(--r-sm); border: 1px solid var(--line-2); background: var(--bg-2); color: var(--muted); cursor: pointer; touch-action: manipulation; }
   .theme-toggle:hover { color: var(--ink); border-color: var(--accent); }
   .theme-toggle svg { width: 16px; height: 16px; }
+  .theme-toggle .sun { display: block; }
   .theme-toggle .moon { display: none; }
   [data-theme="dark"] .theme-toggle .sun { display: none; }
-  [data-theme="dark"] .theme-toggle .moon { display: inline; }
+  [data-theme="dark"] .theme-toggle .moon { display: block; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -102,15 +104,20 @@
 const $ = (id) => document.getElementById(id);
 const show = (d) => $("out").textContent = typeof d === "string" ? d : JSON.stringify(d, null, 2);
 
-// Theme toggle. Default light, per-visit (not persisted), OS ignored.
+// Theme toggle. Default light, choice saved in localStorage, OS ignored.
 (function () {
   const meta = document.getElementById("theme-color-meta");
   const btn = document.getElementById("theme-toggle");
+  const dark0 = document.documentElement.getAttribute("data-theme") === "dark";
+  if (meta) meta.setAttribute("content", dark0 ? "#0c0e12" : "#ffffff");
+  btn.setAttribute("aria-pressed", String(dark0));
   btn.addEventListener("click", () => {
     const dark = document.documentElement.getAttribute("data-theme") === "dark";
-    document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
+    const next = dark ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
     if (meta) meta.setAttribute("content", dark ? "#ffffff" : "#0c0e12");
     btn.setAttribute("aria-pressed", String(!dark));
+    try { localStorage.setItem("dbsc-theme", next); } catch (e) {}
   });
 })();
 
