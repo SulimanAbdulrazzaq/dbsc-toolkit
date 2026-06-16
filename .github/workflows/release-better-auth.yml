@@ -1,0 +1,47 @@
+name: Release Better Auth plugin
+
+# Publishes @dbsc-toolkit/better-auth on a dedicated tag so it never collides
+# with the root package's `v*` release. Tag format: better-auth-vX.Y.Z
+on:
+  push:
+    tags: ["better-auth-v*"]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # The plugin imports dbsc-toolkit/dpop, so the root package's dist must
+      # exist before the plugin type-checks and builds.
+      - name: Build the root dbsc-toolkit package
+        run: |
+          npm ci
+          npm run build
+
+      # The plugin lives outside any npm workspace and pins dbsc-toolkit as
+      # workspace:* in devDeps, which plain npm install rejects. Point it at the
+      # freshly built root package instead, then install its other deps.
+      - name: Install plugin dependencies
+        working-directory: packages/better-auth
+        run: |
+          npm install --no-save ../..
+          npm install --no-save better-auth@^1.6.18 typescript@^6.0.0 rimraf@^6.0.0
+
+      - name: Build the plugin
+        working-directory: packages/better-auth
+        run: npm run build
+
+      - name: Publish to npm
+        working-directory: packages/better-auth
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
