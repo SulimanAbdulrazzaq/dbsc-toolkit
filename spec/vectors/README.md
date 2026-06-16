@@ -24,6 +24,9 @@ expected. What must match is:
 | `bound-registration.json` | A bound-polyfill registration body: signature over the bare JTI. |
 | `bound-refresh.json` | A bound-polyfill refresh body: signature over `<jti>.<timestamp>`. |
 | `per-request-proof.json` | The `X-Dbsc-Bound-Proof` signed-message format, with and without a body hash. |
+| `dpop-proof.json` | A DPoP (RFC 9449) proof-of-possession JWT and the RFC 7638 thumbprint of its key. Optional layer (10). |
+| `dpop-bound-token.json` | A DPoP proof bound to a bearer token: `ath` over the token, key thumbprint = the token's `cnf.jkt`. Optional layer (10). |
+| `dpop-htu-normalization.json` | `htu` comparison cases: equivalent URIs match, trailing-slash and non-default-port cases do not. Optional layer (10). |
 
 ## Using a vector
 

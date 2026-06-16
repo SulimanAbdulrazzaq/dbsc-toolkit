@@ -65,6 +65,18 @@ keys: the native hardware key (used by native refresh) and a bound polyfill key
 `dbsc`. This is why the storage contract (06) keys bound keys by `kind`
 (`native` | `bound`) and a session can carry one of each.
 
+## A sibling layer: DPoP
+
+DBSC binds the session **cookie**. An optional, separate layer — DPoP
+([10](./10-dpop.md), RFC 9449) — binds a bearer **access token** to the same kind
+of device key, proven on every request via a `DPoP` header. It is for
+token-based APIs (OAuth bearers) rather than cookie sessions.
+
+DPoP is **not** a third tier. The `dbsc` / `bound` / `none` model above is
+unchanged; a session's tier says nothing about whether a given API call also
+carried a valid DPoP proof. A server may implement DPoP with or without the DBSC
+protocols, and the two are verified independently.
+
 ## Normative language
 
 The keywords MUST, MUST NOT, REQUIRED, SHOULD, SHOULD NOT, and MAY are used as

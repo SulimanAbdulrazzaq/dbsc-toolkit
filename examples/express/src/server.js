@@ -10,7 +10,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Redis from "ioredis";
 
-import { createDbsc, requireProof, bindSession } from "dbsc-toolkit/express";
+import { createDbsc, requireProof, requireDpop, bindSession } from "dbsc-toolkit/express";
 import { MemoryStorage, MemoryReplayCache } from "dbsc-toolkit/storage/memory";
 import { RedisStorage } from "dbsc-toolkit/storage/redis";
 
@@ -225,6 +225,44 @@ app.post("/payment", authLimiter, requireLogin, express.raw({ type: "*/*" }), re
     received: payload,
     tier: res.locals.dbsc.tier,
     note: "Body hash verified — an MITM cannot change the amount after signing.",
+  });
+});
+
+// DPoP (RFC 9449) demo — the token-binding sibling of the cookie-binding flow
+// above. The browser holds a device key (non-extractable, like the bound tier);
+// at login it sends that key's thumbprint, and the server mints a bearer token
+// carrying cnf.jkt. /api/resource is guarded by requireDpop, which binds the
+// presented token to the proof key. A stolen token alone — no proof — is 401.
+const dpopTokens = new Map(); // token -> { userId, jkt }
+
+app.post("/login-dpop", authLimiter, async (req, res) => {
+  const r = await checkPassword(req.body);
+  if (r.error) return res.status(r.status).json({ error: r.error });
+  const jkt = req.body?.jkt;
+  if (typeof jkt !== "string" || !jkt) {
+    return res.status(400).json({ error: "missing device-key thumbprint (jkt)" });
+  }
+  // The bearer token carries cnf.jkt, exactly as an OAuth AS would issue it.
+  const token = signToken({ userId: r.user.id, username: r.user.username, cnf: { jkt } });
+  dpopTokens.set(token, { userId: r.user.id, jkt });
+  res.json({ ok: true, mode: "dpop", username: r.user.username, accessToken: token });
+});
+
+// getBoundJkt decodes the presented bearer and returns its cnf.jkt so the guard
+// can confirm the proof key matches the token the proof was minted for.
+function boundJktFromRequest(req) {
+  const auth = req.headers["authorization"];
+  if (typeof auth !== "string") return undefined;
+  const m = /^DPoP\s+(.+)$/i.exec(auth.trim());
+  if (!m) return undefined;
+  const claims = verifyToken(m[1]);
+  return claims?.cnf?.jkt;
+}
+
+app.get("/api/resource", authLimiter, requireDpop({ getBoundJkt: boundJktFromRequest }), (_req, res) => {
+  res.json({
+    ok: true,
+    note: "Reached only with a fresh DPoP proof signed by the device key the token is bound to. A stolen bearer alone is rejected 401.",
   });
 });
 

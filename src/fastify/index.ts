@@ -551,5 +551,6 @@ export const dbsc = fp(dbscPlugin, { name: "@dbsc-toolkit/server-fastify" });
 export { requireBoundProof } from "./proof.js";
 export type { RequireBoundProofOptions } from "./proof.js";
 export { requireProof } from "./require-proof.js";
+export { requireDpop } from "./require-dpop.js";
 export { createDbsc } from "./create-dbsc.js";
 export type { CreateDbscOptions, DbscKit, BindOptions } from "./create-dbsc.js";

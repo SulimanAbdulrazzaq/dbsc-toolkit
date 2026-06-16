@@ -7,8 +7,11 @@ import {
   type RequireProofOptions,
   type CookieScope,
 } from "../core/index.js";
+import type { FastifyRequest } from "fastify";
+import type { RequireDpopOptions } from "../core/dpop/index.js";
 import { dbsc, bindSession, type DbscFastifyOptions } from "./index.js";
 import { requireProof } from "./require-proof.js";
+import { requireDpop } from "./require-dpop.js";
 
 const DEVICE_COOKIE_TTL_SEC = 365 * 24 * 60 * 60;
 
@@ -63,6 +66,8 @@ export interface DbscKit {
   bind(reply: FastifyReply, opts: BindOptions): Promise<string>;
   /** The route guard (use as a `preHandler`). */
   requireProof(opts?: RequireProofOptions): preHandlerAsyncHookHandler;
+  /** DPoP (RFC 9449) route guard (use as a `preHandler`). Optional layer. */
+  requireDpop(opts?: RequireDpopOptions<FastifyRequest>): preHandlerAsyncHookHandler;
 }
 
 /**
@@ -118,5 +123,6 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     },
     bind,
     requireProof,
+    requireDpop,
   };
 }

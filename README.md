@@ -161,6 +161,7 @@ The generic `dbsc-toolkit/node` adapter is exactly this over raw `node:http`. Co
 | Works on Firefox / Safari / mobile / no-TPM | ✅ | ✅ | ❌ | ✅ (polyfill) |
 | Per-request body-hash proof vs MITM | ❌ | ❌ | ❌ | ✅ |
 | Captured-proof replay defense | n/a | ❌ | n/a | ✅ (replay cache) |
+| Bearer/access-token replay (DPoP, RFC 9449) | n/a | ❌ | n/a | ✅ (`dbsc-toolkit/dpop`) |
 | Multi-subdomain binding | loose | loose | ❌ | ✅ (`cookieScope: "site"`) |
 | Better Auth integration | n/a | n/a | n/a | ✅ (plugin) |
 
@@ -196,11 +197,30 @@ Every session carries a `tier`. You don't gate on it directly — `requireProof(
 
 The polyfill is on by default. To run native DBSC only (Chromium 145+, no `bound` tier), pass `bound: false` — the `/dbsc-bound/*` routes don't mount and `requireProof()` relaxes to the native binding.
 
+## Optional: DPoP for bearer tokens (RFC 9449)
+
+DBSC binds a session **cookie**. If you hand out **bearer / access tokens** for an API, those have the same replay problem a cookie does — copy the `Authorization` header, use it anywhere. DPoP closes that the same way: bind the token to a device key and require a per-request `DPoP` proof. It ships as a separate import, off the default path, so projects that don't use it pay nothing.
+
+```ts
+import { dpopConfirmation } from "dbsc-toolkit/dpop";
+import { requireDpop } from "dbsc-toolkit/express";
+
+// at issue time — bind the token to the device key:
+const { jkt } = await dpopConfirmation(deviceJwk);
+const token = signAccessToken({ sub, cnf: { jkt } });   // your JWT lib
+
+// on the resource route — verify the proof and the binding:
+app.get("/api/resource", requireDpop({ getBoundJkt }), handler);
+```
+
+`requireDpop` is exported from every adapter (Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, `node:http`). A failed check answers `401` with `WWW-Authenticate: DPoP`. Always pass `getBoundJkt` so the presented token is bound to its key — see [docs/dpop.md](./docs/dpop.md) and [spec/10-dpop.md](./spec/10-dpop.md).
+
 ## Ecosystem
 
 | Package | What it is |
 |---|---|
 | `dbsc-toolkit` | Core + adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit & raw `node:http`; memory/Redis/Postgres storage |
+| `dbsc-toolkit/dpop` | Optional DPoP (RFC 9449) — bind bearer/access tokens to a device key |
 | `dbsc-toolkit/client` | Browser SDK + Web Crypto polyfill |
 | [`@dbsc-toolkit/better-auth`](./packages/better-auth/) | First-class [Better Auth](https://better-auth.com) plugin — binds every sign-in method automatically |
 
@@ -226,6 +246,7 @@ The wire protocol is documented as a language-neutral spec in [`spec/`](./spec/)
 - [x] Multi-subdomain binding (`cookieScope: "site"`)
 - [x] Better Auth plugin
 - [x] NestJS, Koa, SvelteKit & generic `node:http` adapters
+- [x] DPoP (RFC 9449) for bearer-token binding
 - [ ] Bun / Deno native paths
 - [ ] Third-party security audit
 
@@ -235,6 +256,7 @@ The wire protocol is documented as a language-neutral spec in [`spec/`](./spec/)
 |---|---|
 | `dbsc-toolkit` | Core: types, crypto, protocol handlers, framework-agnostic |
 | `dbsc-toolkit/express` · `/fastify` · `/hono` · `/nextjs` · `/nestjs` · `/koa` · `/sveltekit` · `/node` | Framework adapters |
+| `dbsc-toolkit/dpop` | Optional DPoP (RFC 9449) verifier + `requireDpop` per adapter |
 | `dbsc-toolkit/client` | Browser SDK + polyfill |
 | `dbsc-toolkit/storage/{memory,redis,postgres}` | Storage adapters |
 

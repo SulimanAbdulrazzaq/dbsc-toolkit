@@ -9,8 +9,10 @@ import {
   type RequireProofOptions,
   type CookieScope,
 } from "../core/index.js";
+import type { RequireDpopOptions } from "../core/dpop/index.js";
 import { dbsc, bindSession, type DbscExpressOptions } from "./index.js";
 import { requireProof } from "./require-proof.js";
+import { requireDpop } from "./require-dpop.js";
 
 const DEVICE_COOKIE_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -78,6 +80,8 @@ export interface DbscKit {
   bind(res: Response, opts: BindOptions): Promise<string>;
   /** The route guard — requires a bound device + a per-request proof. */
   requireProof(opts?: RequireProofOptions): RequestHandler;
+  /** DPoP (RFC 9449) route guard for token-bound API calls. Optional layer. */
+  requireDpop(opts?: RequireDpopOptions<Request>): RequestHandler;
 }
 
 /**
@@ -145,5 +149,6 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     },
     bind,
     requireProof,
+    requireDpop,
   };
 }

@@ -2,6 +2,44 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.12.0] — 2026-06-16
+
+### Added
+
+- **Optional DPoP (RFC 9449) support**, a separate, opt-in layer that binds a
+  bearer/access token to a device key — the token-shaped sibling of DBSC's cookie
+  binding. Ships at `dbsc-toolkit/dpop`, off the default import, so projects that
+  don't use it pull in nothing extra.
+  - `verifyDpopProof()` runs the full §4.3 verification: `typ`/`alg`, signature
+    against the embedded public `jwk` (private members rejected), `htm`,
+    normalized `htu`, `iat` window, single-use `jti`, and — when a token is
+    presented — `ath` plus the RFC 7638 `cnf.jkt` binding.
+  - `dpopConfirmation(jwk)` returns the `{ jkt }` to embed as a token's `cnf.jkt`
+    at issue time; `jwkThumbprint` / `accessTokenHash` are exposed too.
+  - A `requireDpop` guard on every adapter (Express, Fastify, Hono, Next.js, Koa,
+    SvelteKit, `node:http`; NestJS via `createDbscDpopGuard`). A failed check
+    answers **401** with `WWW-Authenticate: DPoP`.
+  - Reuses the existing `ProofReplayCache` for `jti` replay defense and the
+    existing `jose` crypto — no new storage concept, no second crypto stack.
+  - Token binding is required by default: a presented token with no bindable
+    `cnf.jkt` is rejected as `DPOP_TOKEN_BINDING_REQUIRED`; running unbound
+    (`requireTokenBinding: false`) must be an explicit, deliberate choice.
+- **Spec**: a new normative `spec/10-dpop.md`, three round-trip-verified vectors
+  (`dpop-proof.json`, `dpop-bound-token.json`, `dpop-htu-normalization.json`), a
+  "DPoP-conforming" level in the conformance doc, and the `DPOP_*` error codes in
+  the catalog.
+- **Better Auth**: an opt-in `dpop` option and a `dbscDpop` helper to bind tokens
+  and guard resource routes. Default behavior is unchanged when `dpop` is unset.
+- A **stolen-bearer-token** demo path in `examples/express`, mirroring the
+  existing stolen-cookie flow.
+
+### Note
+
+The server-provided nonce (`DPoP-Nonce` / `use_dpop_nonce`) is intentionally not
+in this release; the `jti` single-use check plus the `iat` window are the replay
+defense. DPoP at the OAuth token endpoint is out of scope — this is the
+resource-server side.
+
 ## [2.11.0] — 2026-06-15
 
 ### Added

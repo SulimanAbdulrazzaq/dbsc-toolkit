@@ -30,6 +30,7 @@ import {
 } from "../core/index.js";
 
 export { requireProof } from "./require-proof.js";
+export { requireDpop } from "./require-dpop.js";
 
 /** Internal carrier so `requireProof()` can reach storage without re-passing it. */
 export interface DbscInternal {

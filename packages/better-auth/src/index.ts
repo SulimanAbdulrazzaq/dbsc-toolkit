@@ -23,6 +23,16 @@ import {
   type AnyTelemetryEvent,
 } from "dbsc-toolkit";
 
+import {
+  verifyDpopProof,
+  dpopConfirmation,
+  jwkThumbprint,
+  runDpopGuard,
+  parseDpopAuthorization,
+  DPOP_WWW_AUTHENTICATE,
+  type RequireDpopOptions,
+} from "dbsc-toolkit/dpop";
+
 import { createAuthEndpoint } from "better-auth/api";
 
 import { createBetterAuthStorageAdapter } from "./adapter.js";
@@ -57,6 +67,21 @@ export interface DbscPluginOptions {
   bound?: boolean;
   /** Path the polyfill SDK is served at, baked into the init shim. Default "/dbsc-client". */
   clientPath?: string;
+  /**
+   * Optional DPoP (RFC 9449) support for bearer-token-bound API calls, separate
+   * from DBSC's cookie binding. Off by default — leaving it unset keeps the
+   * plugin's behavior byte-for-byte unchanged. When enabled, bind an access
+   * token to a device key at issue time with `dpopConfirmation(jwk)` (embed the
+   * returned `{ jkt }` as the token's `cnf.jkt`) and guard the resource route
+   * with `dbscDpop.guard({ getBoundJkt })`, re-exported below. The token-issuing
+   * and resource endpoints live in your app — Better Auth issues session tokens,
+   * not OAuth bearers, so the bearer lifecycle stays yours.
+   */
+  dpop?: {
+    enabled?: boolean;
+    /** Acceptable DPoP proof `iat` window in ms. Default 300000. */
+    iatWindowMs?: number;
+  };
   /** Telemetry hook */
   onEvent?: (event: AnyTelemetryEvent) => void | Promise<void>;
 }
@@ -270,4 +295,63 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
     },
   } satisfies object;
 }
+
+/**
+ * Opt-in DPoP (RFC 9449) helper for binding bearer access tokens to a device
+ * key, alongside DBSC's cookie binding. Use from your own token-issuing and
+ * resource endpoints — Better Auth issues session tokens, not OAuth bearers, so
+ * the token lifecycle stays in your app.
+ *
+ *   // at issue time, after the device key is registered:
+ *   const { jkt } = await dbscDpop.bind(deviceJwk);
+ *   const token = await signJwt({ sub, cnf: { jkt } });
+ *
+ *   // in the resource endpoint (any runtime with a standard Request):
+ *   const denied = await dbscDpop.verify(request, { getBoundJkt });
+ *   if (denied) return denied; // 401 + WWW-Authenticate: DPoP
+ */
+export const dbscDpop = {
+  /** Returns `{ jkt }` to embed as the access token's `cnf.jkt`. */
+  bind: dpopConfirmation,
+  /** Low-level: the RFC 7638 thumbprint of a JWK. */
+  thumbprint: jwkThumbprint,
+  /** Low-level: verify a DPoP proof directly. */
+  verifyProof: verifyDpopProof,
+  /**
+   * Verify the DPoP proof on a standard `Request`. Returns a 401 `Response` to
+   * return from the handler on failure, or `undefined` when the proof is valid.
+   */
+  async verify(
+    request: Request,
+    opts: RequireDpopOptions<Request> = {},
+  ): Promise<Response | undefined> {
+    const boundJkt = opts.getBoundJkt ? await opts.getBoundJkt(request) : undefined;
+    const outcome = await runDpopGuard({
+      proof: request.headers.get("DPoP") ?? undefined,
+      authorization: request.headers.get("Authorization") ?? undefined,
+      method: request.method,
+      url: request.url,
+      boundJkt,
+      replayCache: opts.replayCache,
+      opts: {
+        ...(opts.requireTokenBinding !== undefined && { requireTokenBinding: opts.requireTokenBinding }),
+        ...(opts.iatWindowMs !== undefined && { iatWindowMs: opts.iatWindowMs }),
+      },
+    });
+    if (outcome.ok) return undefined;
+    return new Response(
+      JSON.stringify({ error: "invalid_dpop_proof", code: outcome.error?.code }),
+      {
+        status: 401,
+        headers: {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": DPOP_WWW_AUTHENTICATE,
+        },
+      },
+    );
+  },
+};
+
+// Re-export the bearer-token Authorization parser for convenience.
+export { parseDpopAuthorization };
 

@@ -40,6 +40,12 @@ cookies, and errors (05–08) are the rules that make a server conforming.
 | 07 | [Cookies](./07-cookies.md) | `__Host-` / `__Secure-` rules, the attributes string, scope |
 | 08 | [Errors](./08-errors.md) | The error-code catalog and which flow raises each |
 | 09 | [Conformance](./09-conformance.md) | What "conforming" means and how to check it |
+| 10 | [DPoP (RFC 9449)](./10-dpop.md) | Optional, separate token-binding layer — verify a DPoP proof, bind a bearer token to a device key |
+
+Document 10 is an **optional, separate** layer. DPoP binds a bearer **access
+token** to a device key (proven per request); it is not part of native or bound
+DBSC and does not change the tier model. Implement it only if you guard
+token-bound APIs.
 
 ## Test vectors
 

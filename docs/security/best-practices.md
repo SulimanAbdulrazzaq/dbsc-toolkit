@@ -244,6 +244,15 @@ The `session_stolen` telemetry event fires when a refresh request arrives with a
 - **Bound key storage**: the public keys are not secrets but should still be stored only in your application database. Do not log them with other request data.
 - **Audit log**: the Postgres adapter creates a `dbsc_audit_log` table. Retain audit data per your compliance requirements (typically 90 days minimum for SOC 2).
 
+## DPoP (optional layer) — when and how
+
+DBSC binds the session **cookie**; `requireProof()` is the guard for cookie-backed routes. DPoP (`dbsc-toolkit/dpop`, RFC 9449) binds a **bearer/access token**; `requireDpop()` is the guard for token-backed APIs. Reach for DPoP when you hand out bearer tokens that travel in an `Authorization` header — those replay exactly like a cookie does. If your app is purely cookie-session, you do not need DPoP.
+
+- **Always pass `getBoundJkt`.** It tells the guard which key the presented token was issued against, so the proof key's thumbprint can be matched to the token's `cnf.jkt`. Without binding, a DPoP guard only proves the caller holds *some* key — a stolen token paired with a self-minted proof for *their own* key would pass. To prevent that footgun, the guard rejects a presented token with no bindable `cnf.jkt` as `DPOP_TOKEN_BINDING_REQUIRED`; running unbound (`requireTokenBinding: false`) is strictly weaker and must be a deliberate, documented decision — never the default you fall into by omitting the hook.
+- **Use Redis for the jti store in production.** The `jti` replay defense reuses the same `ProofReplayCache` as the per-request DBSC proof. The in-memory cache is single-process only; with multiple replicas, a proof verified on one instance can be replayed against another. Wire `RedisReplayCache` so the jti is seen across the fleet.
+- **Keep the `iat` window tight.** The default is 5 minutes for clock skew; shorter is safer if your clients are well-synchronized, because it bounds how long a captured proof is replayable before the `jti` even matters.
+- **DPoP is not device-malware protection.** Same caveat as the `bound` tier — if the proof key is a software key the attacker's code can reach, they can sign. DPoP closes token replay over the network and through logs, not on-device signing.
+
 ## What DBSC does NOT protect against
 
 Important to communicate to your team and users:
@@ -264,6 +273,7 @@ Important to communicate to your team and users:
 - [ ] `__Host-` cookies (default — verify in DevTools)
 - [ ] `RateLimiter` implementation wired (not the noop default)
 - [ ] `onEvent` callback emitting to your logger and metrics
+- [ ] If using DPoP: `getBoundJkt` supplied on every `requireDpop()` and `RedisReplayCache` wired for the jti store
 - [ ] `session_stolen` triggers immediate revocation
 - [ ] Redis or Postgres storage (not memory)
 - [ ] Bound cookie TTL appropriate for sensitivity (default 10 min may be too long for payments)

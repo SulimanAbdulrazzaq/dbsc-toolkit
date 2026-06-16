@@ -10,6 +10,7 @@ import {
 } from "../node/index.js";
 
 export { requireProof } from "./require-proof.js";
+export { requireDpop } from "./require-dpop.js";
 export { createDbsc } from "./create-dbsc.js";
 export type { CreateDbscOptions, DbscKit, BindOptions } from "./create-dbsc.js";
 export type { DbscNodeSession as DbscKoaSession, BindSessionOptions } from "../node/index.js";

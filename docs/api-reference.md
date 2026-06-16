@@ -15,6 +15,7 @@ Every public export across all subpaths.
 | `dbsc-toolkit/koa` | Koa middleware |
 | `dbsc-toolkit/sveltekit` | SvelteKit `dbscHandle` hook + `requireProof` |
 | `dbsc-toolkit/node` | Generic raw `node:http` handler |
+| `dbsc-toolkit/dpop` | Optional DPoP (RFC 9449): `verifyDpopProof`, `dpopConfirmation`, `jwkThumbprint` |
 | `dbsc-toolkit/client` | Browser SDK |
 | `dbsc-toolkit/storage/memory` | `MemoryStorage` |
 | `dbsc-toolkit/storage/redis` | `RedisStorage` |
@@ -373,6 +374,58 @@ class NoopRateLimiter implements RateLimiter {
   recordFailure(): Promise<void>;
 }
 ```
+
+---
+
+## `dbsc-toolkit/dpop` (optional)
+
+Optional DPoP (RFC 9449) layer for binding bearer/access tokens to a device key.
+Off the default import path. Per-adapter `requireDpop` guards live on each
+adapter subpath; the core verification surface is here.
+
+```ts
+function verifyDpopProof(req: VerifyDpopProofRequest): Promise<DpopVerifyResult>;
+
+interface VerifyDpopProofRequest {
+  proof: string | undefined;          // the DPoP header value
+  method: string;                     // actual request method
+  url: string;                        // actual absolute request URL
+  accessToken?: string;               // bearer, when binding a token
+  boundJkt?: string;                  // the token's cnf.jkt
+  requireTokenBinding?: boolean;      // default true — reject an unbound presented token
+  iatWindowMs?: number;               // default 300000
+  replayCache?: ProofReplayCache;     // jti store (reuses the DBSC cache)
+}
+interface DpopVerifyResult { jkt: string; jti: string; payload: JWTPayload; }
+
+// Bind a token at issue time: embed { cnf: { jkt } } in the token.
+function dpopConfirmation(jwk: JsonWebKey): Promise<{ jkt: string }>;
+
+// RFC 7638 JWK thumbprint, and the ath claim hash.
+function jwkThumbprint(jwk: JsonWebKey): Promise<string>;
+function accessTokenHash(token: string): Promise<string>;
+
+// htu normalization, exposed for testing / custom guards.
+function normalizeHtu(uri: string): string;
+function htuMatches(claimed: string, requestUrl: string): boolean;
+
+// Adapter-neutral guard core + the WWW-Authenticate value.
+function runDpopGuard(input: DpopGuardInput): Promise<DpopGuardOutcome>;
+function parseDpopAuthorization(authorization?: string): string | undefined;
+const DPOP_WWW_AUTHENTICATE: string;  // 'DPoP error="invalid_dpop_proof"'
+
+interface RequireDpopOptions<Req = unknown> {
+  getBoundJkt?: (req: Req) => string | undefined | Promise<string | undefined>;
+  requireTokenBinding?: boolean;
+  iatWindowMs?: number;
+  replayCache?: ProofReplayCache;
+}
+```
+
+Every adapter exports `requireDpop(opts?: RequireDpopOptions<AdapterReq>)`
+(NestJS: `createDbscDpopGuard(opts)`). A failed check answers **401** with
+`WWW-Authenticate: DPoP`. New error codes (`DPOP_*`) are added to `ErrorCodes`.
+See [dpop.md](./dpop.md) and [spec/10-dpop.md](../spec/10-dpop.md).
 
 ---
 

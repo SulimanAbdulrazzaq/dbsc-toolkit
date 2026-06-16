@@ -4,6 +4,7 @@ import {
   Inject,
   ForbiddenException,
   InternalServerErrorException,
+  UnauthorizedException,
   type DynamicModule,
   type NestModule,
   type MiddlewareConsumer,
@@ -17,6 +18,11 @@ import {
   DbscVerificationError,
   type RequireProofOptions,
 } from "../core/index.js";
+import {
+  runDpopGuard,
+  DPOP_WWW_AUTHENTICATE,
+  type RequireDpopOptions,
+} from "../core/dpop/index.js";
 import {
   dbsc,
   createDbsc,
@@ -149,4 +155,59 @@ export function createDbscGuard(opts: RequireProofOptions): new () => CanActivat
     }
   }
   return ConfiguredDbscGuard;
+}
+
+async function runDpop(
+  req: Request,
+  res: Response,
+  opts: RequireDpopOptions<Request>,
+): Promise<void> {
+  const internal = (res.locals as Record<PropertyKey, unknown>)[DBSC_INTERNAL] as
+    | DbscInternal
+    | undefined;
+  const replayCache = opts.replayCache ?? internal?.replayCache;
+  const url = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
+  const boundJkt = opts.getBoundJkt ? await opts.getBoundJkt(req) : undefined;
+
+  const outcome = await runDpopGuard({
+    proof: req.headers["dpop"] as string | undefined,
+    authorization: req.headers["authorization"] as string | undefined,
+    method: req.method,
+    url,
+    boundJkt,
+    replayCache,
+    opts: {
+      ...(opts.requireTokenBinding !== undefined && { requireTokenBinding: opts.requireTokenBinding }),
+      ...(opts.iatWindowMs !== undefined && { iatWindowMs: opts.iatWindowMs }),
+    },
+  });
+
+  if (!outcome.ok) {
+    res.setHeader("WWW-Authenticate", DPOP_WWW_AUTHENTICATE);
+    throw new UnauthorizedException({ error: "invalid_dpop_proof", code: outcome.error?.code });
+  }
+}
+
+/**
+ * DPoP (RFC 9449) route guard for NestJS (Express platform). Build it with the
+ * token-binding hook, then attach with `@UseGuards`:
+ *
+ *   @UseGuards(createDbscDpopGuard({ getBoundJkt }))
+ *   @Get("resource")
+ *   resource() { ... }
+ *
+ * On failure throws a 401 carrying `WWW-Authenticate: DPoP`.
+ */
+export function createDbscDpopGuard(
+  opts: RequireDpopOptions<Request> = {},
+): new () => CanActivate {
+  @Injectable()
+  class ConfiguredDbscDpopGuard implements CanActivate {
+    async canActivate(context: ExecutionContext): Promise<boolean> {
+      const http = context.switchToHttp();
+      await runDpop(http.getRequest<Request>(), http.getResponse<Response>(), opts);
+      return true;
+    }
+  }
+  return ConfiguredDbscDpopGuard;
 }

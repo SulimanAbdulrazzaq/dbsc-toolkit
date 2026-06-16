@@ -105,4 +105,5 @@ From this point forward your application code never has to think about DBSC. The
 - Read [protocol](./protocol.md) to understand exactly what Chrome and the server exchange.
 - Gate sensitive operations with `requireProof()` — one no-argument guard that requires a bound device + a per-request proof, works on every browser. See [usage.md](./usage.md) and [per-request-signing.md](./per-request-signing.md) for the threat boundary.
 - Wire telemetry — see [telemetry](./telemetry.md).
+- Handing out bearer/access tokens for an API? Bind them to a device key with the optional DPoP layer (RFC 9449) — see [dpop](./dpop.md).
 - Going to production — see [deployment](./deployment.md) and [security best practices](./security/best-practices.md).

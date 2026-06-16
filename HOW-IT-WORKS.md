@@ -354,9 +354,47 @@ The realistic adoption pattern: ship it as the second layer behind your existing
 
 ---
 
+## DPoP: the same idea for bearer tokens
+
+Everything above binds a **cookie**. If your app also hands out **bearer access
+tokens** — an OAuth/OIDC flow, a mobile client, a service-to-service API — those
+tokens have the cookie's exact weakness: whoever holds the `Authorization` header
+is the user, copy it and it works anywhere. The optional DPoP layer
+([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449.html), `dbsc-toolkit/dpop`)
+closes that gap with the same mechanism: a device keypair plus a per-request
+signature.
+
+The distinction is worth stating plainly, because the two are easy to conflate:
+
+- **DBSC binds a session cookie.** The browser (native) or a client SDK (bound)
+  drives it. The proof is exchanged on refresh and on guarded requests, and it is
+  scoped to the session.
+- **DPoP binds an access token.** Your app's client drives it. A fresh proof JWT
+  rides a `DPoP` header on **every** API call, carrying `htm` (the method),
+  `htu` (the URI), `iat`, `jti`, and — when a token is presented — `ath` (a hash
+  of that token). The token is tied to the key by embedding the key's RFC 7638
+  thumbprint as the token's `cnf.jkt`; the resource server confirms the proof key
+  produces the same thumbprint.
+
+So a stolen DBSC cookie fails because refresh needs a TPM signature; a stolen
+DPoP token fails because each call needs a fresh proof signed by the device key,
+bound to that exact method and URL, single-use within a short window. Same shape,
+different object.
+
+`requireDpop` is exported from every adapter and answers a failed check with
+**401** + `WWW-Authenticate: DPoP` (deliberately not the 403 the DBSC refresh
+route must use). It reuses the same replay cache as the per-request DBSC proof,
+keyed on the proof's `jti`. The honest limit is identical to the `bound` tier:
+DPoP does not stop on-device malware that can sign with the key — it closes token
+replay over the network and through logs. Full walkthrough:
+[docs/dpop.md](./docs/dpop.md); normative spec: [spec/10-dpop.md](./spec/10-dpop.md).
+
+---
+
 ## Further reading
 
 - [README.md](./README.md) — quick-start, install, subpath imports.
+- [docs/dpop.md](./docs/dpop.md) — the optional DPoP (RFC 9449) layer for bearer tokens.
 - [docs/integrating-existing-auth.md](./docs/integrating-existing-auth.md) — bolting DBSC onto an existing app with its own session cookie.
 - [docs/api-reference.md](./docs/api-reference.md) — every public export across all subpaths.
 - [docs/protocol.md](./docs/protocol.md) — exact wire format with every header value and JSON shape.

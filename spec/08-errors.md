@@ -14,6 +14,7 @@ strict (02): missing or invalid proof is **403**, never 401.
 | Bound challenge, no session | 403 |
 | Bound registration, missing cookie or body | 400 |
 | Per-request proof missing/invalid on a guarded route | 403 |
+| DPoP proof missing/invalid on a guarded route (10) | **401** + `WWW-Authenticate: DPoP error="invalid_dpop_proof"` |
 | Rate limit tripped | 429 |
 | Registration/refresh success | 200 + JSON |
 
@@ -42,6 +43,32 @@ the session dies.
 | `MISSING_PROOF` | A guarded route received no `X-Dbsc-Bound-Proof` header | 04 |
 | `MALFORMED_PROOF` | The proof header violated a parse rule, or carried `bh` without body signing, or omitted `bh` with it | 04 |
 | `PROOF_REPLAY` | A per-request proof's `(sessionId, ts, sig)` tuple was seen before | 04 |
+
+### DPoP codes (optional layer, 10)
+
+These belong to the optional DPoP layer and map to **401** (not 403). They are
+raised only when a `requireDpop` guard runs; a server that does not implement
+DPoP never produces them.
+
+| Code | Raised when | Where |
+|---|---|---|
+| `DPOP_PROOF_MISSING` | No `DPoP` header on a DPoP-guarded route | 10 |
+| `DPOP_PROOF_MALFORMED` | The `DPoP` value is not a single well-formed JWT, or a required claim is absent/ill-typed | 10 |
+| `DPOP_INVALID_TYP` | The proof `typ` is not `dpop+jwt` | 10 |
+| `DPOP_INVALID_ALG` | The proof `alg` is `none`, symmetric, or otherwise unaccepted | 10 |
+| `DPOP_JWK_PRIVATE` | The proof header `jwk` carries private key material | 10 |
+| `DPOP_SIGNATURE_INVALID` | The proof JWS did not verify against its embedded `jwk` | 10 |
+| `DPOP_HTM_MISMATCH` | `htm` does not equal the request method | 10 |
+| `DPOP_HTU_MISMATCH` | `htu` does not equal the request URI after normalization | 10 |
+| `DPOP_IAT_OUT_OF_WINDOW` | `iat` is outside the acceptance window (past or future) | 10 |
+| `DPOP_JTI_REPLAY` | The proof `jti` was already used within the window | 10 |
+| `DPOP_ATH_MISMATCH` | A token was presented but `ath` ≠ its hash | 10 |
+| `DPOP_JKT_MISMATCH` | The proof key's thumbprint ≠ the token's `cnf.jkt` | 10 |
+| `DPOP_TOKEN_BINDING_REQUIRED` | A token was presented with no `cnf.jkt` to bind against, and binding was not explicitly waived | 10 |
+
+The 401-vs-403 split is deliberate: DPoP is an OAuth resource-server response
+(`WWW-Authenticate: DPoP`), while the native DBSC refresh route MUST stay 403
+(Chromium ignores 401 there and the session dies).
 
 ## Telemetry
 

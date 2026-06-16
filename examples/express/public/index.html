@@ -120,6 +120,27 @@
   <button id="replay-btn" class="attack">Send identical request twice</button>
 </div>
 
+<h2>DPoP: token binding (RFC 9449)</h2>
+<p class="lede">The same idea, applied to bearer tokens instead of cookies. The token is bound to a device key; every API call carries a fresh <code>DPoP</code> proof. A stolen bearer alone proves nothing.</p>
+
+<div class="card">
+  <h3>Bind a token to this device</h3>
+  <p>Generate a device key in the browser, then sign in. The server issues a bearer token carrying <code>cnf.jkt</code> — the key's thumbprint.</p>
+  <button id="dpop-login-btn" class="primary">Generate key + get bound token</button>
+</div>
+
+<div class="card">
+  <h3>Call the API with a proof</h3>
+  <p>Sign a <code>DPoP</code> proof over the method + URL with the device key, send it with the token. <code>requireDpop()</code> verifies both.</p>
+  <button id="dpop-call-btn" class="primary">GET /api/resource (token + proof)</button>
+</div>
+
+<div class="card">
+  <h3>The stolen bearer token</h3>
+  <p>An attacker exfiltrates the bearer token and replays it with no proof — the way a stolen <code>Authorization</code> header travels today.</p>
+  <button id="dpop-steal-btn" class="attack">Send token, no proof</button>
+</div>
+
 <div id="explain"></div>
 <pre id="out">(output appears here)</pre>
 
@@ -324,6 +345,86 @@ $("replay-btn").onclick = async () => {
   show({ path: "/profile, same proof replayed twice", first: { status: first.status, body: first.body }, second: { status: second.status, body: second.body } });
   if (second.status === 403) explain("ok", "<strong>Defended.</strong> The replay cache (v2.8+) recorded the first proof. The second arrival of the same proof bytes returned 403 <code>PROOF_REPLAY</code>.");
   else explain("info", "The first request succeeded. The second succeeded too — replay cache is off, or the v2.8 cache isn't wired here.");
+};
+
+// DPoP demo. A self-contained Web Crypto implementation of the client half of
+// RFC 9449: a device key, the RFC 7638 thumbprint, and a signed proof JWT.
+let dpopKey = null;       // CryptoKeyPair
+let dpopJkt = null;       // RFC 7638 thumbprint
+let dpopToken = null;     // bound bearer
+
+function b64url(bytes) {
+  let s = ""; const b = new Uint8Array(bytes);
+  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+  return btoa(s).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+async function jwkThumbprint(jwk) {
+  // RFC 7638: SHA-256 over the canonical members in lexicographic order.
+  const canon = JSON.stringify({ crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y });
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canon));
+  return b64url(digest);
+}
+
+async function dpopAth(tok) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(tok));
+  return b64url(d);
+}
+
+async function mintDpopProof(method, url, boundToken) {
+  const pub = await crypto.subtle.exportKey("jwk", dpopKey.publicKey);
+  const jwk = { kty: pub.kty, crv: pub.crv, x: pub.x, y: pub.y };
+  const header = { typ: "dpop+jwt", alg: "ES256", jwk };
+  const payload = {
+    jti: crypto.randomUUID(),
+    htm: method,
+    htu: url.split("#")[0].split("?")[0],
+    iat: Math.floor(Date.now() / 1000),
+  };
+  // A proof sent with a bound token must carry ath = base64url(sha256(token)).
+  if (boundToken) payload.ath = await dpopAth(boundToken);
+  const signingInput =
+    b64url(new TextEncoder().encode(JSON.stringify(header))) + "." +
+    b64url(new TextEncoder().encode(JSON.stringify(payload)));
+  const sig = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    dpopKey.privateKey,
+    new TextEncoder().encode(signingInput),
+  );
+  return signingInput + "." + b64url(sig);
+}
+
+$("dpop-login-btn").onclick = async () => {
+  clearExplain();
+  dpopKey = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  const pub = await crypto.subtle.exportKey("jwk", dpopKey.publicKey);
+  dpopJkt = await jwkThumbprint(pub);
+  const r = await plainFetch("POST", "/login-dpop", { username: val("username"), password: $("password").value, jkt: dpopJkt });
+  dpopToken = r.body?.accessToken ?? null;
+  show({ ...r, jkt: dpopJkt });
+  if (r.status === 200) explain("ok", "Signed in. The bearer token now carries <code>cnf.jkt</code> = your device key's thumbprint. The private key never left the browser.");
+  else explain("bad", "Sign up + sign in first; the device key binds to that account.");
+};
+
+$("dpop-call-btn").onclick = async () => {
+  clearExplain();
+  if (!dpopToken) return show({ error: "get a bound token first" });
+  const url = location.origin + "/api/resource";
+  const proof = await mintDpopProof("GET", url, dpopToken);
+  const r = await plainFetch("GET", "/api/resource", null, { Authorization: "DPoP " + dpopToken, DPoP: proof });
+  show(r);
+  if (r.status === 200) explain("ok", "The DPoP proof verified against the embedded key, and that key's thumbprint matched the token's <code>cnf.jkt</code>. <code>requireDpop()</code> let the call through.");
+  else explain("bad", "Proof check failed — see the reason code.");
+};
+
+$("dpop-steal-btn").onclick = async () => {
+  clearExplain();
+  if (!dpopToken) return show({ error: "get a bound token first" });
+  // The attacker has the bearer, not the device key — so no proof.
+  const r = await plainFetch("GET", "/api/resource", null, { Authorization: "DPoP " + dpopToken });
+  show(r);
+  if (r.status === 401) explain("ok", "<strong>Defended.</strong> The stolen bearer reached the server but no <code>DPoP</code> proof was sent — <code>requireDpop()</code> returned 401 <code>invalid_dpop_proof</code>. The token alone is worthless without the device key.");
+  else explain("bad", "Unexpected status. Check the body.");
 };
 
 $("interceptor-btn").onclick = async () => {

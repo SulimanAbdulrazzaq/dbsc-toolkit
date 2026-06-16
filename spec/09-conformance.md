@@ -16,6 +16,12 @@ conformance levels:
 A server claiming DBSC support SHOULD aim for full conformance; native-only
 leaves most browsers on plain cookies.
 
+**DPoP-conforming** is a third, **orthogonal** level for the optional DPoP layer
+(10). It is independent of native/full: a server can be full-conforming with or
+without DPoP, and DPoP-conforming with or without the bound protocol. A
+DPoP-conforming server verifies a DPoP proof per RFC 9449 §4.3 — see the DPoP
+checklist below.
+
 ## The MUST checklist
 
 A native-conforming server:
@@ -43,6 +49,24 @@ A full-conforming server additionally:
 - co-registers a bound key for Chromium sessions so per-request proofs work
   there, keeping such sessions at `tier: dbsc`.
 
+A **DPoP-conforming** server (10), for every DPoP-guarded request:
+
+- accepts exactly one well-formed `DPoP` JWT with `typ=dpop+jwt`, an asymmetric
+  `alg`, and a public-only `jwk`;
+- verifies the JWS against that embedded `jwk`;
+- checks `htm` against the method and `htu` against the request URI after
+  RFC 3986 normalization (default port dropped, query/fragment stripped, trailing
+  slash significant);
+- checks `iat` within the window and rejects a replayed `jti`;
+- when a token is presented, checks `ath` against the token hash and the proof
+  key's thumbprint against the token's `cnf.jkt`, and rejects a presented token
+  with no `cnf.jkt` to bind against unless binding is explicitly waived;
+- answers a failed check with **401** + `WWW-Authenticate: DPoP`.
+
+This version does not implement the optional server nonce (`DPoP-Nonce` /
+`use_dpop_nonce`); a DPoP-conforming server MAY add it without affecting the
+above.
+
 ## Checking against the vectors
 
 [`vectors/`](./vectors/) lets an implementation self-check without a browser.
@@ -60,6 +84,12 @@ For each vector:
 The native JWS vectors (`registration.json`, `refresh.json`) carry a full,
 real JWS that a native-conforming verifier MUST accept. The bound and proof
 vectors carry the exact strings a full-conforming implementation MUST produce.
+
+The DPoP vectors (`dpop-proof.json`, `dpop-bound-token.json`) carry real proof
+JWTs a DPoP-conforming verifier MUST accept (with time frozen to the vector
+`iat`), plus `expectedReject` rows it MUST refuse. `dpop-htu-normalization.json`
+is a pure table of `htu` comparison cases — equivalent URIs MUST compare equal,
+the trailing-slash and non-default-port cases MUST NOT.
 
 ## End-to-end check (native)
 
@@ -85,4 +115,6 @@ real TPM 2.0 hardware.
 State the level and the spec version, e.g. "DBSC Toolkit Protocol 1.0 —
 full-conforming." If you implement a subset (native-only, or without per-request
 proofs), say so explicitly rather than claiming bare "DBSC support," so adopters
-know which browsers and which threats your implementation actually covers.
+know which browsers and which threats your implementation actually covers. If you
+also implement the optional DPoP layer, append "+ DPoP-conforming," e.g. "DBSC
+Toolkit Protocol 1.0 — full-conforming + DPoP-conforming."

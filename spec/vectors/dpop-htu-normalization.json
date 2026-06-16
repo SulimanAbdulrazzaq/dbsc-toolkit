@@ -1,0 +1,17 @@
+{
+  "description": "htu comparison cases (RFC 9449 §4.3 + RFC 3986 §6.2.2/§6.2.3). A correct normalizer treats equivalent URIs as equal and genuinely different URIs as not equal. Rules: lowercase scheme and host; drop ONLY the scheme-default port (443/https, 80/http); strip query and fragment; empty path becomes '/'; trailing slash is SIGNIFICANT. Each row: the proof's claimed htu, the actual request URL, and whether they MUST match.",
+  "cases": [
+    { "claimedHtu": "https://example.com/token", "requestUrl": "https://example.com/token", "expectMatch": true, "why": "identical" },
+    { "claimedHtu": "HTTPS://example.com/token", "requestUrl": "https://example.com/token", "expectMatch": true, "why": "scheme case-insensitive" },
+    { "claimedHtu": "https://Example.COM/token", "requestUrl": "https://example.com/token", "expectMatch": true, "why": "host case-insensitive" },
+    { "claimedHtu": "https://example.com:443/token", "requestUrl": "https://example.com/token", "expectMatch": true, "why": "explicit default https port dropped" },
+    { "claimedHtu": "http://example.com:80/token", "requestUrl": "http://example.com/token", "expectMatch": true, "why": "explicit default http port dropped" },
+    { "claimedHtu": "https://example.com/token?x=1", "requestUrl": "https://example.com/token", "expectMatch": true, "why": "query stripped" },
+    { "claimedHtu": "https://example.com/token#f", "requestUrl": "https://example.com/token", "expectMatch": true, "why": "fragment stripped" },
+    { "claimedHtu": "https://example.com", "requestUrl": "https://example.com/", "expectMatch": true, "why": "empty path normalizes to /" },
+    { "claimedHtu": "https://example.com:8443/token", "requestUrl": "https://example.com/token", "expectMatch": false, "why": "non-default port is significant" },
+    { "claimedHtu": "https://example.com/token/", "requestUrl": "https://example.com/token", "expectMatch": false, "why": "trailing slash is significant" },
+    { "claimedHtu": "https://example.com/token", "requestUrl": "http://example.com/token", "expectMatch": false, "why": "scheme differs" },
+    { "claimedHtu": "https://evil.com/token", "requestUrl": "https://example.com/token", "expectMatch": false, "why": "host differs" }
+  ]
+}

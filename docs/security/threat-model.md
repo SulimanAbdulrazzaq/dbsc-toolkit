@@ -49,6 +49,16 @@ An attacker modifies stored public keys to bind their own key.
 
 Mitigation: Out of scope for this library — this is a server security and access control concern. Use principle of least privilege on the storage layer.
 
+**T3: DPoP proof replay / cross-URL reuse (optional DPoP layer, RFC 9449)**
+An attacker captures a valid `DPoP` proof and replays it, or reuses a proof minted for one URL against a different endpoint.
+
+Mitigation: `verifyDpopProof` enforces the §4.3 checklist. The `jti` is recorded in the same `ProofReplayCache` after the signature passes, so a captured proof cannot be replayed inside the `iat` window (use Redis across replicas). Cross-URL reuse is blocked by the `htu` check, which normalizes both sides per RFC 3986 (default port dropped, query/fragment stripped) while keeping the **trailing slash and non-default port significant** — a weak normalizer here is the dangerous failure, so the normalizer is isolated and vector-tested (`spec/vectors/dpop-htu-normalization.json`). `htm` likewise pins the method.
+
+**T4: DPoP token not bound to its key**
+A presented bearer token is accepted on a proof that was not actually issued for it (so a stolen token plus any self-minted proof would pass).
+
+Mitigation: token binding is required by default. When a token is presented but no `cnf.jkt` is available to bind against, the guard rejects with `DPOP_TOKEN_BINDING_REQUIRED`. Pure proof-of-possession (no binding) requires an explicit `requireTokenBinding: false` — it is never reached by omitting `getBoundJkt`. When bound, the proof key's RFC 7638 thumbprint must equal the token's `cnf.jkt` and `ath` must equal the token hash.
+
 ### Repudiation
 
 **R1: Undetected session theft**
@@ -85,7 +95,7 @@ Mitigation: `consumeChallenge` is atomic. Replays fail silently unless the origi
 **E1: Algorithm confusion**
 An attacker crafts a JWS with a weak algorithm (e.g., `none` or `HS256` using the public key as HMAC secret).
 
-Mitigation: `verifyDbscJws` explicitly allows only `ES256` and `RS256`. The `none` algorithm is rejected before any key loading occurs.
+Mitigation: `verifyDbscJws` explicitly allows only `ES256` and `RS256`. The `none` algorithm is rejected before any key loading occurs. The DPoP verifier applies the same allow-list to the proof `alg` and verifies against the key embedded in the proof header, rejecting `none`/symmetric and any private-key material in the `jwk` before importing it.
 
 **E2: Bound tier treated as hardware binding**
 Application code checks `tier !== "none"` and assumes the key is in a TPM. The bound tier is software-bound (Web Crypto + IndexedDB), not hardware-bound.
@@ -101,3 +111,7 @@ Mitigation: Documentation distinguishes the two tiers explicitly. The route guar
 | Infostealer malware reading the browser profile | Mitigated (key in TPM / Secure Enclave) | **Not mitigated** — encrypted blob in IndexedDB, recoverable by attacker with disk access |
 | Malware running inside the browser process | Not mitigated | Not mitigated |
 | Key exfiltration | Mitigated (hardware key store) | Mitigated (platform) | N/A |
+
+### DPoP boundary (optional layer)
+
+DPoP defends **bearer/access-token replay**: a stolen token alone is useless without the device key to mint a fresh, URL- and method-bound, single-use proof. It does **not** defend on-device malware that can sign with the key — exactly the same caveat as the `bound` tier. If the proof key lives in software (a Web Crypto key in the browser), an attacker with code execution in that context can sign proofs; only a hardware-isolated key (TPM / Secure Enclave) raises that bar, and DPoP does not mandate one. Treat DPoP as closing token replay over the network and through logs, not as device-malware protection.

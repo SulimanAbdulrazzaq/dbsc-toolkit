@@ -1,8 +1,10 @@
 import type { Context, Middleware } from "koa";
 import type Application from "koa";
 import { type RequireProofOptions } from "../core/index.js";
+import type { RequireDpopOptions } from "../core/dpop/index.js";
 import { dbsc, bindSession, type DbscKoaOptions } from "./index.js";
 import { requireProof } from "./require-proof.js";
+import { requireDpop } from "./require-dpop.js";
 
 export interface CreateDbscOptions extends DbscKoaOptions {
   /** Default session TTL (ms) for `bind()`. */
@@ -23,6 +25,8 @@ export interface DbscKit {
   bind(ctx: Context, sessionId: string, opts: BindOptions): Promise<string>;
   /** The route guard — requires a bound device + a per-request proof. */
   requireProof(opts?: RequireProofOptions): Middleware;
+  /** DPoP (RFC 9449) route guard for token-bound API calls. Optional layer. */
+  requireDpop(opts?: RequireDpopOptions<Context>): Middleware;
 }
 
 /** Builds a configured DBSC kit for Koa. */
@@ -54,5 +58,6 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     },
     bind,
     requireProof,
+    requireDpop,
   };
 }

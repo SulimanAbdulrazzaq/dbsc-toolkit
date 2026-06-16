@@ -48,6 +48,17 @@ app.post("/payment", express.raw({ type: "*/*" }), requireProof(), paymentHandle
 
 `requireProof` is also `dbsc.requireProof()` on the kit. It signs the request body, so a POST guarded route mounts `express.raw()` in front. A plain `if (res.locals.dbsc.tier === "none") return res.status(403)…` still works if you prefer it.
 
+### DPoP guard (optional)
+
+The same adapters export `requireDpop` for token-bound API routes (the DPoP layer, RFC 9449 — for bearer/access tokens rather than cookies). Same uniform shape on every adapter; on failure it answers **401** with `WWW-Authenticate: DPoP`.
+
+```ts
+import { requireDpop } from "dbsc-toolkit/express";        // and /fastify, /hono, /koa, /node, /sveltekit, /nextjs
+app.get("/api/resource", requireDpop({ getBoundJkt }), handler);
+```
+
+NestJS uses `createDbscDpopGuard({ getBoundJkt })` with `@UseGuards`; SvelteKit's `requireDpop()(event)` returns a 401 `Response` (or `undefined` when valid); Next.js returns `{ ok, response }`; the `node:http` guard returns a boolean like `requireProof`. Always pass `getBoundJkt` so the presented token is bound to its key — see [dpop.md](./dpop.md).
+
 ## Fastify
 
 ```ts

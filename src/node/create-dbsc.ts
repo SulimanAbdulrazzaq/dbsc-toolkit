@@ -9,6 +9,8 @@ import {
   type DbscNodeSession,
 } from "./index.js";
 import { requireProof, type NodeProofGuard } from "./require-proof.js";
+import { requireDpop, type NodeDpopGuard } from "./require-dpop.js";
+import type { RequireDpopOptions } from "../core/dpop/index.js";
 
 export interface CreateDbscOptions extends DbscNodeOptions {
   /** Default session TTL (ms) for `bind()`. */
@@ -29,6 +31,8 @@ export interface DbscKit {
   bind(res: ServerResponse, sessionId: string, opts: BindOptions): Promise<string>;
   /** The route guard — requires a bound device + a per-request proof. */
   requireProof(opts?: RequireProofOptions): NodeProofGuard;
+  /** DPoP (RFC 9449) route guard for token-bound API calls. Optional layer. */
+  requireDpop(opts?: RequireDpopOptions<IncomingMessage>): NodeDpopGuard;
 }
 
 /**
@@ -61,5 +65,6 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     getSession: getDbscSession,
     bind,
     requireProof,
+    requireDpop,
   };
 }
