@@ -1,13 +1,45 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <title>DBSC + Better Auth demo console</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#0c0e12">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" id="theme-color-meta">
 <style>
   :root {
+    --bg: #ffffff;
+    --bg-1: #f6f8fa;
+    --bg-2: #eef1f5;
+    --line: #e2e6ec;
+    --line-2: #d2d9e0;
+    --ink: #0c1117;
+    --muted: #56606b;
+    --faint: #7a8490;
+    --accent: #0a7c47;
+    --accent-ink: #ffffff;
+    --accent-dim: #bfe6d2;
+    --bad: #c2374a;
+    --warn: #8a5e00;
+    --warn-line: #e6d39a;
+    --danger-line: #e7c2c8;
+    --danger-soft: rgba(194,55,74,0.06);
+    --danger-soft-2: rgba(194,55,74,0.10);
+    --accent-soft: rgba(10,124,71,0.07);
+    --accent-soft-2: rgba(10,124,71,0.10);
+    --code-bg: #0c1320;
+    --code-fg: #d7e0ec;
+    --ok-fg: #0a5c36;
+    --bad-fg: #8e2030;
+    --on-code: rgba(13,27,42,0.06);
+    --glow: rgba(10,124,71,0.06);
+    --r: 10px;
+    --r-sm: 7px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+    color-scheme: light;
+  }
+  [data-theme="dark"] {
     --bg: #0c0e12;
     --bg-1: #12151c;
     --bg-2: #171b24;
@@ -21,13 +53,21 @@
     --accent-dim: #1f3b32;
     --bad: #f87171;
     --warn: #fbbf24;
-    --r: 10px;
-    --r-sm: 7px;
-    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
-    --sans: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+    --warn-line: #4a3c1a;
+    --danger-line: #3a2422;
+    --danger-soft: rgba(248,113,113,0.06);
+    --danger-soft-2: rgba(248,113,113,0.10);
+    --accent-soft: rgba(52,211,153,0.07);
+    --accent-soft-2: rgba(52,211,153,0.10);
+    --code-bg: #0a0c10;
+    --code-fg: #cfe3da;
+    --ok-fg: #b8f0d8;
+    --bad-fg: #f9c8c8;
+    --on-code: rgba(255,255,255,0.06);
+    --glow: rgba(52,211,153,0.07);
+    color-scheme: dark;
   }
   * { box-sizing: border-box; }
-  html { color-scheme: dark; }
   body {
     font-family: var(--sans);
     max-width: 1200px;
@@ -36,7 +76,7 @@
     color: var(--ink);
     line-height: 1.55;
     background:
-      radial-gradient(1100px 480px at 78% -8%, rgba(52,211,153,0.07), transparent 60%),
+      radial-gradient(1100px 480px at 78% -8%, var(--glow), transparent 60%),
       var(--bg);
     -webkit-font-smoothing: antialiased;
   }
@@ -46,8 +86,14 @@
   .skip:focus { left: 0.75rem; top: 0.75rem; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
 
-  .masthead { display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap; }
-  .mark { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.12em; color: var(--accent); border: 1px solid var(--accent-dim); background: rgba(52,211,153,0.06); padding: 0.2rem 0.5rem; border-radius: 999px; }
+  .masthead { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+  .mark { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.12em; color: var(--accent); border: 1px solid var(--accent-dim); background: var(--accent-soft); padding: 0.2rem 0.5rem; border-radius: 999px; }
+  .theme-toggle { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: var(--r-sm); border: 1px solid var(--line-2); background: var(--bg-2); color: var(--muted); cursor: pointer; touch-action: manipulation; }
+  .theme-toggle:hover { color: var(--ink); border-color: var(--accent); }
+  .theme-toggle svg { width: 16px; height: 16px; }
+  .theme-toggle .moon { display: none; }
+  [data-theme="dark"] .theme-toggle .sun { display: none; }
+  [data-theme="dark"] .theme-toggle .moon { display: inline; }
   h1 { margin: 0.7rem 0 0.35rem; font-size: clamp(1.6rem, 4vw, 2.15rem); letter-spacing: -0.02em; line-height: 1.1; }
   h2 { margin: 2.6rem 0 0.4rem; font-size: 1.05rem; letter-spacing: -0.01em; }
   .lede { color: var(--muted); font-size: 0.96rem; max-width: 65ch; margin: 0 0 1.4rem; }
@@ -73,12 +119,12 @@
 
   .card { border: 1px solid var(--line); border-radius: var(--r); padding: 1.05rem 1.15rem; margin: 0.75rem 0; background: var(--bg-1); transition: border-color 0.18s ease; }
   .card:hover { border-color: var(--line-2); }
-  .card.danger { border-color: #3a2422; }
-  .card.danger:hover { border-color: #5a322e; }
+  .card.danger { border-color: var(--danger-line); }
+  .card.danger:hover { border-color: var(--danger-line); }
   .card h3 { margin: 0 0 0.35rem; font-size: 0.97rem; display: flex; align-items: center; gap: 0.5rem; }
   .card h3 .verb { font-family: var(--mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; padding: 0.18rem 0.42rem; border-radius: 999px; }
-  .card h3 .verb.allow { color: var(--accent); background: rgba(52,211,153,0.08); border: 1px solid var(--accent-dim); }
-  .card h3 .verb.deny { color: var(--bad); background: rgba(248,113,113,0.07); border: 1px solid #3a2422; }
+  .card h3 .verb.allow { color: var(--accent); background: var(--accent-soft-2); border: 1px solid var(--accent-dim); }
+  .card h3 .verb.deny { color: var(--bad); background: var(--danger-soft); border: 1px solid var(--danger-line); }
   .card p { margin: 0 0 0.75rem; color: var(--muted); font-size: 0.88rem; }
   .card p:last-of-type { margin-bottom: 0.8rem; }
 
@@ -94,26 +140,26 @@
   button:hover { background: var(--bg-1); border-color: var(--faint); }
   button:active { transform: translateY(1px); }
   button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
-  button.primary:hover { background: #2bbe89; border-color: #2bbe89; }
-  button.attack { color: var(--bad); border-color: #3a2422; background: rgba(248,113,113,0.05); }
-  button.attack:hover { background: rgba(248,113,113,0.1); border-color: #5a322e; }
+  button.primary:hover { filter: brightness(1.05); }
+  button.attack { color: var(--bad); border-color: var(--danger-line); background: var(--danger-soft); }
+  button.attack:hover { background: var(--danger-soft-2); border-color: var(--danger-line); }
   button.ghost { background: transparent; }
 
   .output-panel { border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: var(--bg-1); }
   .output-panel .ohead { display: flex; align-items: center; justify-content: space-between; padding: 0.6rem 0.85rem; background: var(--bg-2); border-bottom: 1px solid var(--line); }
   .output-panel .ohead .otitle { font-family: var(--mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 0.45rem; }
-  .output-panel .ohead .otitle::before { content: ""; width: 8px; height: 8px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 0 3px rgba(52,211,153,0.12); }
+  .output-panel .ohead .otitle::before { content: ""; width: 8px; height: 8px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft-2); }
   .output-panel .ohead button { padding: 0.22rem 0.55rem; font-size: 0.72rem; font-family: var(--mono); }
   .output-panel .obody { padding: 0.7rem 0.75rem; }
 
   .explain { font-size: 0.86rem; padding: 0.7rem 0.85rem; border-radius: var(--r-sm); margin: 0 0 0.6rem; line-height: 1.5; border: 1px solid var(--line); }
-  .explain.ok { background: rgba(52,211,153,0.06); color: #b8f0d8; border-color: var(--accent-dim); }
-  .explain.bad { background: rgba(248,113,113,0.06); color: #f9c8c8; border-color: #3a2422; }
+  .explain.ok { background: var(--accent-soft); color: #b8f0d8; border-color: var(--accent-dim); }
+  .explain.bad { background: var(--danger-soft); color: var(--bad-fg); border-color: var(--danger-line); }
   .explain.info { background: var(--bg-2); color: var(--ink); border-color: var(--line-2); }
-  .explain code { background: rgba(255,255,255,0.06); }
+  .explain code { background: var(--on-code); }
   .explain strong { color: var(--ink); }
 
-  pre { background: #0a0c10; color: #cfe3da; padding: 0.85rem 0.95rem; border-radius: var(--r-sm); overflow-x: auto; font-size: 0.78rem; line-height: 1.55; margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; border: 1px solid var(--line); }
+  pre { background: var(--code-bg); color: var(--code-fg); padding: 0.85rem 0.95rem; border-radius: var(--r-sm); overflow-x: auto; font-size: 0.78rem; line-height: 1.55; margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; border: 1px solid var(--line); }
   .output-panel pre { max-height: 62vh; overflow-y: auto; overscroll-behavior: contain; }
 
   .footnote { color: var(--faint); font-size: 0.83rem; margin-top: 2.5rem; padding-top: 1.1rem; border-top: 1px solid var(--line); }
@@ -137,6 +183,10 @@
 <header class="masthead">
   <span class="mark" translate="no">@dbsc-toolkit/better-auth</span>
   <span class="mark" translate="no">plugin</span>
+  <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode">
+    <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+    <svg class="moon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+  </button>
 </header>
 <h1>Better Auth binding console</h1>
 <p class="lede">A stolen session cookie pasted into another browser used to work. Here it gets a 403, because the refresh and every guarded request need a signature from a key that never left your device.</p>
@@ -242,6 +292,18 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const val = (id) => $(id).value.trim();
+
+// Theme toggle. Default light, per-visit (not persisted), OS ignored.
+(function () {
+  const meta = document.getElementById("theme-color-meta");
+  const btn = document.getElementById("theme-toggle");
+  btn.addEventListener("click", () => {
+    const dark = document.documentElement.getAttribute("data-theme") === "dark";
+    document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
+    if (meta) meta.setAttribute("content", dark ? "#ffffff" : "#0c0e12");
+    btn.setAttribute("aria-pressed", String(!dark));
+  });
+})();
 
 function detectBrowser() {
   const ua = navigator.userAgent;
