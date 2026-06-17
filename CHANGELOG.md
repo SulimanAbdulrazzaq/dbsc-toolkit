@@ -2,6 +2,29 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.13.0] — 2026-06-17
+
+### Added
+
+- **Electron adapter** at `dbsc-toolkit/electron` — the Electron main process can
+  now act as the DBSC server for the web app in its `BrowserWindow`.
+  - `createElectronDbsc()` returns the full raw-`node:http` kit plus
+    `protocolHandler()`, a `(request: Request) => Promise<Response>` that mounts
+    the protocol on an Electron custom scheme via `protocol.handle`. The bridge
+    shims `Request`/`Response` onto the existing node handler, so no protocol
+    logic is duplicated. `protocolRoute(request)` returns
+    `{ handled, response, session }` when you need to branch on the session.
+  - The whole `dbsc-toolkit/node` surface (`dbsc`, `bindSession`,
+    `getDbscSession`, `requireProof`, `requireDpop`, `createDbsc`) is re-exported
+    for running an ordinary localhost server in the main process.
+  - `electron` is an optional peer dependency; the adapter imports no Electron
+    types (it uses the global `Request`/`Response`), so installing it is not
+    required to build.
+  - Expected tier in a stock Electron build is `bound` (the Web Crypto polyfill,
+    driven by `dbsc-toolkit/client` in the renderer); native `dbsc` only when the
+    build enables DBSC and a hardware key store is present. Documented in
+    `docs/adapters.md`.
+
 ## [2.12.0] — 2026-06-16
 
 ### Added

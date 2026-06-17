@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="google-site-verification" content="V5kAcz-9nxiWlnN3Djzai3vT18xyFfd0bw7Xbc07SjM" />
 <title>DBSC - Device Bound Session Credentials library for Node.js | dbsc-toolkit</title>
-<meta name="description" content="dbsc-toolkit is the server-side Device Bound Session Credentials (DBSC) library for Node.js. Bind session cookies to a hardware key (TPM / Secure Enclave) so a stolen cookie can't be replayed. Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit and raw node:http adapters, plus a Web Crypto polyfill for Firefox and Safari. npm install dbsc-toolkit.">
+<meta name="description" content="dbsc-toolkit is the server-side Device Bound Session Credentials (DBSC) library for Node.js. Bind session cookies to a hardware key (TPM / Secure Enclave) so a stolen cookie can't be replayed. Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, Electron and raw node:http adapters, plus a Web Crypto polyfill for Firefox and Safari. npm install dbsc-toolkit.">
 <meta name="keywords" content="DBSC, Device Bound Session Credentials, DBSC Node.js, DBSC library, DBSC npm, DBSC server, device bound session credentials library, session cookie binding, cookie theft protection, TPM session, hardware-bound session, DBSC Express, DBSC Next.js">
 <link rel="canonical" href="https://sulimanabdulrazzaq.github.io/dbsc-toolkit/">
 <meta name="robots" content="index, follow">
@@ -14,12 +14,12 @@
 
 <meta property="og:type" content="website">
 <meta property="og:title" content="DBSC - Device Bound Session Credentials library for Node.js">
-<meta property="og:description" content="The server-side DBSC library. Bind session cookies to a hardware key so a stolen cookie can't be replayed. Adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit and raw node:http, plus a Web Crypto polyfill for every other browser.">
+<meta property="og:description" content="The server-side DBSC library. Bind session cookies to a hardware key so a stolen cookie can't be replayed. Adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, Electron and raw node:http, plus a Web Crypto polyfill for every other browser.">
 <meta property="og:url" content="https://sulimanabdulrazzaq.github.io/dbsc-toolkit/">
 <meta property="og:site_name" content="dbsc-toolkit">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="DBSC - Device Bound Session Credentials library for Node.js">
-<meta name="twitter:description" content="The server-side DBSC library. Bind session cookies to a hardware key so a stolen cookie can't be replayed. Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit and node:http adapters.">
+<meta name="twitter:description" content="The server-side DBSC library. Bind session cookies to a hardware key so a stolen cookie can't be replayed. Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, Electron and node:http adapters.">
 
 <script type="application/ld+json">
 {
@@ -36,7 +36,7 @@
     "https://www.npmjs.com/package/dbsc-toolkit",
     "https://github.com/SulimanAbdulrazzaq/dbsc-toolkit"
   ],
-  "keywords": "DBSC, Device Bound Session Credentials, DBSC library, DBSC Node.js, DBSC npm, DBSC server, Node.js, Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, cookie theft, session security, TPM, Web Crypto"
+  "keywords": "DBSC, Device Bound Session Credentials, DBSC library, DBSC Node.js, DBSC npm, DBSC server, DBSC Electron, Node.js, Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, Electron, cookie theft, session security, TPM, Web Crypto"
 }
 </script>
 
@@ -51,7 +51,7 @@
   "url": "https://sulimanabdulrazzaq.github.io/dbsc-toolkit/",
   "downloadUrl": "https://www.npmjs.com/package/dbsc-toolkit",
   "softwareVersion": "2.12",
-  "description": "Server-side Device Bound Session Credentials (DBSC) library for Node.js. Binds session cookies to a hardware key so a stolen cookie cannot be replayed, with adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit and raw node:http and a Web Crypto polyfill for non-Chromium browsers.",
+  "description": "Server-side Device Bound Session Credentials (DBSC) library for Node.js. Binds session cookies to a hardware key so a stolen cookie cannot be replayed, with adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, Electron and raw node:http and a Web Crypto polyfill for non-Chromium browsers.",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
   "license": "https://www.apache.org/licenses/LICENSE-2.0",
   "sameAs": [
@@ -87,7 +87,7 @@
       "name": "Which web frameworks does dbsc-toolkit support?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "It ships adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit and raw node:http, all over one framework-agnostic core, so it works with any Node.js server."
+        "text": "It ships adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, Electron and raw node:http, all over one framework-agnostic core, so it works with any Node.js server."
       }
     },
     {
@@ -374,7 +374,7 @@ p { text-wrap: pretty; }
 <div class="trust">
   <div class="wrap">
     <div class="t"><b>Verified on real hardware</b>Chrome 147 with TPM 2.0, refresh cycle included</div>
-    <div class="t"><b>8 framework adapters</b>Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, node:http</div>
+    <div class="t"><b>9 framework adapters</b>Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, Electron, node:http</div>
     <div class="t"><b>Apache-2.0, no lock-in</b>Every line readable; polyfill covers Firefox and Safari</div>
   </div>
 </div>
@@ -469,6 +469,7 @@ tier: <span class="tok-s">"none"</span>  <span class="tok-c">// replay rejected,
         <button class="tab" role="tab" aria-selected="false" aria-controls="fp-nestjs" id="ft-nestjs">DBSC for NestJS</button>
         <button class="tab" role="tab" aria-selected="false" aria-controls="fp-koa" id="ft-koa">DBSC for Koa</button>
         <button class="tab" role="tab" aria-selected="false" aria-controls="fp-sveltekit" id="ft-sveltekit">DBSC for SvelteKit</button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="fp-electron" id="ft-electron">DBSC for Electron</button>
         <button class="tab" role="tab" aria-selected="false" aria-controls="fp-node" id="ft-node">Any other server</button>
       </div>
       <div class="panes">
@@ -520,6 +521,13 @@ await dbsc.bind(ctx, sessionId, { userId });</code></pre>
 <pre><code translate="no">// hooks.server.ts
 export const handle = dbscHandle({ storage });
 // await requireProof()(event) in a +server</code></pre>
+        </div>
+        <div class="pane" id="fp-electron" role="tabpanel" aria-labelledby="ft-electron">
+          <div class="ph"><h3>DBSC for Electron</h3><span class="imp" translate="no">dbsc-toolkit/electron</span></div>
+          <p>The Electron main process plays server for your renderer. A bridge mounts the protocol on a custom scheme via <code translate="no">protocol.handle</code>; the renderer reaches the bound tier with the client SDK.</p>
+<pre><code translate="no">const dbsc = createElectronDbsc({ storage });
+const handleDbsc = dbsc.protocolHandler();
+protocol.handle("app", (request) => handleDbsc(request));</code></pre>
         </div>
         <div class="pane" id="fp-node" role="tabpanel" aria-labelledby="ft-node">
           <div class="ph"><h3>Any other server, via raw node:http or the core</h3><span class="imp" translate="no">dbsc-toolkit/node</span></div>

@@ -287,6 +287,44 @@ createServer(async (req, res) => {
 
 ---
 
+## Electron (main process)
+
+An Electron app's **main process** is Node, so it plays the DBSC server for the web app running in your `BrowserWindow`. Two ways to wire it.
+
+The idiomatic one mounts the protocol on an Electron custom scheme with `protocol.handle`, which hands you a Web `Request` and wants a `Response`. `dbsc-toolkit/electron` bridges that onto the same core, so no protocol code is duplicated:
+
+```ts
+import { app, protocol, net } from "electron";
+import { createElectronDbsc } from "dbsc-toolkit/electron";
+import { MemoryStorage } from "dbsc-toolkit/storage/memory";
+
+const dbsc = createElectronDbsc({ storage: new MemoryStorage() });
+const handleDbsc = dbsc.protocolHandler();
+
+app.whenReady().then(() => {
+  protocol.handle("app", async (request) => {
+    const url = new URL(request.url);
+
+    // DBSC protocol routes (/dbsc/*, /dbsc-bound/*) — the adapter answers these.
+    if (url.pathname.startsWith("/dbsc")) {
+      const res = await handleDbsc(request);
+      if (res.status !== 404) return res;
+    }
+
+    // Your own routes / static files.
+    return net.fetch("file://" + /* map url.pathname to disk */ "");
+  });
+});
+```
+
+If you'd rather run an ordinary localhost server in the main process, everything from the [raw `node:http`](#raw-nodehttp-generic) adapter is re-exported here unchanged — `dbsc`, `bindSession`, `getDbscSession`, `requireProof`, `requireDpop`, `createDbsc` — so wire `handler()` at the top of your listener exactly as above.
+
+`requireProof()` / `requireDpop()` are the same guards as everywhere else; on the `protocol.handle` path use `dbsc.protocolRoute(request)` to get `{ handled, response, session }` and branch on the resolved session.
+
+**Tier note, honestly.** Treat the renderer like a browser that probably does *not* have native hardware-backed DBSC: Chrome's native DBSC is gated and is not enabled in a stock Electron build, so the expected tier here is `bound` (the Web Crypto polyfill, driven by the client SDK in the renderer), not `dbsc`. The protection is the same shape — a key the renderer holds and signs with per request — but the key lives in the renderer's IndexedDB, not a TPM. Native `dbsc` only appears if your Electron build specifically enables DBSC and the OS exposes a hardware key store. Load `dbsc-toolkit/client` in the renderer to reach `bound`.
+
+---
+
 ## Writing your own adapter
 
 The core is framework-agnostic — bring your own framework. The four shipped adapters cover the major frameworks, but they're thin wrappers over the same core functions, which take plain data and a `StorageAdapter` and assume nothing about the HTTP layer. For Koa, Hapi, raw `http`, Bun's built-in server, Deno's `Deno.serve`, a custom session layer, or anything else — call the core functions directly. There is no API restriction.

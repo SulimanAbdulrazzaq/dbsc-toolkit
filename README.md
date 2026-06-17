@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Stop stolen session cookies from being replayed on another device.</strong><br>
-  Device Bound Session Credentials for Node.js — one framework-agnostic core with adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit and raw <code>node:http</code>, plus a Web Crypto polyfill so every browser is covered, not just Chrome. A language-neutral protocol spec with a Node reference implementation.
+  Device Bound Session Credentials for Node.js — one framework-agnostic core with adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, Electron and raw <code>node:http</code>, plus a Web Crypto polyfill so every browser is covered, not just Chrome. A language-neutral protocol spec with a Node reference implementation.
 </p>
 
 <p align="center">
@@ -135,6 +135,7 @@ The protocol lives in a framework-agnostic core — plain functions plus a `Stor
 | NestJS | `dbsc-toolkit/nestjs` |
 | Koa | `dbsc-toolkit/koa` |
 | SvelteKit | `dbsc-toolkit/sveltekit` |
+| Electron (main process) | `dbsc-toolkit/electron` |
 | Any other server (raw `node:http`) | `dbsc-toolkit/node` |
 | [Better Auth](https://better-auth.com) | `@dbsc-toolkit/better-auth` |
 
@@ -213,13 +214,13 @@ const token = signAccessToken({ sub, cnf: { jkt } });   // your JWT lib
 app.get("/api/resource", requireDpop({ getBoundJkt }), handler);
 ```
 
-`requireDpop` is exported from every adapter (Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, `node:http`). A failed check answers `401` with `WWW-Authenticate: DPoP`. Always pass `getBoundJkt` so the presented token is bound to its key — see [docs/dpop.md](./docs/dpop.md) and [spec/10-dpop.md](./spec/10-dpop.md).
+`requireDpop` is exported from every adapter (Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, Electron, `node:http`). A failed check answers `401` with `WWW-Authenticate: DPoP`. Always pass `getBoundJkt` so the presented token is bound to its key — see [docs/dpop.md](./docs/dpop.md) and [spec/10-dpop.md](./spec/10-dpop.md).
 
 ## Ecosystem
 
 | Package | What it is |
 |---|---|
-| `dbsc-toolkit` | Core + adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit & raw `node:http`; memory/Redis/Postgres storage |
+| `dbsc-toolkit` | Core + adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, Electron & raw `node:http`; memory/Redis/Postgres storage |
 | `dbsc-toolkit/dpop` | Optional DPoP (RFC 9449) — bind bearer/access tokens to a device key |
 | `dbsc-toolkit/client` | Browser SDK + Web Crypto polyfill |
 | [`@dbsc-toolkit/better-auth`](./packages/better-auth/) | First-class [Better Auth](https://better-auth.com) plugin — binds every sign-in method automatically |
@@ -245,7 +246,7 @@ The wire protocol is documented as a language-neutral spec in [`spec/`](./spec/)
 - [x] Per-request proof + body signing + replay cache
 - [x] Multi-subdomain binding (`cookieScope: "site"`)
 - [x] Better Auth plugin
-- [x] NestJS, Koa, SvelteKit & generic `node:http` adapters
+- [x] NestJS, Koa, SvelteKit, Electron & generic `node:http` adapters
 - [x] DPoP (RFC 9449) for bearer-token binding
 - [ ] Bun / Deno native paths
 - [ ] Third-party security audit
@@ -255,7 +256,7 @@ The wire protocol is documented as a language-neutral spec in [`spec/`](./spec/)
 | Import | What it is |
 |---|---|
 | `dbsc-toolkit` | Core: types, crypto, protocol handlers, framework-agnostic |
-| `dbsc-toolkit/express` · `/fastify` · `/hono` · `/nextjs` · `/nestjs` · `/koa` · `/sveltekit` · `/node` | Framework adapters |
+| `dbsc-toolkit/express` · `/fastify` · `/hono` · `/nextjs` · `/nestjs` · `/koa` · `/sveltekit` · `/electron` · `/node` | Framework adapters |
 | `dbsc-toolkit/dpop` | Optional DPoP (RFC 9449) verifier + `requireDpop` per adapter |
 | `dbsc-toolkit/client` | Browser SDK + polyfill |
 | `dbsc-toolkit/storage/{memory,redis,postgres}` | Storage adapters |

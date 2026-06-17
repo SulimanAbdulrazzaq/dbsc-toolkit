@@ -1,6 +1,6 @@
 {
   "name": "dbsc-toolkit",
-  "version": "2.12.0",
+  "version": "2.13.0",
   "description": "Server-side Device Bound Session Credentials (DBSC) for Node.js — Express, Fastify, Hono and Next.js adapters — plus a Web Crypto polyfill for Firefox, Safari, and older Chromium. Cookie-theft protection on every modern browser.",
   "license": "Apache-2.0",
   "type": "module",
@@ -43,6 +43,10 @@
       "import": "./dist/nestjs/index.js",
       "types": "./dist/nestjs/index.d.ts"
     },
+    "./electron": {
+      "import": "./dist/electron/index.js",
+      "types": "./dist/electron/index.d.ts"
+    },
     "./dpop": {
       "import": "./dist/dpop/index.js",
       "types": "./dist/dpop/index.d.ts"
@@ -84,6 +88,7 @@
     "@nestjs/common": ">=10.0.0",
     "@nestjs/core": ">=10.0.0",
     "@sveltejs/kit": ">=2.0.0",
+    "electron": ">=28.0.0",
     "express": ">=5.0.0",
     "fastify": ">=5.0.0",
     "hono": ">=4.0.0",
@@ -109,6 +114,9 @@
       "optional": true
     },
     "@sveltejs/kit": {
+      "optional": true
+    },
+    "electron": {
       "optional": true
     },
     "hono": {

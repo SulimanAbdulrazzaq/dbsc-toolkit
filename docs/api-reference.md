@@ -15,6 +15,7 @@ Every public export across all subpaths.
 | `dbsc-toolkit/koa` | Koa middleware |
 | `dbsc-toolkit/sveltekit` | SvelteKit `dbscHandle` hook + `requireProof` |
 | `dbsc-toolkit/node` | Generic raw `node:http` handler |
+| `dbsc-toolkit/electron` | Electron main-process adapter (`protocol.handle` bridge + node re-exports) |
 | `dbsc-toolkit/dpop` | Optional DPoP (RFC 9449): `verifyDpopProof`, `dpopConfirmation`, `jwkThumbprint` |
 | `dbsc-toolkit/client` | Browser SDK |
 | `dbsc-toolkit/storage/memory` | `MemoryStorage` |
@@ -709,6 +710,27 @@ createDbsc(opts): { handler(), getSession(req), bind(res, sessionId, opts), requ
 ```
 
 Generic raw `node:http`. No `install()` — branch on the handler's boolean return. The guard caches the verified raw body on the request so a downstream handler can re-read it via `readJsonBody`.
+
+---
+
+## `dbsc-toolkit/electron`
+
+Electron main-process adapter. Re-exports the whole `dbsc-toolkit/node` surface (`dbsc`, `bindSession`, `getDbscSession`, `readJsonBody`, `requireProof`, `requireDpop`, `createDbsc`) for running a localhost server in the main process, and adds a bridge onto Electron's `protocol.handle` Web `Request`/`Response` shape.
+
+```ts
+createElectronDbsc(opts: CreateDbscOptions): ElectronDbscKit
+// ElectronDbscKit extends the node kit with:
+//   protocolHandler(): (request: Request) => Promise<Response>   // 404 Response when not a protocol route
+//   protocolRoute(request: Request): Promise<{ handled, response, session }>
+
+handleDbscProtocol(request: Request, handler: DbscNodeHandler): Promise<{
+  handled: boolean;          // true when the request was a DBSC protocol route
+  response: Response;        // the Response to send (or a 404 when not handled)
+  session: DbscNodeSession | undefined;
+}>
+```
+
+The bridge builds a minimal request/response shim and runs the same node handler, so no protocol logic is duplicated. Expected tier in a stock Electron build is `bound` (Web Crypto polyfill); native `dbsc` only if the build enables DBSC and a hardware key store is present. See [adapters.md](./adapters.md#electron-main-process).
 
 ---
 
