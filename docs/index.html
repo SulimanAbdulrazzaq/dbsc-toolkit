@@ -4,20 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="google-site-verification" content="V5kAcz-9nxiWlnN3Djzai3vT18xyFfd0bw7Xbc07SjM" />
-<title>DBSC for Node.js - Device Bound Session Credentials | dbsc-toolkit</title>
-<meta name="description" content="Server-side Device Bound Session Credentials (DBSC) for Node.js, on any framework. Express, Fastify, Hono, Next.js, NestJS, Koa and SvelteKit adapters that bind session cookies to a hardware TPM key to stop cookie theft, plus a Web Crypto polyfill for Firefox and Safari.">
+<title>DBSC - Device Bound Session Credentials library for Node.js | dbsc-toolkit</title>
+<meta name="description" content="dbsc-toolkit is the server-side Device Bound Session Credentials (DBSC) library for Node.js. Bind session cookies to a hardware key (TPM / Secure Enclave) so a stolen cookie can't be replayed. Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit and raw node:http adapters, plus a Web Crypto polyfill for Firefox and Safari. npm install dbsc-toolkit.">
+<meta name="keywords" content="DBSC, Device Bound Session Credentials, DBSC Node.js, DBSC library, DBSC npm, DBSC server, device bound session credentials library, session cookie binding, cookie theft protection, TPM session, hardware-bound session, DBSC Express, DBSC Next.js">
 <link rel="canonical" href="https://sulimanabdulrazzaq.github.io/dbsc-toolkit/">
 <meta name="robots" content="index, follow">
 <meta name="theme-color" content="#ffffff" id="theme-color-meta">
 <script>try{var t=localStorage.getItem("dbsc-theme");if(t==="dark"||t==="light")document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
 
 <meta property="og:type" content="website">
-<meta property="og:title" content="DBSC for Node.js - Device Bound Session Credentials Server Library">
-<meta property="og:description" content="Bind session cookies to a hardware key so a stolen cookie can't be replayed. DBSC for Express, Fastify, Hono, Next.js, NestJS, Koa and SvelteKit, or any framework via the core, with a Web Crypto polyfill for every other browser.">
+<meta property="og:title" content="DBSC - Device Bound Session Credentials library for Node.js">
+<meta property="og:description" content="The server-side DBSC library. Bind session cookies to a hardware key so a stolen cookie can't be replayed. Adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit and raw node:http, plus a Web Crypto polyfill for every other browser.">
 <meta property="og:url" content="https://sulimanabdulrazzaq.github.io/dbsc-toolkit/">
+<meta property="og:site_name" content="dbsc-toolkit">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="DBSC for Node.js - Device Bound Session Credentials Server Library">
-<meta name="twitter:description" content="Bind session cookies to a hardware key so a stolen cookie can't be replayed. DBSC for Express, Fastify, Hono, Next.js, NestJS, Koa and SvelteKit.">
+<meta name="twitter:title" content="DBSC - Device Bound Session Credentials library for Node.js">
+<meta name="twitter:description" content="The server-side DBSC library. Bind session cookies to a hardware key so a stolen cookie can't be replayed. Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit and node:http adapters.">
 
 <script type="application/ld+json">
 {
@@ -30,7 +32,73 @@
   "runtimePlatform": "Node.js",
   "license": "https://www.apache.org/licenses/LICENSE-2.0",
   "author": { "@type": "Person", "name": "Suliman Abdulrazzaq" },
-  "keywords": "DBSC, Device Bound Session Credentials, Node.js, Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, cookie theft, session security, TPM, Web Crypto"
+  "sameAs": [
+    "https://www.npmjs.com/package/dbsc-toolkit",
+    "https://github.com/SulimanAbdulrazzaq/dbsc-toolkit"
+  ],
+  "keywords": "DBSC, Device Bound Session Credentials, DBSC library, DBSC Node.js, DBSC npm, DBSC server, Node.js, Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, cookie theft, session security, TPM, Web Crypto"
+}
+</script>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "dbsc-toolkit",
+  "alternateName": "Device Bound Session Credentials for Node.js",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Node.js 20+",
+  "url": "https://sulimanabdulrazzaq.github.io/dbsc-toolkit/",
+  "downloadUrl": "https://www.npmjs.com/package/dbsc-toolkit",
+  "softwareVersion": "2.12",
+  "description": "Server-side Device Bound Session Credentials (DBSC) library for Node.js. Binds session cookies to a hardware key so a stolen cookie cannot be replayed, with adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit and raw node:http and a Web Crypto polyfill for non-Chromium browsers.",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "license": "https://www.apache.org/licenses/LICENSE-2.0",
+  "sameAs": [
+    "https://www.npmjs.com/package/dbsc-toolkit",
+    "https://github.com/SulimanAbdulrazzaq/dbsc-toolkit"
+  ]
+}
+</script>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is DBSC (Device Bound Session Credentials)?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "DBSC is a W3C protocol that binds a web session to a key held in the device's hardware (TPM on Windows, Secure Enclave on Apple Silicon). The browser proves it still holds the key by signing a server challenge on every refresh, so a session cookie copied to another machine stops working on its next refresh. dbsc-toolkit is the server-side library that speaks this protocol on Node.js."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can I use dbsc-toolkit from plain JavaScript, not TypeScript?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. The package ships compiled JavaScript plus optional type definitions, so a JavaScript project uses it with zero TypeScript setup. The only constraint is that it is ESM-only, so a CommonJS app imports it with a dynamic import()."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Which web frameworks does dbsc-toolkit support?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "It ships adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit and raw node:http, all over one framework-agnostic core, so it works with any Node.js server."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Which browsers does DBSC work on?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Native hardware-backed binding runs on Chromium 145+ (Chrome, Edge, Brave, Opera, Arc). Every other browser, including Firefox and Safari, falls back to a Web Crypto polyfill that the bundled client SDK drives, so no browser is locked out."
+      }
+    }
+  ]
 }
 </script>
 
@@ -278,9 +346,9 @@ p { text-wrap: pretty; }
 <section class="hero">
   <div class="wrap">
     <div>
-      <span class="tagpill"><span class="v">v2.12</span> Device Bound Session Credentials for Node.js</span>
+      <span class="tagpill"><span class="v">v2.12</span> DBSC · Device Bound Session Credentials library for Node.js</span>
       <h1>Stop stolen session cookies from being <span class="em">replayed.</span></h1>
-      <p class="lead">The cookie still copies. The device key it needs to refresh does not. A session lifted to another machine dies on the next request.</p>
+      <p class="lead"><strong>dbsc-toolkit</strong> is the server-side Device Bound Session Credentials (DBSC) library for Node.js. The cookie still copies. The device key it needs to refresh does not. A session lifted to another machine dies on the next request.</p>
       <div class="cta">
         <a class="btn btn-primary" href="./docs.html?doc=docs/quickstart.md">Get started</a>
         <a class="btn btn-ghost" href="https://github.com/SulimanAbdulrazzaq/dbsc-toolkit">View on GitHub</a>
