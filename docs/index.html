@@ -524,7 +524,7 @@ export const handle = dbscHandle({ storage });
         </div>
         <div class="pane" id="fp-electron" role="tabpanel" aria-labelledby="ft-electron">
           <div class="ph"><h3>DBSC for Electron</h3><span class="imp" translate="no">dbsc-toolkit/electron</span></div>
-          <p>The Electron main process plays server for your renderer. A bridge mounts the protocol on a custom scheme via <code translate="no">protocol.handle</code>; the renderer reaches the bound tier with the client SDK.</p>
+          <p>The Electron main process plays server for your renderer. A bridge mounts the protocol on a custom scheme via <code translate="no">protocol.handle</code>; the renderer reaches the bound tier with the client SDK (native dbsc needs an https origin and hardware key store Electron rarely has).</p>
 <pre><code translate="no">const dbsc = createElectronDbsc({ storage });
 const handleDbsc = dbsc.protocolHandler();
 protocol.handle("app", (request) => handleDbsc(request));</code></pre>

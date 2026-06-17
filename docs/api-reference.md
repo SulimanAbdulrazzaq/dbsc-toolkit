@@ -730,7 +730,7 @@ handleDbscProtocol(request: Request, handler: DbscNodeHandler): Promise<{
 }>
 ```
 
-The bridge builds a minimal request/response shim and runs the same node handler, so no protocol logic is duplicated. Expected tier in a stock Electron build is `bound` (Web Crypto polyfill); native `dbsc` only if the build enables DBSC and a hardware key store is present. See [adapters.md](./adapters.md#electron-main-process).
+The bridge builds a minimal request/response shim and runs the same node handler, so no protocol logic is duplicated. Expected tier in a stock Electron build is `bound` (Web Crypto polyfill): native DBSC is on by default in Chrome, but the Electron renderer usually lacks the `https` origin and hardware key store it needs, so it falls back. `initBoundDbsc()` still uses native `dbsc` if the build provides it. See [adapters.md](./adapters.md#electron-main-process).
 
 ---
 
