@@ -431,11 +431,11 @@ tier: <span class="tok-s">"none"</span>  <span class="tok-c">// replay rejected,
   <div class="wrap">
     <p class="eyebrow reveal">Coverage</p>
     <h2 class="h2 reveal">Every browser, one server</h2>
-    <p class="sec-lead reveal">Native DBSC is Chromium-only today. The Web Crypto polyfill covers the rest, so you read one <code translate="no">tier</code> and don't branch per browser. Run native-only with <code translate="no">bound: false</code>.</p>
+    <p class="sec-lead reveal">Native DBSC is Chromium-only: Windows from Chrome 145 (TPM), macOS from Chrome 147 (Secure Enclave). The Web Crypto polyfill covers everything else, so you read one <code translate="no">tier</code> and don't branch per browser. Run native-only with <code translate="no">bound: false</code>.</p>
     <div class="tier-cards reveal">
       <div class="tier-card lead">
         <div class="name" translate="no">dbsc</div>
-        <p class="where">Hardware key in the TPM or Secure Enclave. Chromium 145+.</p>
+        <p class="where">Hardware key in the TPM or Secure Enclave. Chromium on Windows (Chrome 145+) or macOS (Chrome 147+).</p>
         <div class="line"><svg class="ic yes" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3 3 7-7"/></svg> Remote cookie theft defeated</div>
         <div class="line"><svg class="ic yes" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3 3 7-7"/></svg> On-device infostealer defeated</div>
       </div>

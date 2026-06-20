@@ -4,7 +4,7 @@ This guide takes a fresh Express project from zero to a working DBSC-protected s
 
 ## What DBSC does for you
 
-When a user logs in on a supported Chromium browser (Chrome, Edge, Brave, Opera, Arc — Chromium 145+ on Windows or macOS), the browser generates an EC P-256 keypair inside the device's hardware key store (TPM on Windows, Secure Enclave on Apple Silicon macOS). The public key goes to your server. Your server binds the user's session to that key. Every ten minutes the browser automatically refreshes the bound cookie by signing a server-issued challenge with the private key — which never leaves the hardware. If a stolen cookie is replayed from a different device, refresh fails because the attacker has no matching key. The session dies within one refresh cycle.
+When a user logs in on a supported Chromium browser (Chrome, Edge, Brave, Opera, Arc — Chromium on Windows from Chrome 145, or on Apple Silicon macOS from Chrome 147), the browser generates an EC P-256 keypair inside the device's hardware key store (TPM on Windows, Secure Enclave on Apple Silicon macOS). The public key goes to your server. Your server binds the user's session to that key. Every ten minutes the browser automatically refreshes the bound cookie by signing a server-issued challenge with the private key — which never leaves the hardware. If a stolen cookie is replayed from a different device, refresh fails because the attacker has no matching key. The session dies within one refresh cycle.
 
 On Firefox, Safari, and other browsers without native DBSC support, the Web Crypto polyfill provides equivalent session binding with a non-extractable key in IndexedDB — approximately every modern browser can reach `tier: "bound"`.
 

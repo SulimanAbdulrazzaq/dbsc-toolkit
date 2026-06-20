@@ -27,7 +27,7 @@ This is the part that matters most and gets glossed over. DBSC binding comes in 
 | Infostealer reading the browser profile on disk | Stopped (key is in hardware) | **Not stopped** (encrypted blob on disk is recoverable) |
 | Malware running inside the browser process | Not stopped | Not stopped |
 
-The native tier (`dbsc`) puts the private key inside a TPM or Secure Enclave. No software on the machine — including malware running as the user — can read it. That's the strong form, and it's Chromium-on-supported-hardware only today.
+The native tier (`dbsc`) puts the private key inside a TPM or Secure Enclave. No software on the machine — including malware running as the user — can read it. That's the strong form, and it's Chromium on supported hardware: Windows from Chrome 145 (TPM), Apple Silicon macOS from Chrome 147 (Secure Enclave).
 
 The `bound` tier is a polyfill for everyone else (Firefox, Safari, older Chromium). It uses a non-extractable Web Crypto key in IndexedDB. The JavaScript API genuinely can't export that key — so XSS can't steal it, which is why remote theft is still defeated. But the encrypted key blob does sit in the browser profile directory on disk. Infostealer malware running with the victim's privileges can read that directory and, depending on the OS keystore, decrypt it. So the polyfill defends against *remote* theft but not against *on-device* malware with disk access.
 

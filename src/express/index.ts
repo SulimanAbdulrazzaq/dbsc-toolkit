@@ -450,10 +450,16 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       });
       return;
     }
+    // A native key is authoritative even if a bound key was stored first. If
+    // the polyfill registered before Chrome's native registration landed, the
+    // session row may still read tier="bound"; the next native refresh promotes
+    // it back to "dbsc", but that can be minutes out. Report "dbsc" here as soon
+    // as a native key exists so the client SDK resolves native-dbsc immediately.
+    const reportedTier = nativeKey ? "dbsc" : session.tier;
     res.status(200).json({
       phase: "bound",
       sessionId,
-      tier: session.tier,
+      tier: reportedTier,
       refreshIntervalMs: boundCookieTtl,
       ...(nativeSkipped && { nativeSkipped }),
     });

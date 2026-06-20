@@ -156,6 +156,50 @@ describe("GET /dbsc-bound/state", () => {
       await ctx.close();
     }
   });
+
+  // Late-native-arrival race: the polyfill registered first (so the session row
+  // reads tier="bound"), then Chrome's native key landed. With both keys present
+  // the state route must report tier="dbsc" — a native key is authoritative — so
+  // the client SDK resolves native-dbsc without waiting for the next refresh.
+  it("reports tier: dbsc when a native key exists even if the row says bound", async () => {
+    const sessionId = "sess-state-native-after-bound";
+    const ctx = await startServer((app, storage) => {
+      app.post("/login", async (_req, res) => {
+        await bindSession(res, sessionId, storage, { userId: "u1", secure: false });
+        // Polyfill won the race: bound key stored, session pinned to bound.
+        await storage.setBoundKey({
+          sessionId,
+          kind: "bound",
+          jwk: { kty: "EC", crv: "P-256", x: "bx", y: "by" },
+          algorithm: "ES256",
+          createdAt: Date.now(),
+        });
+        const s1 = await storage.getSession(sessionId);
+        await storage.setSession({ ...s1!, tier: "bound", lastRefreshAt: Date.now() });
+        // Native key arrives afterwards; tier on the row is still "bound".
+        await storage.setBoundKey({
+          sessionId,
+          kind: "native",
+          jwk: { kty: "EC", crv: "P-256", x: "nx", y: "ny" },
+          algorithm: "ES256",
+          createdAt: Date.now(),
+        });
+        res.json({ ok: true });
+      });
+    });
+    try {
+      const loginRes = await fetch(`${ctx.url}/login`, { method: "POST" });
+      const jar = parseSetCookie(loginRes.headers.getSetCookie?.() ?? []);
+      const stateRes = await fetch(`${ctx.url}/dbsc-bound/state`, {
+        headers: { Cookie: cookieHeader(jar) },
+      });
+      const body = await stateRes.json();
+      expect(body.phase).toBe("bound");
+      expect(body.tier).toBe("dbsc");
+    } finally {
+      await ctx.close();
+    }
+  });
 });
 
 async function registerBoundSession(ctx: Awaited<ReturnType<typeof startServer>>) {

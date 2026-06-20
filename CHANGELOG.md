@@ -2,6 +2,24 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.13.1] — 2026-06-20
+
+### Fixed
+
+- Corrected the native-DBSC platform claims across the docs and demos to match
+  Chrome's published rollout: native DBSC ships on **Windows from Chrome 145**
+  (TPM) and on **Apple Silicon macOS from Chrome 147** (Secure Enclave), both as
+  gradual rollouts. Earlier copy variously said "146+" or implied macOS was
+  unsupported. The browser badge in both example apps is now OS- and
+  version-aware: it expects `tier: "dbsc"` on Windows and on macOS Chrome 147+,
+  and the polyfill elsewhere. A Mac on an older Chrome — or one the gradual
+  rollout hasn't reached yet — still reads `"bound"`, which is expected.
+- Hardened a late-native-arrival race in the Express `/dbsc-bound/state` handler:
+  if the polyfill registered before Chrome's native key landed, the session row
+  could stay pinned at `tier: "bound"` until the next native refresh. The state
+  route now reports `tier: "dbsc"` whenever a native key exists, so the client SDK
+  resolves the native tier immediately instead of waiting.
+
 ## [2.13.0] — 2026-06-17
 
 ### Added

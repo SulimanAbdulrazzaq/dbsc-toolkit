@@ -370,7 +370,19 @@ function detectBrowser() {
   const isChrome = /Chrome\//.test(ua) && !isEdge;
   const isFirefox = /Firefox\//.test(ua);
   const isSafari = /Safari\//.test(ua) && !/Chrome\//.test(ua);
-  if (isChrome || isEdge) return { name: isEdge ? "Edge" : "Chrome", expect: "dbsc", note: "native TPM / Secure Enclave binding" };
+  const isWindows = /Windows/.test(ua);
+  const isMac = /Mac OS X|Macintosh/.test(ua);
+  const major = Number((ua.match(/(?:Chrome|Edg)\/(\d+)/) || [])[1] || 0);
+  if (isChrome || isEdge) {
+    const name = isEdge ? "Edge" : "Chrome";
+    // Native DBSC rolls out per platform: Windows from Chrome 145 (TPM),
+    // macOS from Chrome 147 (Secure Enclave). Both are gradual rollouts, so a
+    // supported build may still land on the polyfill until it reaches the profile.
+    if (isWindows) return { name, expect: "dbsc", note: "native TPM binding" };
+    if (isMac && major >= 147) return { name, expect: "dbsc", note: "native Secure Enclave binding" };
+    if (isMac) return { name, expect: "bound", note: "macOS native DBSC needs Chrome 147+ — using the polyfill" };
+    return { name, expect: "bound", note: "native DBSC not available on this OS — using the polyfill" };
+  }
   if (isFirefox) return { name: "Firefox", expect: "bound", note: "Web Crypto polyfill" };
   if (isSafari) return { name: "Safari", expect: "bound", note: "Web Crypto polyfill" };
   return { name: "Browser", expect: "bound", note: "polyfill fallback" };

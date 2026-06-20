@@ -20,7 +20,7 @@ A session cookie gets stolen — XSS, infostealer malware, a leaked log. The att
 
 DBSC ties the session to a private key the browser generates inside the device at sign-in. The cookie is still stealable, but the refresh request — and every guarded request — needs a signature from that key, and the attacker on another machine has nothing to sign with. The replay 403s.
 
-`plugins: [dbsc()]` is the whole server integration. The plugin mounts its protocol routes through Better Auth's own router, so it works on **every runtime** (Express, Fastify, Hono, Next.js, SvelteKit, Node) with no framework-specific setup. Chromium 145+ binds to a key in the TPM or Secure Enclave; Firefox, Safari, and older Chromium fall back to a Web Crypto polyfill key in IndexedDB (`extractable: false`). Same guard either way.
+`plugins: [dbsc()]` is the whole server integration. The plugin mounts its protocol routes through Better Auth's own router, so it works on **every runtime** (Express, Fastify, Hono, Next.js, SvelteKit, Node) with no framework-specific setup. Chromium binds to a key in the TPM (Windows, Chrome 145+) or Secure Enclave (macOS, Chrome 147+); Firefox, Safari, and older Chromium fall back to a Web Crypto polyfill key in IndexedDB (`extractable: false`). Same guard either way.
 
 **[Live demo](https://dbsc-better-auth-demo.onrender.com)** — sign in, then hit the "simulate stolen cookie" button. It fires a bare request with the bound cookie and no proof, and comes back 403 `PROOF_MISSING`. The whole plugin in one button.
 
@@ -135,7 +135,7 @@ From then on, `boundFetch` builds a `ts=…;sig=…;bh=…` proof for every call
 
 Every session row carries a `tier`:
 
-`"dbsc"` is the Chromium 145+ native binding, key in TPM 2.0 (Windows) or Secure Enclave (Apple Silicon macOS).
+`"dbsc"` is the Chromium native binding, key in TPM 2.0 on Windows (Chrome 145+) or the Secure Enclave on Apple Silicon macOS (Chrome 147+).
 
 `"bound"` is the polyfill, key in IndexedDB with `extractable: false`.
 

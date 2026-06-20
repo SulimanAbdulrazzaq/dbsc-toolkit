@@ -277,7 +277,7 @@ The wire protocol is documented as a language-neutral spec in [`spec/`](./spec/)
 
 ## Status
 
-Verified end-to-end on Chrome 147 / Windows / TPM 2.0. Native DBSC requires Chromium 145+ on Windows or Apple Silicon macOS; the polyfill covers every browser with Web Crypto + IndexedDB. No third-party security audit yet — see [HOW-IT-WORKS.md#production-readiness](./HOW-IT-WORKS.md#production-readiness).
+Verified end-to-end on Chrome 147 / Windows / TPM 2.0. Native DBSC rolls out on Windows from Chrome 145 (TPM) and on macOS from Chrome 147 (Secure Enclave), both as gradual rollouts — a recent enough Chrome on supported hardware reaches `tier: "dbsc"` on either OS. The polyfill covers every other browser with Web Crypto + IndexedDB. No third-party security audit yet — see [HOW-IT-WORKS.md#production-readiness](./HOW-IT-WORKS.md#production-readiness).
 
 ## License
 
