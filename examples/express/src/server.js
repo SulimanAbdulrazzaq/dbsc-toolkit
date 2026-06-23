@@ -155,8 +155,22 @@ const dbscKitNative = createDbsc({
 });
 
 // Which mode is this browser in? Cookie wins; otherwise the boot default.
+// Read the raw Cookie header directly: the dispatcher below runs BEFORE the dbsc
+// middleware (which is what populates req.cookies), so req.cookies is undefined
+// at dispatch time. Parsing the header here is what makes the live toggle work.
+function readModeCookie(req) {
+  const raw = req.headers?.cookie;
+  if (raw) {
+    for (const part of raw.split(";")) {
+      const i = part.indexOf("=");
+      if (i === -1) continue;
+      if (part.slice(0, i).trim() === "dbsc-demo-mode") return part.slice(i + 1).trim();
+    }
+  }
+  return req.cookies?.["dbsc-demo-mode"];
+}
 function modeOf(req) {
-  const m = req.cookies?.["dbsc-demo-mode"];
+  const m = readModeCookie(req);
   if (m === "native") return "native";
   if (m === "bound") return "bound";
   return DEFAULT_BOUND ? "bound" : "native";
