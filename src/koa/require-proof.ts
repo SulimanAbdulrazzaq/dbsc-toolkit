@@ -3,10 +3,66 @@ import type { IncomingMessage } from "node:http";
 import {
   verifyBoundProof,
   noBindingReason,
+  guardNativeProof,
+  freshProofActive,
+  challengeCookieName,
+  FRESH_PROOF_CHALLENGE_TTL_MS,
+  readSessionResponseHeader,
+  buildChallengeHeader,
+  parseCookieHeader,
+  CHALLENGE_HEADER,
+  LEGACY_CHALLENGE_HEADER,
   DbscVerificationError,
   type RequireProofOptions,
+  type CookieScope,
 } from "../core/index.js";
 import { DBSC_INTERNAL, type DbscInternal, type DbscNodeSession } from "../node/index.js";
+
+async function runNativeFreshProof(
+  ctx: Context,
+  sessionId: string,
+  storage: NonNullable<DbscInternal["storage"]>,
+  internal: DbscInternal | undefined,
+): Promise<boolean> {
+  const scope: { secure: boolean; cookieScope?: CookieScope; cookieDomain?: string } = {
+    secure: internal?.secure ?? true,
+    ...(internal?.cookieScope !== undefined && { cookieScope: internal.cookieScope }),
+    ...(internal?.cookieDomain !== undefined && { cookieDomain: internal.cookieDomain }),
+  };
+  const cookieName = challengeCookieName(scope);
+  const responseHeader = readSessionResponseHeader(
+    ctx.req.headers as Record<string, string | string[] | undefined>,
+  );
+  const expectedJti = parseCookieHeader(ctx.req.headers.cookie)[cookieName];
+
+  const result = await guardNativeProof(
+    { sessionId, secSessionResponseHeader: responseHeader, expectedJti },
+    storage,
+  );
+
+  if (result.kind === "pass") return true;
+  if (result.kind === "reject") {
+    ctx.status = 403;
+    ctx.body = { error: result.error, code: result.code };
+    return false;
+  }
+  const header = buildChallengeHeader(result.jti, sessionId);
+  ctx.set(CHALLENGE_HEADER, header);
+  ctx.set(LEGACY_CHALLENGE_HEADER, header);
+  const parts = [
+    `${cookieName}=${result.jti}`,
+    "HttpOnly",
+    "Path=/",
+    "SameSite=Lax",
+    `Max-Age=${FRESH_PROOF_CHALLENGE_TTL_MS / 1000}`,
+  ];
+  if (scope.secure) parts.push("Secure");
+  if (scope.cookieDomain !== undefined) parts.push(`Domain=${scope.cookieDomain}`);
+  ctx.set("Set-Cookie", parts.join("; "));
+  ctx.status = 403;
+  ctx.body = "";
+  return false;
+}
 
 async function readRawBody(ctx: Context): Promise<Uint8Array> {
   const rawBody = (ctx.request as unknown as { rawBody?: string }).rawBody;
@@ -42,6 +98,18 @@ export function requireProof(opts: RequireProofOptions = {}): Middleware {
     if (!storage) {
       ctx.status = 500;
       ctx.body = { error: "requireProof: storage unavailable — mount dbsc() before this route, or pass { storage }" };
+      return;
+    }
+
+    if (
+      freshProofActive({
+        tier,
+        boundEnabled: internal?.boundEnabled,
+        freshProof: opts.freshProof,
+        allowDbscWithoutProof: opts.allowDbscWithoutProof,
+      })
+    ) {
+      if (await runNativeFreshProof(ctx, session.sessionId, storage, internal)) await next();
       return;
     }
 

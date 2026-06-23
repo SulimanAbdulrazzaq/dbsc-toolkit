@@ -197,7 +197,7 @@ All configuration lives on the `dbsc()` plugin:
 
 `sessionTtl` is a deprecated alias for `cookieTtl`.
 
-With `bound: false`, only the two native endpoints mount (the state route still answers `unbound` so a loaded SDK stands down). Guard routes with `requireProof` imported from `dbsc-toolkit/<framework>` — pass `bound: false` to it as well so it auto-relaxes the native `dbsc` tier (Chromium passes on its hardware binding; non-Chromium browsers are unbound and 403). Native-only suits managed fleets that can mandate a Chromium build with a hardware key store, not general-audience apps.
+With `bound: false`, only the two native endpoints mount (the state route still answers `unbound` so a loaded SDK stands down). Guard routes with `requireProof` imported from `dbsc-toolkit/<framework>`, passing `bound: false` to it as well. As of dbsc-toolkit 2.14 native-only is fail-closed: instead of trusting the cookie, `requireProof()` demands a fresh hardware proof per request via the `freshProof` 403-challenge handshake (Chromium re-signs with the TPM/Secure Enclave key and retries; a stolen cookie has no key and 403s). Non-Chromium browsers are unbound and 403. To restore the old relax-to-cookie behavior on a route, pass `requireProof({ freshProof: false })`. Native-only suits managed fleets that can mandate a Chromium build with a hardware key store, not general-audience apps.
 
 ### Per-route proof tuning
 
@@ -208,12 +208,19 @@ The guard (`requireProof` from `dbsc-toolkit/<framework>`) takes per-route overr
 app.post("/payment", express.raw({ type: "*/*" }),
   requireProof({ timestampWindowMs: 30_000 }), payHandler)
 
+// Force a fresh hardware proof every request on a sensitive route, even with
+// the polyfill on (a TPM roundtrip per request — reserve for the riskiest).
+app.post("/transfer", express.raw({ type: "*/*" }),
+  requireProof({ freshProof: true }), transferHandler)
+
 // Relax on a low-risk read where a bound cookie is enough.
 app.get("/feed", requireProof({ allowDbscWithoutProof: true }), feedHandler)
 ```
 
-Options: `timestampWindowMs` (default 5 min), `allowDbscWithoutProof` (default
-`false`), `signBody`, and a per-route `replayCache` override.
+Options: `timestampWindowMs` (default 5 min), `freshProof` (2.14+; default on when
+`bound: false`, off when the polyfill is on — the native 403-challenge handshake),
+`allowDbscWithoutProof` (default `false`), `signBody`, and a per-route `replayCache`
+override.
 
 ## Database
 

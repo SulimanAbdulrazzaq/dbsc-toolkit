@@ -250,6 +250,9 @@
 </div>
 
 <h2>What it defends against</h2>
+<div id="native-warning" class="storage-badge ephemeral" style="display:none;margin-bottom:0.8rem">
+  <strong>Native-only mode (<code>bound: false</code>).</strong> <code>requireProof()</code> demands a fresh <em>hardware</em> proof per request (<code>freshProof</code>): the <strong>theft</strong> button below still gets a 403, defended by the TPM key via the 403-challenge handshake — no polyfill needed. The <strong>tamper</strong> and <strong>replay</strong> demos are polyfill-specific (they sign and replay the bound-key proof), so they need the polyfill on; native proofs verify key <em>possession</em>, not body integrity. Turn the polyfill on for body-hash binding and the per-request replay cache.
+</div>
 <p class="section-note">
   Only the routes you put <code translate="no">requireProof()</code> in front of demand the proof header. Here that's <code translate="no">/profile</code> and <code translate="no">/payment</code>. Your real app picks its own list (payments, admin actions, password or email change, 2FA enroll). Unguarded routes like <code translate="no">/me</code> accept the bare cookie like any normal app.
 </p>
@@ -427,6 +430,8 @@ function renderModeBtn() {
   btn.textContent = on ? "Polyfill ON — switch to native-only" : "Native-only — switch polyfill ON";
   btn.classList.toggle("attack", !on);
   btn.classList.toggle("primary", on);
+  const warn = $("native-warning");
+  if (warn) warn.style.display = on ? "none" : "block";
 }
 async function loadMode() {
   try {
@@ -587,9 +592,9 @@ $("pay-btn").onclick = async () => {
 $("theft-btn").onclick = async () => {
   const r = await plainFetch("GET", "/profile");
   show(r);
-  if (r.status === 403) explain("ok", "<strong>Defended.</strong> The cookie reached the server but no proof header was sent. <code>requireProof()</code> returned 403 <code>PROOF_MISSING</code>. This is what a stolen cookie pasted into a different browser sees.");
+  if (r.status === 403 && boundMode === "native") explain("ok", "<strong>Defended (hardware).</strong> Native-only mode: <code>requireProof({ freshProof })</code> answered the proofless request with 403 + <code>Secure-Session-Challenge</code>. A real Chrome would re-sign it with the TPM key and retry — but a stolen cookie on a machine without that key can't, so it stays 403. Per-request rejection, no polyfill needed.");
+  else if (r.status === 403) explain("ok", "<strong>Defended.</strong> The cookie reached the server but no proof header was sent. <code>requireProof()</code> returned 403 <code>PROOF_MISSING</code>. This is what a stolen cookie pasted into a different browser sees.");
   else if (r.status === 401) explain("info", "Sign in first, then click this button.");
-  else if (r.status === 200 && boundMode === "native") explain("info", "<strong>Passed — and that's expected here.</strong> In native-only mode (<code>bound: false</code>) <code>requireProof()</code> relaxes: a <code>dbsc</code> session is trusted on its hardware binding, so a bare cookie request is <em>not</em> rejected per-request. The per-request defenses (theft / tamper / replay) only apply with the polyfill on. Turn it on to see the 403.");
   else explain("bad", "Unexpected status. Check the body.");
 };
 

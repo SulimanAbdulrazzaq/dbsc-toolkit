@@ -38,6 +38,9 @@ export interface DbscInternal {
   secure: boolean;
   boundEnabled: boolean;
   replayCache?: ProofReplayCache;
+  /** Cookie scope, so the freshProof guard writes the challenge cookie correctly. */
+  cookieScope?: CookieScope;
+  cookieDomain?: string;
 }
 export const DBSC_INTERNAL: unique symbol = Symbol("dbsc-toolkit.sveltekit.internal");
 
@@ -404,6 +407,8 @@ export function dbscHandle(opts: DbscSvelteKitOptions): Handle {
       secure,
       boundEnabled: bound,
       ...(replayCache !== undefined && { replayCache }),
+      ...(cookieScope !== undefined && { cookieScope }),
+      ...(cookieDomain !== undefined && { cookieDomain }),
     } satisfies DbscInternal;
     (event.locals as Record<PropertyKey, unknown>).dbsc = dbscSession;
 

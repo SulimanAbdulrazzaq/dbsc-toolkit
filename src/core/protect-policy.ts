@@ -1,5 +1,6 @@
 import type { ProofReplayCache, StorageAdapter } from "./types.js";
 import type { SkippedEntry } from "./protocol/headers.js";
+import type { CookieScope } from "./cookies/options.js";
 
 /**
  * Options for `requireProof()`. All optional — `requireProof()` with no
@@ -38,6 +39,37 @@ export interface RequireProofOptions {
    * shared context. An explicit `allowDbscWithoutProof` still wins.
    */
   bound?: boolean;
+  /**
+   * Demand a fresh hardware proof per request on a `tier: "dbsc"` session via
+   * the native 403-challenge handshake, instead of trusting the rotated cookie.
+   * The guard answers a proofless request with `403` + `Secure-Session-Challenge`;
+   * Chrome signs the challenge with the TPM/Secure Enclave key and retries the
+   * same URL with `Secure-Session-Response`, which the guard verifies against the
+   * stored native key. A stolen cookie has no hardware key, so it is rejected per
+   * request — closing the refresh-cycle replay window without the polyfill.
+   *
+   * Default: **on when the polyfill is off** (`bound: false`). With the polyfill
+   * on, the co-registered bound key already proves every request, so the native
+   * handshake is skipped unless you set this `true` explicitly (a hardware
+   * roundtrip on every request — slower; reserve it for the most sensitive
+   * routes). Set `false` to restore the old behavior of trusting a `dbsc` cookie
+   * without a per-request check.
+   *
+   * Verifies key *possession*, not body integrity — for body-hash binding use the
+   * polyfill `bound` tier (`signBody`). `allowDbscWithoutProof` still wins if set.
+   */
+  freshProof?: boolean;
+  /**
+   * Cookie scope for the `freshProof` challenge cookie, so it matches the
+   * binding cookies' name + attributes. The Express / Fastify / Hono / Koa /
+   * node / SvelteKit guards read this from the middleware context automatically;
+   * the Next.js `requireProof` takes it here (and `secure`) because it has no
+   * shared context. Defaults to the secure `__Host-` scope.
+   */
+  cookieScope?: CookieScope;
+  cookieDomain?: string;
+  /** Secure flag for the `freshProof` challenge cookie (Next.js only — others read context). Default true. */
+  secure?: boolean;
 }
 
 /** Human-readable reason for a `tier: "none"` rejection — quota-aware. */

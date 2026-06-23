@@ -2,6 +2,38 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.14.0] — 2026-06-23
+
+### Added
+
+- **`requireProof({ freshProof })` — per-request hardware proof (all adapters).** On
+  a native `dbsc` session the guard can now demand a *fresh* TPM/Secure Enclave proof
+  per request via the W3C 403-challenge handshake, instead of trusting the rotated
+  cookie. A proofless request gets `403` + `Secure-Session-Challenge`; Chrome
+  re-signs with the hardware key and retries the same URL with
+  `Secure-Session-Response`, which is verified against the stored native key. A
+  stolen cookie has no hardware key, so it is rejected per request — closing the
+  refresh-cycle replay window **without the polyfill**. Wired into Express, Fastify,
+  Hono, Koa, Next.js, SvelteKit, NestJS, raw `node:http` and Electron. New core
+  helper `guardNativeProof()` backs it. Verifies key possession, not body integrity
+  (for body-hash binding use the polyfill `bound` tier's `signBody`).
+  - The SvelteKit guard now returns a `Response` for the handshake (return it from
+    your handler); it still returns `void`/throws otherwise.
+  - The Next.js `requireProof` takes `secure` / `cookieScope` / `cookieDomain` so the
+    challenge cookie matches your binding cookies (it has no shared context).
+
+### Changed
+
+- **Native-only default is now fail-closed (all adapters).** With the polyfill off
+  (`bound: false`), `requireProof()` previously *relaxed* a `dbsc` session — a bare
+  cookie passed, leaving the refresh-cycle replay window open. It now defaults to
+  the `freshProof` handshake above, so a stolen cookie is rejected per request.
+  With the polyfill on (the default deployment) nothing changes — the co-registered
+  bound key already proves each request, so no native challenge is issued unless you
+  pass `freshProof: true` explicitly (a hardware roundtrip every request — reserve
+  for the most sensitive routes). To restore the old relax-to-cookie behavior on a
+  route, pass `requireProof({ freshProof: false })`.
+
 ## [2.13.3] — 2026-06-23
 
 ### Fixed

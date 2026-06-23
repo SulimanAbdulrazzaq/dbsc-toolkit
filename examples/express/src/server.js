@@ -287,11 +287,14 @@ app.get("/demo/mode", (req, res) => {
 
 // requireProof()-guarded routes — one guard, every browser.
 app.get("/profile", authLimiter, requireLogin, requireProof(), (req, res) => {
+  const native = modeOf(req) === "native";
   res.json({
     username: req.demoUser.username,
     loginMode: req.demoUser.mode,
     securityLevel: `device-bound (tier: ${res.locals.dbsc.tier})`,
-    note: "Reached only from the bound device. A stolen cookie replayed elsewhere is rejected.",
+    note: native
+      ? "Native-only mode: no per-request proof was checked. A stolen cookie works until Chrome's next refresh fails (session-level, ~boundCookieTtl), not per request. Enable the polyfill for per-request rejection."
+      : "Per-request proof verified. A stolen cookie replayed without the bound key's signature is rejected immediately.",
   });
 });
 

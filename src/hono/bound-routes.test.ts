@@ -286,7 +286,7 @@ describe("bound: false (native-only)", () => {
     expect((await app.fetch(new Request("http://x/dbsc-bound/refresh", { method: "POST" }))).status).toBe(404);
   });
 
-  it("requireProof() auto-relaxes a native dbsc session and still 403s tier:none", async () => {
+  it("requireProof() demands a native proof (403 + challenge) and still 403s tier:none", async () => {
     const sessionId = "sess-hono-native";
     const { storage, app } = build((a) => {
       a.get("/guarded", requireProof(), (c) => c.json({ ok: true }));
@@ -294,17 +294,19 @@ describe("bound: false (native-only)", () => {
     const now = Date.now();
     await storage.setSession({ id: sessionId, userId: "u1", tier: "dbsc", createdAt: now, expiresAt: now + 60000, lastRefreshAt: now });
     await storage.setBoundKey({ sessionId, kind: "native", jwk: { kty: "EC", crv: "P-256", x: "x", y: "y" }, createdAt: now, algorithm: "ES256" });
-    const ok = await app.fetch(new Request("http://x/guarded", { headers: { cookie: `dbsc-session=${sessionId}` } }));
-    expect(ok.status).toBe(200);
+    // v2.14: native-only runs the freshProof handshake instead of relaxing.
+    const challenged = await app.fetch(new Request("http://x/guarded", { headers: { cookie: `dbsc-session=${sessionId}` } }));
+    expect(challenged.status).toBe(403);
+    expect(challenged.headers.get("secure-session-challenge")).toBeTruthy();
     const denied = await app.fetch(new Request("http://x/guarded"));
     expect(denied.status).toBe(403);
   });
 
-  // Regression: requireProof() must resolve the relax decision per request, not
-  // memoize the first request's boundEnabled. One guard, two dbsc() middlewares
-  // dispatched by a header — a bound-mode request must 403 a dbsc session, a
-  // native-mode request must pass it, and they must not leak across calls.
-  it("resolves relax per request when two middlewares are dispatched by mode", async () => {
+  // Regression: requireProof() must resolve its mode per request, not memoize the
+  // first request's boundEnabled. One guard, two dbsc() middlewares dispatched by
+  // a header. Distinguishing signal: native mode runs the freshProof handshake
+  // (challenge header present), bound mode runs the bound-proof path (no header).
+  it("resolves mode per request when two middlewares are dispatched by mode", async () => {
     const sessionId = "sess-hono-twomode";
     const storage = new MemoryStorage();
     const now = Date.now();
@@ -322,10 +324,13 @@ describe("bound: false (native-only)", () => {
 
     const cookie = `dbsc-session=${sessionId}`;
     const a = await app.fetch(new Request("http://x/guarded", { headers: { cookie } }));
-    expect(a.status).toBe(403); // bound mode: proof required
+    expect(a.status).toBe(403); // bound mode: bound-proof path
+    expect(a.headers.get("secure-session-challenge")).toBeNull();
     const b = await app.fetch(new Request("http://x/guarded", { headers: { cookie, "x-mode": "native" } }));
-    expect(b.status).toBe(200); // native mode: relaxed
+    expect(b.status).toBe(403); // native mode: freshProof handshake
+    expect(b.headers.get("secure-session-challenge")).toBeTruthy();
     const d = await app.fetch(new Request("http://x/guarded", { headers: { cookie } }));
-    expect(d.status).toBe(403); // bound again: must not have leaked from native
+    expect(d.status).toBe(403); // bound again: no challenge header — mode didn't leak
+    expect(d.headers.get("secure-session-challenge")).toBeNull();
   });
 });

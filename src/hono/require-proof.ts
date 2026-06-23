@@ -1,7 +1,62 @@
-import type { MiddlewareHandler } from "hono";
-import { noBindingReason, type RequireProofOptions } from "../core/index.js";
+import type { Context, MiddlewareHandler } from "hono";
+import { setCookie } from "hono/cookie";
+import {
+  noBindingReason,
+  guardNativeProof,
+  freshProofActive,
+  challengeCookieName,
+  FRESH_PROOF_CHALLENGE_TTL_MS,
+  readSessionResponseHeader,
+  buildChallengeHeader,
+  parseCookieHeader,
+  CHALLENGE_HEADER,
+  LEGACY_CHALLENGE_HEADER,
+  type RequireProofOptions,
+  type CookieScope,
+} from "../core/index.js";
 import { requireBoundProof } from "./proof.js";
 import { DBSC_INTERNAL, type DbscInternal } from "./index.js";
+
+/** Returns a Response (403) to send, or null to let the request proceed. */
+async function runNativeFreshProof(
+  c: Context,
+  sessionId: string,
+  storage: NonNullable<DbscInternal["storage"]>,
+  internal: DbscInternal | undefined,
+): Promise<Response | null> {
+  const scope: { secure: boolean; cookieScope?: CookieScope; cookieDomain?: string } = {
+    secure: internal?.secure ?? true,
+    ...(internal?.cookieScope !== undefined && { cookieScope: internal.cookieScope }),
+    ...(internal?.cookieDomain !== undefined && { cookieDomain: internal.cookieDomain }),
+  };
+  const cookieName = challengeCookieName(scope);
+  const responseHeader = readSessionResponseHeader(
+    Object.fromEntries(c.req.raw.headers) as Record<string, string | string[] | undefined>,
+  );
+  const expectedJti = parseCookieHeader(c.req.header("cookie"))[cookieName];
+
+  const result = await guardNativeProof(
+    { sessionId, secSessionResponseHeader: responseHeader, expectedJti },
+    storage,
+  );
+
+  if (result.kind === "pass") return null;
+  if (result.kind === "reject") {
+    return c.json({ error: result.error, code: result.code }, 403);
+  }
+  const header = buildChallengeHeader(result.jti, sessionId);
+  c.header(CHALLENGE_HEADER, header);
+  c.header(LEGACY_CHALLENGE_HEADER, header);
+  setCookie(c, cookieName, result.jti, {
+    httpOnly: true,
+    secure: scope.secure,
+    sameSite: "Lax",
+    path: "/",
+    maxAge: FRESH_PROOF_CHALLENGE_TTL_MS / 1000,
+    ...(scope.cookieDomain !== undefined && { domain: scope.cookieDomain }),
+  });
+  return c.body(null, 403);
+}
 
 /**
  * The route guard for Hono.
@@ -41,6 +96,20 @@ export function requireProof(opts: RequireProofOptions = {}): MiddlewareHandler 
         500,
       );
     }
+    if (
+      freshProofActive({
+        tier,
+        boundEnabled: internal?.boundEnabled,
+        freshProof: opts.freshProof,
+        allowDbscWithoutProof: opts.allowDbscWithoutProof,
+      })
+    ) {
+      const blocked = await runNativeFreshProof(c, dbsc!.sessionId!, storage, internal);
+      if (blocked) return blocked;
+      await next();
+      return;
+    }
+
     // bound polyfill off → no bound key exists → auto-relax the dbsc tier.
     // Resolved per request — boundEnabled can differ between requests (e.g. two
     // middlewares dispatched by mode), so the handler must not be memoized.

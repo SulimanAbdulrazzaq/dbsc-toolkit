@@ -15,8 +15,17 @@ import type { Request, Response } from "express";
 import {
   verifyBoundProof,
   noBindingReason,
+  guardNativeProof,
+  freshProofActive,
+  challengeCookieName,
+  FRESH_PROOF_CHALLENGE_TTL_MS,
+  readSessionResponseHeader,
+  buildChallengeHeader,
+  CHALLENGE_HEADER,
+  LEGACY_CHALLENGE_HEADER,
   DbscVerificationError,
   type RequireProofOptions,
+  type CookieScope,
 } from "../core/index.js";
 import {
   runDpopGuard,
@@ -77,6 +86,49 @@ export class DbscModule implements NestModule {
   }
 }
 
+async function runNativeFreshProof(
+  req: Request,
+  res: Response,
+  sessionId: string,
+  storage: NonNullable<RequireProofOptions["storage"]>,
+  internal: DbscInternal | undefined,
+): Promise<void> {
+  const scope: { secure: boolean; cookieScope?: CookieScope; cookieDomain?: string } = {
+    secure: internal?.secure ?? true,
+    ...(internal?.cookieScope !== undefined && { cookieScope: internal.cookieScope }),
+    ...(internal?.cookieDomain !== undefined && { cookieDomain: internal.cookieDomain }),
+  };
+  const cookieName = challengeCookieName(scope);
+  const responseHeader = readSessionResponseHeader(
+    req.headers as Record<string, string | string[] | undefined>,
+  );
+  const expectedJti = (req.cookies as Record<string, string> | undefined)?.[cookieName];
+
+  const result = await guardNativeProof(
+    { sessionId, secSessionResponseHeader: responseHeader, expectedJti },
+    storage,
+  );
+
+  if (result.kind === "pass") return;
+  if (result.kind === "reject") {
+    throw new ForbiddenException({ error: result.error, code: result.code });
+  }
+  // Pre-set the challenge header + cookie on res, then throw 403 — Nest's filter
+  // keeps headers already written.
+  const header = buildChallengeHeader(result.jti, sessionId);
+  res.setHeader(CHALLENGE_HEADER, header);
+  res.setHeader(LEGACY_CHALLENGE_HEADER, header);
+  res.cookie(cookieName, result.jti, {
+    httpOnly: true,
+    secure: scope.secure,
+    sameSite: "lax",
+    path: "/",
+    maxAge: FRESH_PROOF_CHALLENGE_TTL_MS,
+    ...(scope.cookieDomain !== undefined && { domain: scope.cookieDomain }),
+  });
+  throw new ForbiddenException();
+}
+
 async function runProof(req: Request, res: Response, opts: RequireProofOptions): Promise<void> {
   const dbscLocals = res.locals.dbsc;
   const tier = dbscLocals?.tier ?? "none";
@@ -89,6 +141,18 @@ async function runProof(req: Request, res: Response, opts: RequireProofOptions):
   const storage = opts.storage ?? internal?.storage;
   if (!storage) {
     throw new InternalServerErrorException("requireProof: storage unavailable — import DbscModule.forRoot(...)");
+  }
+
+  if (
+    freshProofActive({
+      tier,
+      boundEnabled: internal?.boundEnabled,
+      freshProof: opts.freshProof,
+      allowDbscWithoutProof: opts.allowDbscWithoutProof,
+    })
+  ) {
+    await runNativeFreshProof(req, res, dbscLocals.sessionId, storage, internal);
+    return;
   }
 
   const allowDbscWithoutProof =

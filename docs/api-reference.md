@@ -182,6 +182,7 @@ Produces a stable, deterministic, opaque `sessionId` for `bindSession()` when th
 ```ts
 interface RequireProofOptions {
   allowDbscWithoutProof?: boolean;  // v2.7+ default: false — every tier must carry a proof header
+  freshProof?: boolean;             // v2.14+ — demand a fresh hardware proof per request on dbsc
   timestampWindowMs?: number;       // accepted proof timestamp window, ms
   storage?: StorageAdapter;         // override; default = the adapter's storage
 }
@@ -194,6 +195,20 @@ register a polyfill key alongside the TPM key on first init, so the per-request
 proof works the same way on every tier. Set this to `true` only if your
 Chromium client cannot ship the v2.7 client SDK (then the legacy v2.6
 behavior is restored, with the refresh-cycle replay window — see CHANGELOG).
+
+`freshProof` (v2.14+, **all adapters**) makes the guard demand a fresh
+hardware proof per request on a `dbsc` session via the native 403-challenge
+handshake: a proofless request gets `403` + `Secure-Session-Challenge`, Chrome
+re-signs with the TPM/Secure Enclave key and retries with `Secure-Session-Response`,
+which is verified against the stored native key. A stolen cookie has no hardware
+key, so it is rejected per request — closing the refresh-cycle replay window
+without the polyfill. It is **on by default when the polyfill is off** (`bound:
+false`); with the polyfill on the co-registered bound key already proves each
+request, so set `freshProof: true` explicitly to force the hardware roundtrip on
+a route (slower — reserve for the most sensitive ones). `freshProof: false`
+restores the old behavior of trusting a `dbsc` cookie without a per-request check.
+It verifies key *possession*, not body integrity — for body-hash binding use the
+polyfill `bound` tier's `signBody`.
 
 `RequireProofOptions` is the (entirely optional) option shape of every adapter's `requireProof()`. `noBindingReason` produces the quota-aware human reason used in a `tier: "none"` rejection — exported for custom adapters.
 
