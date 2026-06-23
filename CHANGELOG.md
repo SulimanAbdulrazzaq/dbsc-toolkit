@@ -2,6 +2,22 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.13.3] — 2026-06-23
+
+### Fixed
+
+- The `requireProof()` guard in the **Express, Fastify, and Hono** adapters
+  memoized its inner proof handler on the first request, locking in that request's
+  `boundEnabled` value for the lifetime of the guard. A single guard serving
+  requests whose `boundEnabled` differs between requests — e.g. two kits (one with
+  `bound: true`, one with `bound: false`) dispatched per request — would then apply
+  the wrong relax decision: a native (`bound: false`) session could be wrongly
+  required to send a per-request proof (`MISSING_PROOF`), or a bound session could
+  be wrongly relaxed. The relax decision is now resolved on every request in all
+  three adapters. The Koa, Next.js, raw `node:http`, SvelteKit and Electron guards
+  already resolved it per request and were unaffected. Single-kit apps were
+  unaffected regardless; only setups mixing both modes behind one guard hit this.
+
 ## [2.13.2] — 2026-06-22
 
 ### Fixed

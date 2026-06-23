@@ -299,4 +299,33 @@ describe("bound: false (native-only)", () => {
     const denied = await app.fetch(new Request("http://x/guarded"));
     expect(denied.status).toBe(403);
   });
+
+  // Regression: requireProof() must resolve the relax decision per request, not
+  // memoize the first request's boundEnabled. One guard, two dbsc() middlewares
+  // dispatched by a header — a bound-mode request must 403 a dbsc session, a
+  // native-mode request must pass it, and they must not leak across calls.
+  it("resolves relax per request when two middlewares are dispatched by mode", async () => {
+    const sessionId = "sess-hono-twomode";
+    const storage = new MemoryStorage();
+    const now = Date.now();
+    await storage.setSession({ id: sessionId, userId: "u1", tier: "dbsc", createdAt: now, expiresAt: now + 60000, lastRefreshAt: now });
+    await storage.setBoundKey({ sessionId, kind: "native", jwk: { kty: "EC", crv: "P-256", x: "x", y: "y" }, createdAt: now, algorithm: "ES256" });
+
+    const boundMw = dbsc({ storage, secure: false, bound: true });
+    const nativeMw = dbsc({ storage, secure: false, bound: false });
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      const mw = c.req.header("x-mode") === "native" ? nativeMw : boundMw;
+      return mw(c, next);
+    });
+    app.get("/guarded", requireProof(), (c) => c.json({ ok: true }));
+
+    const cookie = `dbsc-session=${sessionId}`;
+    const a = await app.fetch(new Request("http://x/guarded", { headers: { cookie } }));
+    expect(a.status).toBe(403); // bound mode: proof required
+    const b = await app.fetch(new Request("http://x/guarded", { headers: { cookie, "x-mode": "native" } }));
+    expect(b.status).toBe(200); // native mode: relaxed
+    const d = await app.fetch(new Request("http://x/guarded", { headers: { cookie } }));
+    expect(d.status).toBe(403); // bound again: must not have leaked from native
+  });
 });

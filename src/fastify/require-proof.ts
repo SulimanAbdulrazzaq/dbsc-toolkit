@@ -14,8 +14,6 @@ import { DBSC_INTERNAL, type DbscInternal } from "./index.js";
  * context the `dbsc` plugin populates; pass `{ storage }` only to override.
  */
 export function requireProof(opts: RequireProofOptions = {}): preHandlerAsyncHookHandler {
-  let proofHandler: preHandlerAsyncHookHandler | undefined;
-
   return async function preHandler(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const dbsc = req.dbsc;
     const tier = dbsc?.tier ?? "none";
@@ -29,29 +27,29 @@ export function requireProof(opts: RequireProofOptions = {}): preHandlerAsyncHoo
       });
       return;
     }
-    if (!proofHandler) {
-      const internal = (req as unknown as Record<PropertyKey, unknown>)[DBSC_INTERNAL] as
-        | DbscInternal
-        | undefined;
-      const storage = opts.storage ?? internal?.storage;
-      if (!storage) {
-        reply.status(500).send({
-          error:
-            "requireProof: storage unavailable — register the dbsc plugin / createDbsc().install() first, or pass { storage }",
-        });
-        return;
-      }
-      // bound polyfill off → no bound key exists → auto-relax the dbsc tier.
-      const allowDbscWithoutProof =
-        opts.allowDbscWithoutProof ?? (internal?.boundEnabled === false ? true : undefined);
-      proofHandler = requireBoundProof({
-        storage,
-        signBody: true,
-        ...(allowDbscWithoutProof !== undefined && { allowDbscWithoutProof }),
-        ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
-        ...(internal?.replayCache !== undefined && { replayCache: internal.replayCache }),
+    const internal = (req as unknown as Record<PropertyKey, unknown>)[DBSC_INTERNAL] as
+      | DbscInternal
+      | undefined;
+    const storage = opts.storage ?? internal?.storage;
+    if (!storage) {
+      reply.status(500).send({
+        error:
+          "requireProof: storage unavailable — register the dbsc plugin / createDbsc().install() first, or pass { storage }",
       });
+      return;
     }
+    // bound polyfill off → no bound key exists → auto-relax the dbsc tier.
+    // Resolved per request — boundEnabled can differ between requests (e.g. two
+    // plugins dispatched by mode), so the handler must not be memoized.
+    const allowDbscWithoutProof =
+      opts.allowDbscWithoutProof ?? (internal?.boundEnabled === false ? true : undefined);
+    const proofHandler = requireBoundProof({
+      storage,
+      signBody: true,
+      ...(allowDbscWithoutProof !== undefined && { allowDbscWithoutProof }),
+      ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
+      ...(internal?.replayCache !== undefined && { replayCache: internal.replayCache }),
+    });
     await (proofHandler as (req: FastifyRequest, reply: FastifyReply) => Promise<void>)(req, reply);
   };
 }

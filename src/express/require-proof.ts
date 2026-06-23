@@ -20,8 +20,6 @@ import { DBSC_INTERNAL, type DbscInternal } from "./index.js";
  * middleware populates; pass `{ storage }` only to override.
  */
 export function requireProof(opts: RequireProofOptions = {}): RequestHandler {
-  let proofHandler: RequestHandler | undefined;
-
   return (req: Request, res: Response, next: NextFunction): void => {
     const dbsc = res.locals.dbsc;
     const tier = dbsc?.tier ?? "none";
@@ -35,31 +33,31 @@ export function requireProof(opts: RequireProofOptions = {}): RequestHandler {
       });
       return;
     }
-    if (!proofHandler) {
-      const internal = (res.locals as Record<PropertyKey, unknown>)[DBSC_INTERNAL] as
-        | DbscInternal
-        | undefined;
-      const storage = opts.storage ?? internal?.storage;
-      if (!storage) {
-        res.status(500).json({
-          error:
-            "requireProof: storage unavailable — mount dbsc() / createDbsc().install() before this route, or pass { storage }",
-        });
-        return;
-      }
-      // When the bound polyfill is disabled, no bound key is ever registered,
-      // so a native dbsc-tier session has nothing to prove with. Auto-relax:
-      // pass dbsc through. An explicit option still wins.
-      const allowDbscWithoutProof =
-        opts.allowDbscWithoutProof ?? (internal?.boundEnabled === false ? true : undefined);
-      proofHandler = requireBoundProof({
-        storage,
-        signBody: true,
-        ...(allowDbscWithoutProof !== undefined && { allowDbscWithoutProof }),
-        ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
-        ...(internal?.replayCache !== undefined && { replayCache: internal.replayCache }),
+    const internal = (res.locals as Record<PropertyKey, unknown>)[DBSC_INTERNAL] as
+      | DbscInternal
+      | undefined;
+    const storage = opts.storage ?? internal?.storage;
+    if (!storage) {
+      res.status(500).json({
+        error:
+          "requireProof: storage unavailable — mount dbsc() / createDbsc().install() before this route, or pass { storage }",
       });
+      return;
     }
+    // When the bound polyfill is disabled, no bound key is ever registered, so a
+    // native dbsc-tier session has nothing to prove with. Auto-relax: pass dbsc
+    // through. An explicit option still wins. Resolved per request — boundEnabled
+    // can differ between requests (e.g. two kits dispatched by mode), so the
+    // handler must not be memoized across the first call's value.
+    const allowDbscWithoutProof =
+      opts.allowDbscWithoutProof ?? (internal?.boundEnabled === false ? true : undefined);
+    const proofHandler = requireBoundProof({
+      storage,
+      signBody: true,
+      ...(allowDbscWithoutProof !== undefined && { allowDbscWithoutProof }),
+      ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
+      ...(internal?.replayCache !== undefined && { replayCache: internal.replayCache }),
+    });
     proofHandler(req, res, next);
   };
 }
