@@ -241,6 +241,14 @@
   <p id="tier-explain">After sign-in, the kit binds your session to a device-resident key. The tier shown here tells you which kind.</p>
 </div>
 
+<div class="card">
+  <h3>Polyfill (<code translate="no">bound</code> tier)</h3>
+  <p id="mode-explain">On by default: non-Chromium browsers get the Web Crypto <code translate="no">bound</code> tier. Turn it off to run native-only (<code translate="no">bound: false</code>) — then a non-Chromium browser drops to <code translate="no">tier: none</code> and <code translate="no">requireProof()</code> rejects it, while Chromium still gets native <code translate="no">dbsc</code>. Switching re-binds your session, so sign in again if you were signed in.</p>
+  <div class="btn-row">
+    <button id="mode-btn" class="primary">Loading mode…</button>
+  </div>
+</div>
+
 <h2>What it defends against</h2>
 <p class="section-note">
   Only the routes you put <code translate="no">requireProof()</code> in front of demand the proof header. Here that's <code translate="no">/profile</code> and <code translate="no">/payment</code>. Your real app picks its own list (payments, admin actions, password or email change, 2FA enroll). Unguarded routes like <code translate="no">/me</code> accept the bare cookie like any normal app.
@@ -408,6 +416,47 @@ async function showStorageBadge() {
   } catch { /* */ }
 }
 showStorageBadge();
+
+// Polyfill (bound) mode toggle. Reads the current mode, renders the button, and
+// on click flips it server-side then re-binds the current session in the new
+// mode so the tier banner updates live.
+let boundMode = "bound";
+function renderModeBtn() {
+  const on = boundMode === "bound";
+  const btn = $("mode-btn");
+  btn.textContent = on ? "Polyfill ON — switch to native-only" : "Native-only — switch polyfill ON";
+  btn.classList.toggle("attack", !on);
+  btn.classList.toggle("primary", on);
+}
+async function loadMode() {
+  try {
+    const r = await fetch("/demo/mode", { credentials: "include" });
+    const j = await r.json();
+    boundMode = j.mode === "native" ? "native" : "bound";
+  } catch { /* */ }
+  renderModeBtn();
+}
+loadMode();
+
+$("mode-btn") && ($("mode-btn").onclick = async () => {
+  const next = boundMode === "bound" ? "native" : "bound";
+  const r = await plainFetch("POST", "/demo/mode", { mode: next });
+  show(r);
+  if (r.status !== 200) return;
+  boundMode = next;
+  renderModeBtn();
+  // If signed in, re-bind under the new mode so the tier reflects it now.
+  const me = await plainFetch("GET", "/me");
+  if (me.status === 200) {
+    if (typeof window.clearBoundKey === "function") await window.clearBoundKey().catch(() => {});
+    const re = await plainFetch("POST", "/login", { username: val("username"), password: $("password").value });
+    if (re.status === 200) await reinitDbsc();
+    else explain("info", "Mode switched. Sign in again to bind in " + next + " mode.");
+  } else {
+    setTier("unbound", next === "native" ? "native-only" : "polyfill on", "Mode set. Sign in to bind.");
+    explain("info", "Polyfill " + (next === "bound" ? "enabled" : "disabled") + ". Sign in to see the resulting tier.");
+  }
+});
 
 function setTier(state, label, explain) {
   $("tier-banner").className = "tier-banner " + state;

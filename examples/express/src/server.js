@@ -113,11 +113,14 @@ const dbscStorage = process.env.REDIS_URL
   ? new RedisStorage(new Redis(process.env.REDIS_URL))
   : new MemoryStorage();
 
-// Set DBSC_BOUND=false to run native-only: the /dbsc-bound/* routes don't mount
-// and requireProof() auto-relaxes for a dbsc-tier session (no bound key to prove
-// with). Non-Chromium browsers then get tier "none" instead of "bound". Defaults
-// to the polyfill being on.
-const BOUND_ENABLED = process.env.DBSC_BOUND !== "false";
+// DBSC_BOUND controls the DEFAULT mode at boot. The demo also exposes a live
+// in-page toggle (POST /demo/mode sets the `dbsc-demo-mode` cookie), so two kits
+// are mounted side by side: the bound one on the standard paths, and a
+// native-only one namespaced under /native. Per request, pickKit() chooses which
+// kit's middleware/guard runs, based on the mode cookie. In native-only mode the
+// /dbsc-bound/* routes are absent and requireProof() auto-relaxes a dbsc session
+// (no bound key to prove with); non-Chromium browsers then read tier "none".
+const DEFAULT_BOUND = process.env.DBSC_BOUND !== "false";
 
 const KIT_OPTIONS = {
   boundCookieTtl: 60 * 1000,
@@ -125,19 +128,67 @@ const KIT_OPTIONS = {
   secure: true,
   cookieScope: "host",
   clientPath: "/dbsc-client",
-  bound: BOUND_ENABLED,
 };
 
 const replayCache = new MemoryReplayCache();
 
+// Bound (polyfill on) — standard paths, plus the browser client SDK shim.
 const dbscKit = createDbsc({
   storage: dbscStorage,
   rateLimiter,
   replayCache,
+  bound: true,
   ...KIT_OPTIONS,
 });
 
-dbscKit.install(app);
+// Native-only (polyfill off). Same protocol paths as the bound kit — the two
+// never run on the same request (see the dispatcher below), so they don't
+// collide. clientPath: false because it reuses the /dbsc-client assets the bound
+// kit already serves.
+const dbscKitNative = createDbsc({
+  storage: dbscStorage,
+  rateLimiter,
+  replayCache,
+  bound: false,
+  ...KIT_OPTIONS,
+  clientPath: false,
+});
+
+// Which mode is this browser in? Cookie wins; otherwise the boot default.
+function modeOf(req) {
+  const m = req.cookies?.["dbsc-demo-mode"];
+  if (m === "native") return "native";
+  if (m === "bound") return "bound";
+  return DEFAULT_BOUND ? "bound" : "native";
+}
+function kitFor(req) {
+  return modeOf(req) === "native" ? dbscKitNative : dbscKit;
+}
+
+// Each kit is installed on its own sub-app; a mode-aware dispatcher forwards the
+// request to exactly one of them. Installing both kits' middleware on the same
+// app would let the second clobber res.locals.dbsc set by the first; routing to
+// one sub-app per request keeps res.locals.dbsc faithful to the active mode. A
+// mounted Express app falls through to the parent's next() when no route
+// matches, so the app-level routes below (/login, /profile, …) still run.
+const boundApp = express();
+const nativeApp = express();
+dbscKit.install(boundApp);
+dbscKitNative.install(nativeApp);
+app.use((req, res, next) => {
+  (modeOf(req) === "native" ? nativeApp : boundApp)(req, res, next);
+});
+
+// Flip the live mode. Clears any existing binding so the next login starts clean
+// in the new mode (the two modes use different cookies / client flow).
+app.post("/demo/mode", express.json(), async (req, res) => {
+  const next = req.body?.mode === "native" ? "native" : "bound";
+  try { await res.locals.dbsc?.revoke?.(); } catch { /* */ }
+  res.cookie("dbsc-demo-mode", next, {
+    httpOnly: false, secure: true, sameSite: "lax", maxAge: 24 * 60 * 60 * 1000, path: "/",
+  });
+  res.json({ ok: true, mode: next, boundEnabled: next === "bound" });
+});
 
 // Cookie-session login
 app.post("/login", authLimiter, async (req, res) => {
@@ -147,9 +198,9 @@ app.post("/login", authLimiter, async (req, res) => {
   req.session.userId = r.user.id;
   req.session.username = r.user.username;
 
-  await dbscKit.bind(res, req.session.id, { userId: r.user.id });
+  await kitFor(req).bind(res, req.session.id, { userId: r.user.id });
 
-  res.json({ ok: true, mode: "cookie", username: r.user.username });
+  res.json({ ok: true, mode: "cookie", boundMode: modeOf(req), username: r.user.username });
 });
 
 // JWT-mode login
@@ -161,8 +212,8 @@ app.post("/login-jwt", authLimiter, async (req, res) => {
     httpOnly: true, secure: true, sameSite: "lax", maxAge: 24 * 60 * 60 * 1000,
   });
 
-  const derivedId = await dbscKit.bind(res, { userId: r.user.id });
-  res.json({ ok: true, mode: "jwt", username: r.user.username, derivedSessionId: derivedId });
+  const derivedId = await kitFor(req).bind(res, { userId: r.user.id });
+  res.json({ ok: true, mode: "jwt", boundMode: modeOf(req), username: r.user.username, derivedSessionId: derivedId });
 });
 
 app.post("/logout", async (req, res) => {
@@ -206,12 +257,18 @@ app.get("/me", (req, res) => {
   res.json({
     username: u.username,
     loginMode: u.mode,
+    boundMode: modeOf(req),
     dbsc: {
       sessionId: res.locals.dbsc.sessionId,
       tier: res.locals.dbsc.tier,
       skipped: res.locals.dbsc.skipped,
     },
   });
+});
+
+// Current polyfill mode for the UI toggle to read on load.
+app.get("/demo/mode", (req, res) => {
+  res.json({ mode: modeOf(req), boundEnabled: modeOf(req) === "bound" });
 });
 
 // requireProof()-guarded routes — one guard, every browser.
@@ -273,10 +330,12 @@ app.get("/api/resource", authLimiter, requireDpop({ getBoundJkt: boundJktFromReq
   });
 });
 
-app.get("/config", (_req, res) => {
+app.get("/config", (req, res) => {
   res.json({
     storage: process.env.REDIS_URL ? "redis" : "memory",
     ...KIT_OPTIONS,
+    bound: modeOf(req) === "bound",
+    boundMode: modeOf(req),
     rateLimiter: { registrationPerMin: RL_LIMITS.registration, refreshPerMin: RL_LIMITS.refresh },
   });
 });
