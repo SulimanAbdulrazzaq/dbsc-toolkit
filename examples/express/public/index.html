@@ -445,10 +445,12 @@ $("mode-btn") && ($("mode-btn").onclick = async () => {
   if (r.status !== 200) return;
   boundMode = next;
   renderModeBtn();
+  // Always clear any IndexedDB key from the other mode, signed in or not, so a
+  // stale polyfill key can't make the banner show the wrong tier later.
+  if (typeof window.clearBoundKey === "function") await window.clearBoundKey().catch(() => {});
   // If signed in, re-bind under the new mode so the tier reflects it now.
   const me = await plainFetch("GET", "/me");
   if (me.status === 200) {
-    if (typeof window.clearBoundKey === "function") await window.clearBoundKey().catch(() => {});
     const re = await plainFetch("POST", "/login", { username: val("username"), password: $("password").value });
     if (re.status === 200) await reinitDbsc();
     else explain("info", "Mode switched. Sign in again to bind in " + next + " mode.");
@@ -504,14 +506,36 @@ async function plainFetch(method, path, body, extraHeaders) {
 }
 
 async function reinitDbsc() {
-  if (typeof window.initBoundDbsc !== "function") return;
   setTier("none", "binding…", "Generating a key and registering it with the server.");
+  // Native-only mode: the polyfill SDK is disabled (/dbsc-bound/state always
+  // answers "unbound"), so it can't report the tier. The authoritative source
+  // is the server — read it from /me. On Chromium, native registration runs via
+  // the response header and lands ~1s after login, so poll briefly for it.
+  if (boundMode === "native") return reinitNative();
+  if (typeof window.initBoundDbsc !== "function") return;
   try {
     const outcome = await window.initBoundDbsc();
     setTierFromOutcome(outcome);
   } catch (err) {
     setTier("none", "error", String(err && err.message || err));
   }
+}
+
+async function reinitNative() {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let tier = "none";
+  for (let i = 0; i < 8; i++) {
+    const me = await plainFetch("GET", "/me");
+    if (me.status !== 200) { tier = "none"; break; }
+    tier = me.body?.dbsc?.tier ?? "none";
+    if (tier === "dbsc") break;
+    await sleep(500);
+  }
+  if (tier === "dbsc") return setTier("dbsc", ...TIER_COPY.dbsc);
+  // Non-Chromium (or a Chromium that didn't register) gets nothing in native-only
+  // mode — there's no polyfill to fall back to. That's the point of bound:false.
+  setTier("none", "none (native-only)",
+    "Polyfill is off, so this browser has no device binding. requireProof() will reject guarded routes. Turn the polyfill back on for cross-browser coverage, or use Chrome on supported hardware for native dbsc.");
 }
 
 $("signup-btn").onclick = async () => {
@@ -534,8 +558,13 @@ $("profile-btn").onclick = async () => {
   const r = await window.boundFetch("/profile", { method: "GET", credentials: "include" });
   const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
   show({ method: "GET", path: "/profile", status: r.status, body: b });
-  if (r.status === 200) explain("ok", "The signed proof header verified against your bound key. <code>requireProof()</code> let the request through.");
-  else explain("bad", "Proof check failed. See body for the reason code.");
+  if (r.status === 200 && boundMode === "native") {
+    explain("ok", "Passed on the native binding. With the polyfill off (<code>bound: false</code>), <code>requireProof()</code> relaxes — no per-request proof is sent; the hardware-bound session is trusted. Turn the polyfill on to see per-request proof signing.");
+  } else if (r.status === 200) {
+    explain("ok", "The signed proof header verified against your bound key. <code>requireProof()</code> let the request through.");
+  } else {
+    explain("bad", "Proof check failed. See body for the reason code.");
+  }
 };
 
 $("pay-btn").onclick = async () => {
@@ -548,7 +577,11 @@ $("pay-btn").onclick = async () => {
   });
   const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
   show({ method: "POST", path: "/payment", status: r.status, body: b });
-  if (r.status === 200) explain("ok", "Body hash signed into the proof, verified server-side. An MITM rewriting the amount would have failed the check.");
+  if (r.status === 200 && boundMode === "native") {
+    explain("ok", "Passed on the native binding. With the polyfill off (<code>bound: false</code>), no per-request proof — so no body hash either. The body-tamper defense below needs the polyfill on; native DBSC binds the session, not the individual request.");
+  } else if (r.status === 200) {
+    explain("ok", "Body hash signed into the proof, verified server-side. An MITM rewriting the amount would have failed the check.");
+  }
 };
 
 $("theft-btn").onclick = async () => {
@@ -556,6 +589,7 @@ $("theft-btn").onclick = async () => {
   show(r);
   if (r.status === 403) explain("ok", "<strong>Defended.</strong> The cookie reached the server but no proof header was sent. <code>requireProof()</code> returned 403 <code>PROOF_MISSING</code>. This is what a stolen cookie pasted into a different browser sees.");
   else if (r.status === 401) explain("info", "Sign in first, then click this button.");
+  else if (r.status === 200 && boundMode === "native") explain("info", "<strong>Passed — and that's expected here.</strong> In native-only mode (<code>bound: false</code>) <code>requireProof()</code> relaxes: a <code>dbsc</code> session is trusted on its hardware binding, so a bare cookie request is <em>not</em> rejected per-request. The per-request defenses (theft / tamper / replay) only apply with the polyfill on. Turn it on to see the 403.");
   else explain("bad", "Unexpected status. Check the body.");
 };
 
