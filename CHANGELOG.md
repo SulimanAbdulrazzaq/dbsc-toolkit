@@ -2,6 +2,21 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.13.2] — 2026-06-22
+
+### Fixed
+
+- Removed the non-standard `id` parameter from the `Secure-Session-Registration`
+  header. The W3C draft defines no `id` on that header — the bound cookie name is
+  carried by the JSON registration response (`credentials[].name`), and `id` is
+  defined only on `Secure-Session-Challenge`, where it names the session
+  identifier. Chrome ignored the stray parameter, so this is a wire-format
+  cleanup with no behavior change. `buildRegistrationHeader`'s `cookieName` option
+  is now a deprecated no-op (still accepted so callers compile). The conformance
+  vector `spec/vectors/registration-header.json` and the protocol docs were
+  corrected to match. Caught by an independent PHP implementation cross-checking
+  the vectors — thanks to Scott Helme (Report URI).
+
 ## [2.13.1] — 2026-06-20
 
 ### Fixed

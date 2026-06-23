@@ -28,7 +28,7 @@ login succeeds.
 1. The application's login route responds 200 and additionally:
      Set-Cookie: <reg-cookie>=<sessionId>; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=86400
      Set-Cookie: <challenge-cookie>=<jti>; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=300
-     Secure-Session-Registration: (ES256);path="/dbsc/registration";challenge="<jti>";id="<bound-cookie-name>"
+     Secure-Session-Registration: (ES256);path="/dbsc/registration";challenge="<jti>"
      Sec-Session-Registration:    (same value)
 
 2. Chromium, on its own within ~1s, generates an EC P-256 keypair in hardware
@@ -49,16 +49,18 @@ login succeeds.
 The `Secure-Session-Registration` value MUST be:
 
 ```
-(<alg>);path="<registrationPath>";challenge="<jti>";id="<boundCookieName>"
+(<alg>);path="<registrationPath>";challenge="<jti>"
 ```
 
 - `<alg>` is `ES256` or `RS256`, wrapped in parentheses.
 - Segments are joined with `;` and **no spaces**.
-- `path`, `challenge`, and `id` values are double-quoted.
+- `path` and `challenge` values are double-quoted.
 - `path` is where Chromium POSTs the registration JWS. It is **not** the refresh
   URL (that comes from the JSON config).
-- `id` is the name of the bound cookie the session will use. Chromium 145+
-  requires it.
+- There is **no `id` parameter** on this header. The W3C draft defines `id` only
+  on `Secure-Session-Challenge`, where it names the session identifier. The bound
+  cookie name is carried by the JSON registration response (`credentials[].name`),
+  not here. (Earlier versions emitted `id="<cookie-name>"`; Chromium ignored it.)
 
 Exact string for sample inputs: [`vectors/registration-header.json`](./vectors/registration-header.json).
 

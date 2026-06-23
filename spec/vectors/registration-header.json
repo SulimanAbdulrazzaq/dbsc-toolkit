@@ -1,14 +1,13 @@
 {
-  "description": "Exact Secure-Session-Registration and Secure-Session-Challenge header strings.",
+  "description": "Exact Secure-Session-Registration and Secure-Session-Challenge header strings. Per the W3C draft, Secure-Session-Registration carries no id parameter (the bound cookie name lives in the JSON registration response). The id parameter belongs only on Secure-Session-Challenge, where it names the session identifier.",
   "inputs": {
     "algorithm": "ES256",
     "registrationPath": "/dbsc/registration",
     "challenge": "KN3qw_pQxR8tY5uI8oP1aS2dF3gH4jK5lM6nO7pQ8rS",
-    "cookieName": "__Host-dbsc-session",
     "sessionId": "sess_3f9a1c7e8b2d4f60a1b2c3d4e5f60718"
   },
   "expected": {
-    "Secure-Session-Registration": "(ES256);path=\"/dbsc/registration\";challenge=\"KN3qw_pQxR8tY5uI8oP1aS2dF3gH4jK5lM6nO7pQ8rS\";id=\"__Host-dbsc-session\"",
+    "Secure-Session-Registration": "(ES256);path=\"/dbsc/registration\";challenge=\"KN3qw_pQxR8tY5uI8oP1aS2dF3gH4jK5lM6nO7pQ8rS\"",
     "Secure-Session-Challenge (bare)": "\"KN3qw_pQxR8tY5uI8oP1aS2dF3gH4jK5lM6nO7pQ8rS\"",
     "Secure-Session-Challenge (with id)": "\"KN3qw_pQxR8tY5uI8oP1aS2dF3gH4jK5lM6nO7pQ8rS\";id=\"sess_3f9a1c7e8b2d4f60a1b2c3d4e5f60718\""
   }

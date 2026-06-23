@@ -275,6 +275,7 @@ interface RegistrationHeaderOptions {
   /** @deprecated misnamed alias for registrationPath; kept for back-compat */
   refreshPath?: string;
   challenge: string;
+  /** @deprecated no-op; the header carries no id parameter (cookie name lives in the JSON response) */
   cookieName?: string;
 }
 function buildRegistrationHeader(opts: RegistrationHeaderOptions): string;

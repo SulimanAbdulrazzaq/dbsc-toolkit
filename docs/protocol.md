@@ -23,7 +23,7 @@ Legacy `Sec-Session-*` variants are also accepted by the library's `readSessionR
      Status: 200
      Set-Cookie: __Host-dbsc-reg=<sessionId>; HttpOnly; Secure; SameSite=Lax; Max-Age=86400; Path=/
      Set-Cookie: __Host-dbsc-challenge=<jti>; HttpOnly; Secure; SameSite=Lax; Max-Age=300; Path=/
-     Secure-Session-Registration: (ES256);path="/dbsc/registration";challenge="<jti>";id="__Host-dbsc-session"
+     Secure-Session-Registration: (ES256);path="/dbsc/registration";challenge="<jti>"
      Sec-Session-Registration: (same value, for older Chrome builds)
 
 2. POST /dbsc/registration (Chrome auto-initiated, within ~1 second)

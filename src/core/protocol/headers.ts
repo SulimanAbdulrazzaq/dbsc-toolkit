@@ -5,6 +5,13 @@ export interface RegistrationHeaderOptions {
   /** @deprecated misnamed alias for registrationPath; kept for back-compat. */
   refreshPath?: string;
   challenge: string;
+  /**
+   * @deprecated No longer emitted. The W3C draft defines no `id` parameter on
+   * `Secure-Session-Registration` — the bound cookie name is carried by the JSON
+   * registration response (`credentials[].name`), not the header. Chrome ignored
+   * this param; it was a no-op. Accepted for back-compat so existing callers keep
+   * compiling. See spec/vectors/registration-header.json.
+   */
   cookieName?: string;
 }
 
@@ -12,9 +19,9 @@ export function buildRegistrationHeader(opts: RegistrationHeaderOptions): string
   const alg = opts.algorithm ?? "ES256";
   const path = opts.registrationPath ?? opts.refreshPath;
   if (!path) throw new Error("buildRegistrationHeader: registrationPath is required");
-  const parts = [`(${alg})`, `path="${path}"`, `challenge="${opts.challenge}"`];
-  if (opts.cookieName) parts.push(`id="${opts.cookieName}"`);
-  return parts.join(";");
+  // No `id` parameter: it is not defined for this header in the W3C draft. The
+  // cookie name is bound via the JSON registration response, not here.
+  return [`(${alg})`, `path="${path}"`, `challenge="${opts.challenge}"`].join(";");
 }
 
 export function buildChallengeHeader(jti: string, sessionId?: string): string {

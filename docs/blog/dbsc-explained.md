@@ -27,10 +27,10 @@ Crucially, the server is *reactive*. It doesn't initiate anything. It sets one r
 Registration happens right after your normal login succeeds. The login response carries an extra header:
 
 ```
-Secure-Session-Registration: (ES256);path="/dbsc/registration";challenge="<jti>";id="__Host-dbsc-session"
+Secure-Session-Registration: (ES256);path="/dbsc/registration";challenge="<jti>"
 ```
 
-That value is a small grammar, joined by semicolons with no spaces: the algorithm in parentheses, the `path` where the browser should POST its key, a one-time `challenge` (a JTI — a unique nonce), and the `id` naming the cookie the bound session will use.
+That value is a small grammar, joined by semicolons with no spaces: the algorithm in parentheses, the `path` where the browser should POST its key, and a one-time `challenge` (a JTI — a unique nonce). The header names no cookie — the bound cookie's name comes back later, in the JSON registration response. (The `id` parameter belongs to the *challenge* header, not this one, where it names the session identifier.)
 
 The browser sees that header, generates its hardware keypair, and — on its own, within about a second — POSTs to the path:
 

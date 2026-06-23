@@ -49,7 +49,7 @@ T+0s    User submits /login
             Server: POST /login → 200 OK
             ├── Set-Cookie: __Host-dbsc-reg=<sessionId>; ...
             ├── Set-Cookie: __Host-dbsc-challenge=<jti>; ...
-            ├── Secure-Session-Registration: (ES256);path="/dbsc/registration";challenge="<jti>";id="__Host-dbsc-session"
+            ├── Secure-Session-Registration: (ES256);path="/dbsc/registration";challenge="<jti>"
             └── Sec-Session-Registration: <same value, legacy header name>
 
 T+0.3s  Browser sees the registration header. Generates EC P-256 keypair in

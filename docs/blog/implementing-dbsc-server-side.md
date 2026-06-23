@@ -36,10 +36,10 @@ Legacy inbound names you MUST also accept: `Sec-Session-Response`, `Sec-Session-
 The registration header value is a strict little grammar:
 
 ```
-(<alg>);path="<registrationPath>";challenge="<jti>";id="<boundCookieName>"
+(<alg>);path="<registrationPath>";challenge="<jti>"
 ```
 
-Joined by `;` with **no spaces**, values double-quoted, algorithm in parentheses (`ES256` or `RS256`). `path` is where the browser POSTs its key — not the refresh URL. `id` is the bound cookie's name; Chromium requires it.
+Joined by `;` with **no spaces**, values double-quoted, algorithm in parentheses (`ES256` or `RS256`). `path` is where the browser POSTs its key — not the refresh URL. There is **no `id` parameter** here; the bound cookie's name comes from the JSON registration response (`credentials[].name`). `id` is defined only on `Secure-Session-Challenge`, where it names the session identifier.
 
 ## The proofs
 
