@@ -113,12 +113,19 @@ const dbscStorage = process.env.REDIS_URL
   ? new RedisStorage(new Redis(process.env.REDIS_URL))
   : new MemoryStorage();
 
+// Set DBSC_BOUND=false to run native-only: the /dbsc-bound/* routes don't mount
+// and requireProof() auto-relaxes for a dbsc-tier session (no bound key to prove
+// with). Non-Chromium browsers then get tier "none" instead of "bound". Defaults
+// to the polyfill being on.
+const BOUND_ENABLED = process.env.DBSC_BOUND !== "false";
+
 const KIT_OPTIONS = {
   boundCookieTtl: 60 * 1000,
   refreshGraceMs: 30 * 1000,
   secure: true,
   cookieScope: "host",
   clientPath: "/dbsc-client",
+  bound: BOUND_ENABLED,
 };
 
 const replayCache = new MemoryReplayCache();

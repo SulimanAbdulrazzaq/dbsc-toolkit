@@ -62,7 +62,9 @@ Native DBSC currently ships only on Chromium-based browsers. That leaves Firefox
 
 DBSC Toolkit extends device-bound sessions to those browsers through a Web Crypto polyfill, so every user gets the same per-request guard. Today it's one of the few open-source implementations providing cross-browser DBSC-style protection for Node.js.
 
-It's built in two layers. The protocol — every header, JWS shape, and the storage and cookie contracts — is written up as a **language-neutral spec** in [`spec/`](./spec/), with real test vectors. This Node.js package is the **reference implementation** of that spec. The spec is designed so a conforming server can be built in any ecosystem; ports to Python, PHP, and Java/Keycloak are the natural next step, and the spec plus its [test vectors](./spec/vectors) are what they target. None exist yet — Node.js is the only implementation today.
+It's built in two layers. The protocol — every header, JWS shape, and the storage and cookie contracts — is written up as a **language-neutral spec** in [`spec/`](./spec/), with real test vectors. This Node.js package is the **reference implementation** of that spec. The spec is designed so a conforming server can be built in any ecosystem, and the [test vectors](./spec/vectors) are what each one targets.
+
+**PHP implementation:** [report-uri/dbsc-php](https://github.com/report-uri/dbsc-php) — an independent native-only DBSC server by Scott Helme (Report URI). It was built separately and cross-validates against these same vectors, so the two implementations verify each other's ES256 proofs.
 
 ## Install
 
@@ -264,6 +266,7 @@ The wire protocol is documented as a language-neutral spec in [`spec/`](./spec/)
 ## Docs
 
 - **Protocol spec (language-neutral):** [spec/](./spec/) · [conformance](./spec/09-conformance.md) · [test vectors](./spec/vectors)
+- **Other languages — PHP:** [report-uri/dbsc-php](https://github.com/report-uri/dbsc-php) (independent implementation, cross-validated against these vectors)
 - **Concepts & protocol:** [HOW-IT-WORKS.md](./HOW-IT-WORKS.md)
 - **Getting started:** [docs/quickstart.md](./docs/quickstart.md)
 - **Add to an existing app:** [docs/guide.md](./docs/guide.md)
