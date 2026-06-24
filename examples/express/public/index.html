@@ -256,7 +256,7 @@
 
 <h2>What it defends against</h2>
 <div id="native-warning" class="callout warn" style="display:none;margin-bottom:0.8rem">
-  <strong>Native-only mode (<code translate="no">bound: false</code>).</strong> <code translate="no">requireProof()</code> demands a fresh <em>hardware</em> proof per request (<code translate="no">freshProof</code>): the <strong>theft</strong> button below gets a 403 + <code translate="no">Secure-Session-Challenge</code>, defended by the TPM key via the 403-challenge handshake — no polyfill needed. The <strong>tamper</strong> and <strong>replay</strong> demos are polyfill-specific (they sign and replay the bound-key proof), so they need the polyfill on; native proofs verify key <em>possession</em>, not body integrity. Turn the polyfill on for body-hash binding and the per-request replay cache.
+  <strong>Native-only mode (<code translate="no">bound: false</code>).</strong> <code translate="no">requireProof()</code> demands a fresh <em>hardware</em> proof per request (<code translate="no">freshProof</code>): every guarded route — <code translate="no">/profile</code>, <code translate="no">/payment</code>, and the <strong>theft</strong> button — answers a <em>scripted</em> <code translate="no">fetch()</code> with 403 + <code translate="no">Secure-Session-Challenge</code>. Chrome completes that handshake automatically on a real <em>navigation</em> (re-signs with the TPM key, retries → 200); a scripted fetch isn't driven by Chrome's DBSC engine, so it stops at the 403. So here, 403 on these buttons is the defense working, not a failure. The <strong>tamper</strong> and <strong>replay</strong> demos are polyfill-specific (they sign and replay the bound-key proof), so they need the polyfill on; native proofs verify key <em>possession</em>, not body integrity. Turn the polyfill on to see clean 200s in JS, body-hash binding, and the per-request replay cache.
 </div>
 <p class="section-note">
   Only the routes you put <code translate="no">requireProof()</code> in front of demand the proof header. Here that's <code translate="no">/profile</code> and <code translate="no">/payment</code>. Your real app picks its own list (payments, admin actions, password or email change, 2FA enroll). Unguarded routes like <code translate="no">/me</code> accept the bare cookie like any normal app.
@@ -566,12 +566,13 @@ $("me-btn").onclick = async () => { clearExplain(); show(await plainFetch("GET",
 $("profile-btn").onclick = async () => {
   if (typeof window.boundFetch !== "function") return show({ error: "SDK not loaded yet" });
   const r = await window.boundFetch("/profile", { method: "GET", credentials: "include" });
+  const challenge = r.headers.get("Secure-Session-Challenge") ?? r.headers.get("Sec-Session-Challenge");
   const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
   show({ method: "GET", path: "/profile", status: r.status, body: b });
-  if (r.status === 200 && boundMode === "native") {
-    explain("ok", "Passed on the native binding. With the polyfill off (<code>bound: false</code>), <code>requireProof()</code> relaxes — no per-request proof is sent; the hardware-bound session is trusted. Turn the polyfill on to see per-request proof signing.");
-  } else if (r.status === 200) {
+  if (r.status === 200) {
     explain("ok", "The signed proof header verified against your bound key. <code>requireProof()</code> let the request through.");
+  } else if (r.status === 403 && challenge && boundMode === "native") {
+    explain("ok", "<strong>freshProof handshake (working as designed).</strong> Native-only mode: <code>requireProof()</code> answered this scripted fetch with 403 + <code>Secure-Session-Challenge</code>, demanding a fresh TPM proof. Chrome completes this handshake automatically on a real navigation (re-signs with the hardware key, retries → 200) — but a scripted <code>fetch()</code> isn't driven by Chrome's DBSC engine, so it stops at the 403. That 403 is the per-request defense: no fresh hardware proof, no access. Turn the polyfill on to see a clean 200 here (the bound key signs each fetch in JS).");
   } else {
     explain("bad", "Proof check failed. See body for the reason code.");
   }
@@ -585,19 +586,24 @@ $("pay-btn").onclick = async () => {
     body: JSON.stringify({ amount: 1, to: "merchant" }),
     credentials: "include",
   });
+  const challenge = r.headers.get("Secure-Session-Challenge") ?? r.headers.get("Sec-Session-Challenge");
   const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
   show({ method: "POST", path: "/payment", status: r.status, body: b });
   if (r.status === 200 && boundMode === "native") {
-    explain("ok", "Passed on the native binding. With the polyfill off (<code>bound: false</code>), no per-request proof — so no body hash either. The body-tamper defense below needs the polyfill on; native DBSC binds the session, not the individual request.");
+    explain("ok", "Body hash verified. Native proofs check key <em>possession</em>, not body integrity — the body-tamper defense further down needs the polyfill on. Native DBSC binds the session, the freshProof handshake binds each request to the hardware key.");
   } else if (r.status === 200) {
     explain("ok", "Body hash signed into the proof, verified server-side. An MITM rewriting the amount would have failed the check.");
+  } else if (r.status === 403 && challenge && boundMode === "native") {
+    explain("ok", "<strong>freshProof handshake (working as designed).</strong> Native-only mode: <code>requireProof()</code> answered this scripted POST with 403 + <code>Secure-Session-Challenge</code>. Chrome auto-completes it on a real navigation; a scripted <code>fetch()</code> stops at the 403, which is the per-request defense. Turn the polyfill on for a clean 200 plus body-hash binding.");
+  } else {
+    explain("bad", "Proof check failed. See body for the reason code.");
   }
 };
 
 $("theft-btn").onclick = async () => {
   const r = await plainFetch("GET", "/profile");
   show(r);
-  if (r.status === 403 && boundMode === "native") explain("ok", "<strong>Defended (hardware).</strong> Native-only mode: <code>requireProof({ freshProof })</code> answered the proofless request with 403 + <code>Secure-Session-Challenge</code>. A real Chrome would re-sign it with the TPM key and retry — but a stolen cookie on a machine without that key can't, so it stays 403. Per-request rejection, no polyfill needed.");
+  if (r.status === 403 && boundMode === "native") explain("ok", "<strong>Defended (hardware).</strong> Native-only mode: <code>requireProof({ freshProof })</code> answered the proofless request with 403 + <code>Secure-Session-Challenge</code>. Completing it requires signing the challenge with the TPM key — which lives only on the victim's machine. The attacker has the cookie, not the key, so the handshake can never complete and the request stays 403. Per-request rejection, no polyfill needed.");
   else if (r.status === 403) explain("ok", "<strong>Defended.</strong> The cookie reached the server but no proof header was sent. <code>requireProof()</code> returned 403 <code>PROOF_MISSING</code>. This is what a stolen cookie pasted into a different browser sees.");
   else if (r.status === 401) explain("info", "Sign in first, then click this button.");
   else explain("bad", "Unexpected status. Check the body.");
@@ -729,6 +735,7 @@ $("interceptor-btn").onclick = async () => {
     uninstall();
     show({ note: "interceptor installed → bare fetch /profile → signed automatically", status: r.status, body: b });
     if (r.status === 200) explain("ok", "<code>installFetchInterceptor</code> swapped <code>globalThis.fetch</code> for the matching paths. A bare <code>fetch('/profile')</code> got signed without changing the call site.");
+    else if (r.status === 403 && boundMode === "native") explain("info", "The interceptor signs with the <em>bound</em> (polyfill) key, which native-only mode doesn't have — so the request reaches <code>requireProof()</code> unsigned and gets the freshProof 403. Turn the polyfill on for this demo.");
   } catch (err) {
     show({ error: "installFetchInterceptor threw", message: String(err) });
   }
