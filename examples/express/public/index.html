@@ -112,6 +112,11 @@
   .storage-badge.ephemeral { color: var(--warn); border-color: var(--warn-line); }
   .storage-badge.ephemeral::before { background: var(--warn); }
 
+  /* A multi-line callout, not a pill — the badge radius clips wrapped text. */
+  .callout { display: block; padding: 0.7rem 0.85rem; border-radius: 10px; border: 1px solid var(--line); background: var(--bg-1); color: var(--muted); font-size: 0.88rem; line-height: 1.5; max-width: 70ch; }
+  .callout.warn { border-color: var(--warn-line); }
+  .callout strong { color: var(--ink); font-weight: 600; }
+
   /* Two columns: console feed left, sticky output right. Collapses < 940px to
      one column with a fixed bottom output dock. */
   .layout { display: grid; grid-template-columns: minmax(0,1fr) 392px; gap: 2rem; align-items: start; margin-top: 1.6rem; }
@@ -250,8 +255,8 @@
 </div>
 
 <h2>What it defends against</h2>
-<div id="native-warning" class="storage-badge ephemeral" style="display:none;margin-bottom:0.8rem">
-  <strong>Native-only mode (<code>bound: false</code>).</strong> <code>requireProof()</code> demands a fresh <em>hardware</em> proof per request (<code>freshProof</code>): the <strong>theft</strong> button below still gets a 403, defended by the TPM key via the 403-challenge handshake — no polyfill needed. The <strong>tamper</strong> and <strong>replay</strong> demos are polyfill-specific (they sign and replay the bound-key proof), so they need the polyfill on; native proofs verify key <em>possession</em>, not body integrity. Turn the polyfill on for body-hash binding and the per-request replay cache.
+<div id="native-warning" class="callout warn" style="display:none;margin-bottom:0.8rem">
+  <strong>Native-only mode (<code translate="no">bound: false</code>).</strong> <code translate="no">requireProof()</code> demands a fresh <em>hardware</em> proof per request (<code translate="no">freshProof</code>): the <strong>theft</strong> button below gets a 403 + <code translate="no">Secure-Session-Challenge</code>, defended by the TPM key via the 403-challenge handshake — no polyfill needed. The <strong>tamper</strong> and <strong>replay</strong> demos are polyfill-specific (they sign and replay the bound-key proof), so they need the polyfill on; native proofs verify key <em>possession</em>, not body integrity. Turn the polyfill on for body-hash binding and the per-request replay cache.
 </div>
 <p class="section-note">
   Only the routes you put <code translate="no">requireProof()</code> in front of demand the proof header. Here that's <code translate="no">/profile</code> and <code translate="no">/payment</code>. Your real app picks its own list (payments, admin actions, password or email change, 2FA enroll). Unguarded routes like <code translate="no">/me</code> accept the bare cookie like any normal app.
