@@ -40,6 +40,14 @@ jobs:
         working-directory: packages/better-auth
         run: npm run build
 
+      # dbsc-toolkit is pinned as workspace:* in devDeps for local monorepo
+      # work. pnpm rewrites that on publish; plain `npm publish` rejects the
+      # workspace: protocol (EUNSUPPORTEDPROTOCOL). The dep is dev-only and the
+      # consumer contract is the peerDependency, so drop it before publishing.
+      - name: Strip workspace devDependency before publish
+        working-directory: packages/better-auth
+        run: npm pkg delete devDependencies.dbsc-toolkit
+
       - name: Publish to npm
         working-directory: packages/better-auth
         run: npm publish --access public
