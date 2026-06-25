@@ -265,27 +265,21 @@ describe("bound: false (native-only)", () => {
     expect(reg.headers.get("x-middleware-next")).toBe("1");
   });
 
-  it("requireProof demands a native proof (403 + challenge) for a dbsc session", async () => {
+  it("requireProof auto-relaxes a native dbsc session, still 403s tier:none", async () => {
     const storage = new MemoryStorage();
     const sessionId = "next-native-only";
     const now = Date.now();
     await storage.setSession({ id: sessionId, userId: "u1", tier: "dbsc", createdAt: now, expiresAt: now + 60_000, lastRefreshAt: now });
     await storage.setBoundKey({ sessionId, kind: "native", jwk: { kty: "EC", crv: "P-256", x: "x", y: "y" }, createdAt: now, algorithm: "ES256" });
 
-    // v2.14: native-only runs the freshProof handshake. Pass secure:false so the
-    // challenge cookie name matches the non-secure session cookie in the test.
     const req = reqWith({ url: "http://x/guarded", cookies: { "dbsc-session": sessionId } });
     const session = await getDbscSession(req, storage, { secure: false });
-    const gate = await requireProof(req, session, { storage, bound: false, secure: false });
-    expect(gate.ok).toBe(false);
-    if (!gate.ok) {
-      expect(gate.response.status).toBe(403);
-      expect(gate.response.headers.get("secure-session-challenge")).toBeTruthy();
-    }
+    const gate = await requireProof(req, session, { storage, bound: false });
+    expect(gate.ok).toBe(true);
 
     const bare = reqWith({ url: "http://x/guarded" });
     const bareSession = await getDbscSession(bare, storage, { secure: false });
-    const denied = await requireProof(bare, bareSession, { storage, bound: false, secure: false });
+    const denied = await requireProof(bare, bareSession, { storage, bound: false });
     expect(denied.ok).toBe(false);
   });
 });

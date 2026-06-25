@@ -70,15 +70,14 @@ describe("koa adapter — bound: false", () => {
     }
   });
 
-  it("requireProof demands a native proof (403 + challenge) for a dbsc session", async () => {
+  it("requireProof auto-relaxes a native dbsc session", async () => {
     const sessionId = "sess-koa-native";
     const ctx = await startServer({ bound: false });
     try {
       await seedDbscSession(ctx.storage, sessionId);
-      // v2.14: native-only runs the freshProof handshake instead of relaxing.
       const res = await fetch(`${ctx.url}/guarded`, { headers: { cookie: `dbsc-session=${sessionId}` } });
-      expect(res.status).toBe(403);
-      expect(res.headers.get("secure-session-challenge")).toBeTruthy();
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
     } finally {
       await ctx.close();
     }

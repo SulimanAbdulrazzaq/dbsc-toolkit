@@ -47,17 +47,6 @@ export {
 export type { SkippedEntry, SkippedReason } from "./protocol/headers.js";
 export { handleRegistration } from "./protocol/registration.js";
 export { handleRefresh } from "./protocol/refresh.js";
-export {
-  guardNativeProof,
-  freshProofActive,
-  challengeCookieName,
-  FRESH_PROOF_CHALLENGE_TTL_MS,
-} from "./protocol/native-proof-guard.js";
-export type {
-  NativeProofGuardRequest,
-  NativeProofGuardResult,
-  FreshProofScope,
-} from "./protocol/native-proof-guard.js";
 
 export { handleBoundRegistration } from "./bound/registration.js";
 export { handleBoundRefresh } from "./bound/refresh.js";

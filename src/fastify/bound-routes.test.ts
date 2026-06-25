@@ -373,7 +373,7 @@ describe("bound: false (native-only)", () => {
     }
   });
 
-  it("requireProof() demands a native proof (403 + challenge) and still 403s tier:none", async () => {
+  it("requireProof() auto-relaxes a native dbsc session and still 403s tier:none", async () => {
     const sessionId = "sess-fastify-native";
     const ctx = await start((app) => {
       app.get("/guarded", { preHandler: requireProof() }, async () => ({ ok: true }));
@@ -382,11 +382,8 @@ describe("bound: false (native-only)", () => {
       const now = Date.now();
       await ctx.storage.setSession({ id: sessionId, userId: "u1", tier: "dbsc", createdAt: now, expiresAt: now + 60_000, lastRefreshAt: now });
       await ctx.storage.setBoundKey({ sessionId, kind: "native", jwk: { kty: "EC", crv: "P-256", x: "x", y: "y" }, createdAt: now, algorithm: "ES256" });
-      // v2.14: native-only no longer relaxes — a proofless dbsc request gets the
-      // freshProof handshake (403 + Secure-Session-Challenge).
-      const challenged = await fetch(`${ctx.url}/guarded`, { headers: { cookie: `dbsc-session=${sessionId}` } });
-      expect(challenged.status).toBe(403);
-      expect(challenged.headers.get("secure-session-challenge")).toBeTruthy();
+      const ok = await fetch(`${ctx.url}/guarded`, { headers: { cookie: `dbsc-session=${sessionId}` } });
+      expect(ok.status).toBe(200);
       const denied = await fetch(`${ctx.url}/guarded`);
       expect(denied.status).toBe(403);
     } finally {

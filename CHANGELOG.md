@@ -2,6 +2,27 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.14.1] — 2026-06-25
+
+### Fixed
+
+- **Removed `freshProof` — it relied on a mechanism the DBSC protocol does not
+  provide.** 2.14.0 made `requireProof()` answer a proofless `dbsc` request with `403`
+  + `Secure-Session-Challenge` on the assumption that Chrome would re-sign with the
+  hardware key and retry the same resource request. It does not: per the W3C spec and
+  Chrome's documentation, the proof-of-possession step fires **only** when the
+  short-lived cookie expires and Chrome calls the refresh endpoint — never on an
+  ordinary route like `GET /profile`. The result was that native-only guarded routes
+  returned **403 forever on the user's own device**. The `freshProof` option, the
+  `guardNativeProof` core helper, and the per-adapter handshake wiring are all removed.
+- **Native-only `requireProof()` relaxes a `dbsc` session again (all adapters).** With
+  the polyfill off (`bound: false`), a native `dbsc` session passes on its hardware
+  binding. Native DBSC protects the session by cookie rotation (Chrome re-proves the
+  TPM/Secure Enclave key at the refresh endpoint each `~boundCookieTtl`), so a stolen
+  cookie stops working within one rotation. For per-request rejection of a stolen
+  cookie, run with the polyfill on (the bound key signs every guarded request) or use
+  DPoP for token-bound APIs. The `bound: true` default deployment is unaffected.
+
 ## [2.14.0] — 2026-06-23
 
 ### Added

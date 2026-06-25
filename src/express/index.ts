@@ -50,13 +50,6 @@ export interface DbscInternal {
   boundEnabled: boolean;
   /** v2.8+: optional replay cache; undefined → no replay check (Noop). */
   replayCache?: ProofReplayCache;
-  /**
-   * Cookie scope, so `requireProof({ freshProof })` can write the challenge
-   * cookie with the same name + attributes the refresh route uses (the JTI must
-   * round-trip through `__Host-dbsc-challenge` / `dbsc-challenge`).
-   */
-  cookieScope?: CookieScope;
-  cookieDomain?: string;
 }
 export const DBSC_INTERNAL: unique symbol = Symbol("dbsc-toolkit.express.internal");
 
@@ -697,8 +690,6 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       secure,
       boundEnabled: bound,
       ...(replayCache !== undefined && { replayCache }),
-      ...(cookieScope !== undefined && { cookieScope }),
-      ...(cookieDomain !== undefined && { cookieDomain }),
     } satisfies DbscInternal;
 
     if (sessionId) {

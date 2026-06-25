@@ -197,7 +197,7 @@ All configuration lives on the `dbsc()` plugin:
 
 `sessionTtl` is a deprecated alias for `cookieTtl`.
 
-With `bound: false`, only the two native endpoints mount (the state route still answers `unbound` so a loaded SDK stands down). Guard routes with `requireProof` imported from `dbsc-toolkit/<framework>`, passing `bound: false` to it as well. As of dbsc-toolkit 2.14 native-only is fail-closed: instead of trusting the cookie, `requireProof()` demands a fresh hardware proof per request via the `freshProof` 403-challenge handshake (Chromium re-signs with the TPM/Secure Enclave key and retries; a stolen cookie has no key and 403s). Non-Chromium browsers are unbound and 403. To restore the old relax-to-cookie behavior on a route, pass `requireProof({ freshProof: false })`. Native-only suits managed fleets that can mandate a Chromium build with a hardware key store, not general-audience apps.
+With `bound: false`, only the two native endpoints mount (the state route still answers `unbound` so a loaded SDK stands down). Guard routes with `requireProof` imported from `dbsc-toolkit/<framework>`, passing `bound: false` to it as well. In native-only mode `requireProof()` relaxes a `dbsc` session — the request passes on its hardware binding. Native DBSC has no per-request proof on ordinary routes; it protects the session by cookie rotation, so a stolen cookie stops working within one refresh cycle (`~boundCookieTtl`). Non-Chromium browsers are unbound and 403. For per-request rejection of a stolen cookie, run with the polyfill on (the bound key signs each request). Native-only suits managed fleets that can mandate a Chromium build with a hardware key store, not general-audience apps.
 
 ### Per-route proof tuning
 
@@ -208,19 +208,12 @@ The guard (`requireProof` from `dbsc-toolkit/<framework>`) takes per-route overr
 app.post("/payment", express.raw({ type: "*/*" }),
   requireProof({ timestampWindowMs: 30_000 }), payHandler)
 
-// Force a fresh hardware proof every request on a sensitive route, even with
-// the polyfill on (a TPM roundtrip per request — reserve for the riskiest).
-app.post("/transfer", express.raw({ type: "*/*" }),
-  requireProof({ freshProof: true }), transferHandler)
-
 // Relax on a low-risk read where a bound cookie is enough.
 app.get("/feed", requireProof({ allowDbscWithoutProof: true }), feedHandler)
 ```
 
-Options: `timestampWindowMs` (default 5 min), `freshProof` (2.14+; default on when
-`bound: false`, off when the polyfill is on — the native 403-challenge handshake),
-`allowDbscWithoutProof` (default `false`), `signBody`, and a per-route `replayCache`
-override.
+Options: `timestampWindowMs` (default 5 min), `allowDbscWithoutProof`
+(default `false`), `signBody`, and a per-route `replayCache` override.
 
 ## Database
 

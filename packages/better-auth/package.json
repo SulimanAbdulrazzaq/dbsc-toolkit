@@ -1,6 +1,6 @@
 {
   "name": "@dbsc-toolkit/better-auth",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "DBSC (Device Bound Session Credentials) plugin for Better Auth, powered by dbsc-toolkit.",
   "license": "Apache-2.0",
   "type": "module",

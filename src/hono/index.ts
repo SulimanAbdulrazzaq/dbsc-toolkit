@@ -44,9 +44,6 @@ export interface DbscInternal {
   /** When false, `requireProof()` auto-relaxes the native dbsc tier. */
   boundEnabled: boolean;
   replayCache?: ProofReplayCache;
-  /** Cookie scope, so the freshProof guard writes the challenge cookie correctly. */
-  cookieScope?: CookieScope;
-  cookieDomain?: string;
 }
 export const DBSC_INTERNAL: unique symbol = Symbol("dbsc-toolkit.hono.internal");
 
@@ -581,8 +578,6 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
       secure,
       boundEnabled: bound,
       ...(replayCache !== undefined && { replayCache }),
-      ...(cookieScope !== undefined && { cookieScope }),
-      ...(cookieDomain !== undefined && { cookieDomain }),
     } satisfies DbscInternal;
     c.set("dbsc", dbscSession);
 

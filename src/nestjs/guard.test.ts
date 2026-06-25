@@ -28,31 +28,8 @@ describe("DbscGuard", () => {
     await expect(guard.canActivate(execCtx({ headers: {} }, res))).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  // v2.14: native-only no longer relaxes — a proofless dbsc request runs the
-  // freshProof handshake, setting Secure-Session-Challenge + cookie and throwing
-  // a ForbiddenException (Nest emits the 403, keeping the pre-set headers).
-  it("demands a native proof (challenge + 403) for a native dbsc session", async () => {
+  it("auto-relaxes a native dbsc session when the polyfill is disabled", async () => {
     const guard = new DbscGuard();
-    const headers: Record<string, string> = {};
-    const cookies: Array<[string, string]> = [];
-    const res = {
-      locals: {
-        dbsc: { sessionId: "s1", tier: "dbsc", skipped: [] },
-        [DBSC_INTERNAL]: { storage: new MemoryStorage(), secure: false, boundEnabled: false },
-      },
-      setHeader(name: string, value: string) { headers[name] = value; },
-      cookie(name: string, value: string) { cookies.push([name, value]); },
-    };
-    const req = { headers: {}, method: "GET", path: "/account", cookies: {} };
-    await expect(guard.canActivate(execCtx(req, res))).rejects.toBeInstanceOf(ForbiddenException);
-    expect(headers["Secure-Session-Challenge"]).toBeTruthy();
-    expect(cookies.some(([n]) => n.endsWith("dbsc-challenge"))).toBe(true);
-  });
-
-  it("relaxes a native dbsc session with freshProof:false (escape hatch)", async () => {
-    const { createDbscGuard } = await import("./index.js");
-    const Guard = createDbscGuard({ freshProof: false });
-    const guard = new Guard();
     const res = {
       locals: {
         dbsc: { sessionId: "s1", tier: "dbsc", skipped: [] },

@@ -73,34 +73,15 @@ describe("bound: false (native-only)", () => {
     }
   });
 
-  // v2.14: native-only no longer relaxes by default — requireProof() demands a
-  // fresh hardware proof via the 403-challenge handshake (freshProof on when the
-  // polyfill is off). A bare dbsc request gets 403 + Secure-Session-Challenge.
-  it("requireProof() demands a native proof (403 + challenge) when bound is off", async () => {
+  it("requireProof() auto-relaxes: a native dbsc session passes without a proof header", async () => {
     const sessionId = "sess-native-only";
     const ctx = await startServer((app) => {
       app.get("/guarded", requireProof(), (_req, res) => res.json({ ok: true }));
     }, { bound: false });
     try {
       await seedDbscSession(ctx.storage, sessionId);
-      const res = await fetch(`${ctx.url}/guarded`, {
-        headers: { cookie: `dbsc-session=${sessionId}` },
-      });
-      expect(res.status).toBe(403);
-      expect(res.headers.get("secure-session-challenge")).toBeTruthy();
-    } finally {
-      await ctx.close();
-    }
-  });
-
-  // The freshProof:false escape hatch keeps the old relax behavior.
-  it("requireProof({ freshProof: false }) relaxes a native dbsc session", async () => {
-    const sessionId = "sess-native-relax";
-    const ctx = await startServer((app) => {
-      app.get("/guarded", requireProof({ freshProof: false }), (_req, res) => res.json({ ok: true }));
-    }, { bound: false });
-    try {
-      await seedDbscSession(ctx.storage, sessionId);
+      // The middleware reads the session id from the bound cookie (secure:false
+      // → "dbsc-session"); send it on the request so tier resolves to "dbsc".
       const res = await fetch(`${ctx.url}/guarded`, {
         headers: { cookie: `dbsc-session=${sessionId}` },
       });
@@ -124,13 +105,12 @@ describe("bound: false (native-only)", () => {
   });
 });
 
-// Regression: requireProof() must resolve its mode PER REQUEST, not memoize the
-// first request's boundEnabled. Two kits (bound + native) share one storage and
-// are dispatched by a header. The distinguishing signal: in native mode the guard
-// runs the freshProof handshake (403 + Secure-Session-Challenge), while in bound
-// mode it runs the bound-proof path (403 MISSING_PROOF, no challenge header). If
-// the decision leaked, both would behave the same.
-describe("requireProof() per-request mode (two-kit dispatch)", () => {
+// Regression: requireProof() must resolve the auto-relax decision PER REQUEST,
+// not memoize the first request's boundEnabled. Two kits (bound + native) sharing
+// one storage are dispatched by a header; a single requireProof() guard on the
+// parent app must 403 a dbsc session in bound mode but pass it in native mode,
+// even when the requests interleave on the same guard instance.
+describe("requireProof() per-request relax (two-kit dispatch)", () => {
   it("does not leak the first request's boundEnabled across requests", async () => {
     const storage = new MemoryStorage();
     const sessionId = "two-kit-dbsc";
@@ -163,19 +143,15 @@ describe("requireProof() per-request mode (two-kit dispatch)", () => {
     const url = `http://127.0.0.1:${port}/guarded`;
     const cookie = `dbsc-session=${sessionId}`;
     try {
-      // Bound first: bound-proof path → 403 MISSING_PROOF, no challenge header.
+      // Bound first: a dbsc session with no proof must be rejected.
       const a = await fetch(url, { headers: { cookie } });
       expect(a.status).toBe(403);
-      expect(a.headers.get("secure-session-challenge")).toBeNull();
-      // Native: freshProof handshake → 403 + Secure-Session-Challenge.
+      // Native: same session, no proof, must relax through.
       const b = await fetch(url, { headers: { cookie, "x-mode": "native" } });
-      expect(b.status).toBe(403);
-      expect(b.headers.get("secure-session-challenge")).toBeTruthy();
-      // Bound again: must be the bound-proof path again — the native handshake
-      // mode must not have stuck (no challenge header).
+      expect(b.status).toBe(200);
+      // Bound again: must still reject — the native pass must not have stuck.
       const c = await fetch(url, { headers: { cookie } });
       expect(c.status).toBe(403);
-      expect(c.headers.get("secure-session-challenge")).toBeNull();
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

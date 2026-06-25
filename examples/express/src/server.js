@@ -118,9 +118,9 @@ const dbscStorage = process.env.REDIS_URL
 // are mounted side by side: the bound one on the standard paths, and a
 // native-only one namespaced under /native. Per request, pickKit() chooses which
 // kit's middleware/guard runs, based on the mode cookie. In native-only mode the
-// /dbsc-bound/* routes are absent and requireProof() defaults to freshProof: a
-// proofless dbsc session gets 403 + Secure-Session-Challenge, Chrome re-signs
-// with the TPM key and retries; non-Chromium browsers read tier "none" and 403.
+// /dbsc-bound/* routes are absent and requireProof() relaxes a dbsc session (no
+// bound key to prove with — native protection is cookie rotation, not per
+// request); non-Chromium browsers then read tier "none".
 const DEFAULT_BOUND = process.env.DBSC_BOUND !== "false";
 
 const KIT_OPTIONS = {
@@ -294,7 +294,7 @@ app.get("/profile", authLimiter, requireLogin, requireProof(), (req, res) => {
     loginMode: req.demoUser.mode,
     securityLevel: `device-bound (tier: ${res.locals.dbsc.tier})`,
     note: native
-      ? "Native-only mode (freshProof): this response means a fresh hardware proof was verified. requireProof() answers a proofless request with 403 + Secure-Session-Challenge; Chrome re-signs it with the TPM key and retries. A stolen cookie with no key can't, so it stays 403."
+      ? "Native-only mode: no per-request proof was checked. A stolen cookie works until Chrome's next refresh fails (session-level, ~boundCookieTtl), not per request. Enable the polyfill for per-request rejection."
       : "Per-request proof verified. A stolen cookie replayed without the bound key's signature is rejected immediately.",
   });
 });

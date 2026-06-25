@@ -2,64 +2,11 @@ import type { NextRequest } from "next/server.js";
 import { NextResponse } from "next/server.js";
 import {
   noBindingReason,
-  guardNativeProof,
-  freshProofActive,
-  challengeCookieName,
-  FRESH_PROOF_CHALLENGE_TTL_MS,
-  readSessionResponseHeader,
-  buildChallengeHeader,
-  parseCookieHeader,
-  CHALLENGE_HEADER,
-  LEGACY_CHALLENGE_HEADER,
   type RequireProofOptions,
   type ProtectionTier,
   type SkippedEntry,
 } from "../core/index.js";
 import { requireBoundProof } from "./proof.js";
-
-async function nativeFreshProofResult(
-  req: NextRequest,
-  sessionId: string,
-  opts: RequireProofOptions,
-): Promise<RequireProofResult> {
-  const scope = {
-    secure: opts.secure ?? true,
-    ...(opts.cookieScope !== undefined && { cookieScope: opts.cookieScope }),
-    ...(opts.cookieDomain !== undefined && { cookieDomain: opts.cookieDomain }),
-  };
-  const cookieName = challengeCookieName(scope);
-  const responseHeader = readSessionResponseHeader(
-    Object.fromEntries(req.headers) as Record<string, string | string[] | undefined>,
-  );
-  const expectedJti = parseCookieHeader(req.headers.get("cookie") ?? undefined)[cookieName];
-
-  const result = await guardNativeProof(
-    { sessionId, secSessionResponseHeader: responseHeader, expectedJti },
-    opts.storage!,
-  );
-
-  if (result.kind === "pass") return { ok: true };
-  if (result.kind === "reject") {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: result.error, code: result.code }, { status: 403 }),
-    };
-  }
-  const header = buildChallengeHeader(result.jti, sessionId);
-  const response = new NextResponse(null, {
-    status: 403,
-    headers: { [CHALLENGE_HEADER]: header, [LEGACY_CHALLENGE_HEADER]: header },
-  });
-  response.cookies.set(cookieName, result.jti, {
-    httpOnly: true,
-    secure: scope.secure,
-    sameSite: "lax",
-    path: "/",
-    maxAge: FRESH_PROOF_CHALLENGE_TTL_MS / 1000,
-    ...(scope.cookieDomain !== undefined && { domain: scope.cookieDomain }),
-  });
-  return { ok: false, response };
-}
 
 export interface RequireProofSession {
   sessionId: string | null;
@@ -110,18 +57,6 @@ export async function requireProof(
       ),
     };
   }
-  if (
-    session.sessionId &&
-    freshProofActive({
-      tier: session.tier,
-      boundEnabled: opts.bound,
-      freshProof: opts.freshProof,
-      allowDbscWithoutProof: opts.allowDbscWithoutProof,
-    })
-  ) {
-    return nativeFreshProofResult(req, session.sessionId, opts);
-  }
-
   // bound polyfill off → no bound key exists → auto-relax the dbsc tier.
   const allowDbscWithoutProof =
     opts.allowDbscWithoutProof ?? (opts.bound === false ? true : undefined);
