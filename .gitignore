@@ -65,3 +65,4 @@ docs/dbsc-debugging-lessons.md
 ~$*
 .history/
 .tmp/
+.github/hooks/impeccable.json 
