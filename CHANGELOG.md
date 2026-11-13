@@ -2,6 +2,44 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.15.0] — 2026-11-13
+
+A security release. It closes several ways a stolen session cookie could still be used, two remote crashes, and a set of adapter bugs found in a full review and in a private report. Upgrade both `dbsc-toolkit` and `@dbsc-toolkit/better-auth` (1.3.0). A GitHub security advisory with the details accompanies this release.
+
+### Security
+
+- **Bind the device to your login.** `requireProof()` only proved that a request came from *some* bound device, so a stolen app cookie sent next to the attacker's own DBSC session passed. New `expectSessionId` / `expectUserId` options reject a mismatch with 403 `SESSION_MISMATCH`. Set one on every guarded route; Better Auth users get `expectBetterAuthSession(auth)`.
+- **Polyfill key takeover.** A stolen session cookie was enough to register an attacker's polyfill key on a session that had none yet, including native Chromium sessions before co-registration. Polyfill keys now register only within `boundRegistrationWindowMs` (default 5 min) of the binding's start, and key writes are insert-if-absent.
+- **Better Auth plugin.** The protocol routes trusted the DBSC id (the Better Auth session id, which is not a secret) from a cookie alone. They now require the caller's Better Auth session, return the same 401 for unknown and foreign ids, and the binding ends with its Better Auth session (sign-out, revoke, ban, expiry). Reported by Jonas Strassel.
+- **Remote crashes.** A malformed proof signature crashed Express servers (unhandled rejection); the node, Koa and Electron adapters crashed on a JSON `null` body or a malformed `Host` header. Express guards now return their promise, signatures are validated as base64url, and the node adapter reads input defensively with size caps.
+- **Replay.** The replay cache key included bits of the ECDSA `s` value, so a re-encoded signature replayed once more; it is now keyed on `r`. Replay defense is on by default (`MemoryReplayCache`).
+- **DPoP.** A `Bearer` token on a DPoP-guarded route is rejected, and the new `origin` option stops `htu` from being checked against the client-supplied Host.
+- **Logout.** Express `revoke()` overwrote the app's own `Set-Cookie` (the app session cookie survived logout); Next.js and SvelteKit did not clear prefixed or Domain cookies.
+
+### Fixed
+
+- Express: routers mounted under a prefix always failed proof verification.
+- Next.js: `basePath` and i18n broke route matching and proofs.
+- Hono: every successful native registration and refresh returned 500 with `secure: true`.
+- SvelteKit: `autoBind` and `registrationCookieTtl` were ignored.
+- Native refresh for an unknown session returns 401 and no longer writes a challenge for an arbitrary id; native registration requires an existing session.
+- `bind()` starts a clean binding, which fixes re-login on a deterministic (JWT-mode) session id.
+- State routes report `dbsc` as soon as a native key exists, in every adapter.
+- Guards reject a parsed body when the body hash is required instead of hashing it as empty; NestJS reads `req.rawBody`.
+- Rate-limiter keys: Next.js uses `x-real-ip` / the last forwarded hop, Hono trusts `cf-connecting-ip` only on Workers, node/Koa accept `ipExtractor`.
+- Client: refresh applies the server clock offset, retries with backoff, and reports `local-key-missing` when site data was cleared.
+- Redis keys expire with their session; Postgres gains `deleteExpired()`; telemetry reports the real key algorithm; integer `Max-Age` everywhere.
+
+### Added
+
+- `signQuery` on `requireProof()` and `wrapFetch()` to cover the query string.
+- `StorageAdapter.setBoundKeyIfAbsent?`, `startBinding`, Electron `result.guard()`.
+
+### Upgrade notes
+
+- Load the client SDK on the page users reach after sign-in, so the polyfill key registers inside the 5-minute window. Sessions that miss it stay unbound until the next sign-in.
+- Spec change for other implementations: the per-request replay key is now `<sessionId>.<ts>.<base64url(r)>` (spec 04), and refresh for an unknown session is 401 (spec 02).
+
 ## [2.14.1] — 2026-06-25
 
 ### Fixed

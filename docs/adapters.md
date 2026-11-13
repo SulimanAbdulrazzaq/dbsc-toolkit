@@ -107,6 +107,8 @@ The 1.3.x split keys (`c.get("dbscSessionId")`, `c.get("dbscTier")`, `c.get("dbs
 
 Two pieces. The middleware mounts protocol routes globally; `getDbscSession` reads tier inside individual handlers.
 
+With `basePath` (or i18n routing), configure the protocol paths with the prefix included, e.g. `registrationPath: "/app/dbsc/registration"`. Routes are matched, and proofs verified, against the full request path.
+
 `lib/dbsc.ts` — build the kit once and share it:
 
 ```ts
@@ -212,6 +214,8 @@ app.use(requireProof()); // place before the protected handler
 ```
 
 The guard reads the raw body from `ctx.request.rawBody` when a body parser populated it, else from the socket.
+
+**Mount `dbsc` before any body parser.** The bound protocol routes read the JSON body from the raw request stream. A parser that runs first (`koa-bodyparser`, `@koa/bodyparser`) consumes the stream, and `/dbsc-bound/registration` and `/dbsc-bound/refresh` then answer 400 forever. The same applies to the raw `node:http` adapter: call the handler before anything reads `req`. Express is the opposite: `install()` mounts its own JSON parser on the two bound routes.
 
 ## SvelteKit
 

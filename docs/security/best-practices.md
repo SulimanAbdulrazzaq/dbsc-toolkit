@@ -99,6 +99,24 @@ Set in adapter options:
 createDbsc({ storage, boundCookieTtl: 5 * 60 * 1000 }).install(app);
 ```
 
+## Tie the binding to your login
+
+This one is easy to miss, and before 2.15 nothing in the docs said it. `requireProof()` checks that the request came from a device bound to *some* DBSC session. It does not know which user your app authenticated from its own session cookie or token. So an attacker with an account of their own can steal a victim's app cookie, send it next to their **own** DBSC cookie, sign with their **own** key, and pass.
+
+Close it on every guarded route:
+
+```ts
+// The session id you passed to bind() for this login.
+app.post("/payment", express.raw({ type: "*/*" }),
+  dbsc.requireProof({ expectSessionId: (req) => req.session?.id }),
+  payHandler);
+
+// JWT apps without a session id: compare the user instead.
+dbsc.requireProof({ expectUserId: (req) => req.user?.sub });
+```
+
+With Better Auth, use `expectBetterAuthSession(auth)` from `@dbsc-toolkit/better-auth`.
+
 ## Enforcing the tier — the part that actually defends
 
 The library negotiates a tier and exposes it on the request. **The tier is information, not a gate.** Your application code is what decides whether the request proceeds, and writing that code is the step where DBSC starts protecting anything.
@@ -268,6 +286,12 @@ Important to communicate to your team and users:
 - **SOC 2**: The `dbsc_audit_log` table satisfies the access logging requirement for authentication events.
 
 ## Pre-production checklist
+
+- Every `requireProof()` route sets `expectSessionId` or `expectUserId`.
+- The client SDK runs on the page users land on after sign-in, so the polyfill key registers inside `boundRegistrationWindowMs`.
+- More than one instance: `RedisReplayCache`, not the in-memory default.
+- DPoP guards set `origin`.
+- Postgres: `deleteExpired()` runs on a schedule.
 
 - [ ] HTTPS only, HSTS enabled with preload
 - [ ] `__Host-` cookies (default — verify in DevTools)

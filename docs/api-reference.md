@@ -180,10 +180,13 @@ Produces a stable, deterministic, opaque `sessionId` for `bindSession()` when th
 ### Route protection
 
 ```ts
-interface RequireProofOptions {
+interface RequireProofOptions<Req = unknown> {
   allowDbscWithoutProof?: boolean;  // v2.7+ default: false — every tier must carry a proof header
   timestampWindowMs?: number;       // accepted proof timestamp window, ms
   storage?: StorageAdapter;         // override; default = the adapter's storage
+  expectSessionId?: (req: Req) => string | null | undefined | Promise<string | null | undefined>; // 2.15+
+  expectUserId?: (req: Req) => string | null | undefined | Promise<string | null | undefined>;    // 2.15+
+  signQuery?: boolean;              // 2.15+: include the query string in the signed path
 }
 
 function noBindingReason(skipped?: SkippedEntry[]): string;
@@ -203,6 +206,10 @@ not per request; there is no protocol way to force a hardware proof on an
 ordinary resource request. For true per-request rejection of a stolen cookie,
 run with the polyfill on (the bound key signs each request) or use DPoP for
 token-bound APIs.
+
+**Tie the proof to your login (2.15+).** `requireProof()` on its own proves that a request came from *a* bound device, not from the device bound to the user your app authenticated. Pass `expectSessionId` (return the session id you gave `bind()`) or `expectUserId` (return the `userId`) on every guarded route where the app identifies the user from its own cookie or token. A mismatch, or a hook that returns nothing, is a 403 with `code: "SESSION_MISMATCH"`. Skipping this lets an attacker pair a stolen app cookie with their own bound session.
+
+`signQuery: true` covers the query string; the client must sign it too (`wrapFetch({ signQuery: true })`). Without it, a captured proof can be replayed with different query parameters inside the timestamp window, so keep state-changing input out of the query or turn it on.
 
 `RequireProofOptions` is the (entirely optional) option shape of every adapter's `requireProof()`. `noBindingReason` produces the quota-aware human reason used in a `tier: "none"` rejection — exported for custom adapters.
 
@@ -859,3 +866,23 @@ Run the included migration once before first use:
 ```sh
 psql $DATABASE_URL < node_modules/dbsc-toolkit/migrations/001_initial.sql
 ```
+
+## Added in 2.15.0
+
+Middleware options (every adapter):
+
+| Option | Default | Meaning |
+|---|---|---|
+| `boundRegistrationWindowMs` | `300000` | How long after `bind()` (or after Chrome's native registration) a polyfill key may still register. Later attempts fail with `REGISTRATION_WINDOW_CLOSED`; the user signs in again. |
+| `replayCache` | `new MemoryReplayCache()` | Replay defense is now on by default. Use `RedisReplayCache` with more than one instance. |
+| `ipExtractor` (node, Koa, Electron) | socket address | Rate-limiter key. Behind a reverse proxy, return the client IP the proxy reports. |
+
+DPoP guards accept `origin` (`requireDpop({ origin: "https://api.example.com", getBoundJkt })`). The `htu` claim is then checked against that origin instead of the request's Host header. Set it in production. A `Bearer` Authorization header on a DPoP-guarded route is now rejected (`DPOP_TOKEN_BINDING_REQUIRED`) unless `requireTokenBinding: false`.
+
+Core exports: `startBinding(storage, { sessionId, userId, sessionTtlMs })` (what every `bindSession()` now calls: it drops old keys and resets the row), `sessionBindingMatches`, `proofTarget`, `proofBodyBytes`, `readJsonObject`. Error codes: `SESSION_MISMATCH`, `REGISTRATION_WINDOW_CLOSED`.
+
+Storage: `StorageAdapter.setBoundKeyIfAbsent?(key)` is optional; when present, registration uses it so two racing registrations cannot overwrite each other. Memory, Redis and Postgres implement it. `PostgresStorage.deleteExpired()` removes expired sessions and challenges; run it on a schedule.
+
+Client: `wrapFetch({ signQuery })`, `installFetchInterceptor({ signQuery })`. `initBoundDbsc()` can now resolve with `skipReason: "local-key-missing"` when the server holds a polyfill key this browser lost (site data cleared). Treat it as signed out.
+
+Electron: `protocolRoute(request)` results carry `guard(kit.requireProof())`, which resolves `null` when the request may proceed or the error `Response` to return.

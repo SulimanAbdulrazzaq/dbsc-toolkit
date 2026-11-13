@@ -98,10 +98,19 @@ Server steps (ordered, normative):
    to this session).
 5. Verify the signature over the bare JTI against `publicKey`; failure →
    `SIGNATURE_INVALID`.
-6. The session MUST NOT already have a `bound` key (`SESSION_ALREADY_REGISTERED`).
-7. **Atomically** consume the challenge.
-8. Store `{ sessionId, kind: "bound", jwk: publicKey, algorithm: "ES256" }`.
-9. **Tier:** if the session also has a `native` key, leave the tier `dbsc` (the
+6. The session MUST exist (`SESSION_NOT_FOUND`) and MUST NOT already have a
+   `bound` key (`SESSION_ALREADY_REGISTERED`).
+7. **Registration window.** The request MUST arrive within the registration
+   window (default 5 minutes) of the binding's start: the `native` key's
+   `createdAt` when one exists, otherwise the session's `createdAt` (the moment
+   the binding was started at login). Later → `REGISTRATION_WINDOW_CLOSED`.
+   Without a window, anyone holding the session cookie could attach their own
+   key to a session that has none yet and pass per-request proof checks.
+8. **Atomically** consume the challenge.
+9. Store `{ sessionId, kind: "bound", jwk: publicKey, algorithm: "ES256" }` only
+   if no `bound` key exists (an atomic insert-if-absent where the store offers
+   one; see 06).
+10. **Tier:** if the session also has a `native` key, leave the tier `dbsc` (the
    native path stays authoritative); otherwise set it to `bound`. Update
    `lastRefreshAt`.
 

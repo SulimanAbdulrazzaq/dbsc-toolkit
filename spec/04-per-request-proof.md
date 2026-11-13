@@ -53,7 +53,10 @@ With body signing:
 ```
 
 - `<METHOD>` is the HTTP method **uppercased** (`POST`, `GET`, …).
-- `<path>` is the request path the proof is scoped to.
+- `<path>` is the full request pathname as the client sees it (including any
+  mount prefix or base path). When both sides opt into query signing, it is the
+  pathname followed by the query string (`/transfer?to=x`); otherwise the query
+  is not covered, and a server SHOULD NOT take state-changing input from it.
 - `<ts>` is the same decimal-string timestamp as the header.
 - `<bh>` is `base64url(sha256(<raw request body bytes>))`.
 - Fields are joined by single `.` characters.
@@ -63,7 +66,9 @@ Samples (both with and without body): [`vectors/per-request-proof.json`](./vecto
 ## Verification (ordered, normative)
 
 1. The proof header MUST be present, else `MISSING_PROOF`.
-2. Parse it under the rules above; malformed → `MALFORMED_PROOF`.
+2. Parse it under the rules above; malformed → `MALFORMED_PROOF`. `sig` and
+   `bh` MUST be base64url (`[A-Za-z0-9_-]`); anything else is malformed, not a
+   verification error.
 3. `ts` MUST be within the timestamp window (default ±5 minutes) of server time,
    else `SIGNATURE_INVALID`.
 4. Load the session's `bound` key; missing → `KEY_NOT_FOUND_BOUND`.
@@ -86,7 +91,11 @@ replay the *exact bytes* until the window closes. A server MAY add a replay
 cache to reject that.
 
 - After the signature verifies, compute the key
-  `"<sessionId>.<ts>.<first 43 chars of sig>"`.
+  `"<sessionId>.<ts>.<base64url(r)>"`, where `r` is the first 32 bytes of the
+  decoded signature. Key on `r` only: ECDSA signatures are malleable, and
+  `(r, n - s)` verifies as well as `(r, s)`, so any key that includes bits of
+  `s` lets a captured proof be replayed once more. (Versions before 2.15 used
+  the first 43 characters of `sig`, which include two bits of `s`.)
 - Record it with a TTL of **twice** the timestamp window (a proof at the future
   edge of the window must remain remembered until the past edge closes).
 - If the key was already present, reject the request with `PROOF_REPLAY`.

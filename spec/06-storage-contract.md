@@ -65,6 +65,9 @@ given in language-neutral form.
 - `getBoundKey(sessionId, kind?) -> BoundKey | null` — when `kind` is omitted,
   return the `native` key if one exists, otherwise the `bound` key
 - `setBoundKey(key) -> void` — create or replace, keyed by `(sessionId, kind)`
+- `setBoundKeyIfAbsent(key) -> boolean` — OPTIONAL. Store only if no key of that
+  kind exists; return `false` otherwise. Registration uses it when present so
+  two racing registrations cannot overwrite each other.
 - `deleteBoundKey(sessionId, kind?) -> void`
 
 **Challenges**
@@ -100,7 +103,8 @@ express this MUST serialize challenge consumption some other way.
 ## Expiry and cleanup
 
 Expired challenges and sessions MAY be swept lazily (rejected on read when past
-`expiresAt`) or by a background sweep. A server MUST reject an expired challenge
+`expiresAt`) or by a background sweep. Bound keys SHOULD NOT outlive their
+session: delete them with it, or give them the session's expiry. A server MUST reject an expired challenge
 (`CHALLENGE_EXPIRED`) even if it has not been swept yet.
 
 ## Persistence

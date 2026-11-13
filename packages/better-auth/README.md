@@ -80,6 +80,7 @@ The protocol is framework-agnostic, but the per-request guard runs on **your** r
 
 ```ts
 import { dbsc as dbscMiddleware, requireProof } from "dbsc-toolkit/express"
+import { expectBetterAuthSession } from "@dbsc-toolkit/better-auth"
 import { createBetterAuthStorageAdapter } from "@dbsc-toolkit/better-auth/internal"
 
 const ctx = await auth.$context
@@ -88,8 +89,13 @@ const storage = createBetterAuthStorageAdapter(ctx.adapter, ctx.internalAdapter)
 // Reads the bound cookie + sets the per-request tier on res.locals.dbsc.
 app.use(dbscMiddleware({ storage, secure: true }))
 
-app.get("/profile", requireProof(), profileHandler)
-app.post("/payment", express.raw({ type: "*/*" }), requireProof({ timestampWindowMs: 30_000 }), payHandler)
+// expectSessionId ties the device binding to the Better Auth session on the
+// request. Without it, a stolen Better Auth cookie sent next to the attacker's
+// own DBSC cookie would pass.
+const sameSession = expectBetterAuthSession(auth)
+
+app.get("/profile", requireProof({ expectSessionId: sameSession }), profileHandler)
+app.post("/payment", express.raw({ type: "*/*" }), requireProof({ expectSessionId: sameSession, timestampWindowMs: 30_000 }), payHandler)
 ```
 
 `requireProof()` returns 403 before your handler runs if the per-request proof is missing or invalid. Fastify, Hono, and Next.js have the matching guard in `dbsc-toolkit/fastify`, `dbsc-toolkit/hono`, `dbsc-toolkit/nextjs`.

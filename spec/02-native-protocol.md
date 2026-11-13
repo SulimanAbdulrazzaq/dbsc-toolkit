@@ -149,6 +149,10 @@ Sample: [`vectors/refresh.json`](./vectors/refresh.json).
 The session identifier comes from the `Sec-Secure-Session-Id` header, **not**
 from a cookie (the bound cookie is gone at this point).
 
+0. If the session does not exist (unknown id, expired, revoked), respond **401**
+   with no challenge and write nothing. The id comes from a client header, so a
+   challenge must not be minted for arbitrary values, and the 401 ends
+   Chromium's binding for a session the server no longer knows.
 1. If `Secure-Session-Response` is absent, the request is the first leg: respond
    **403** with a fresh `Secure-Session-Challenge` header and a challenge cookie.
    The status MUST be 403. Chromium ignores 401 and the session dies.
@@ -170,7 +174,7 @@ from a cookie (the bound cookie is gone at this point).
 | Status | When | Chromium's reaction |
 |---|---|---|
 | 403 + `Secure-Session-Challenge` | Refresh needs proof | Restarts refresh with the JWS |
-| 401 (+ anything) | — | **Ignored — session dies.** Never use 401 here. |
+| 401 (+ anything) | Refresh for a session the server does not know (step 0) | **Session dies.** Never use it for a live session that needs proof. |
 | 200 + JSON config | Registration or refresh succeeded | Updates the session, replays deferred request |
 | 200 **without** JSON config (e.g. 204) | — | **Treated as opt-out — session dies after one cycle.** The JSON body is mandatory. |
 
