@@ -1,4 +1,15 @@
-import type { Handle, RequestEvent } from "@sveltejs/kit";
+import type { RequestEvent } from "@sveltejs/kit";
+
+/**
+ * The server `handle` hook shape. SvelteKit 3 moved its `Handle` type to
+ * `@sveltejs/kit/hooks` while SvelteKit 2 exports it from `@sveltejs/kit`; a
+ * structural type works with both and is assignable to either version's
+ * `Handle`.
+ */
+export type DbscHandle = (input: {
+  event: RequestEvent;
+  resolve: (event: RequestEvent) => Response | Promise<Response>;
+}) => Promise<Response>;
 import {
   handleRegistration,
   handleRefresh,
@@ -157,7 +168,7 @@ export async function bindSession(
  * It answers the DBSC protocol routes itself and, for every other request,
  * resolves the session onto `event.locals.dbsc`.
  */
-export function dbscHandle(opts: DbscSvelteKitOptions): Handle {
+export function dbscHandle(opts: DbscSvelteKitOptions): DbscHandle {
   const {
     storage,
     registrationPath = "/dbsc/registration",

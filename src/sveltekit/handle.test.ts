@@ -1,6 +1,14 @@
 import { describe, it, expect } from "vitest";
 import type { RequestEvent } from "@sveltejs/kit";
-import { dbscHandle } from "./index.js";
+
+// The tested SvelteKit (3.x) requires Node 22.17+; CI also covers Node 20,
+// where the adapter is only usable with SvelteKit 2. Load it lazily so an
+// unsupported runtime skips these tests instead of failing on import.
+const [nodeMajor = 0, nodeMinor = 0] = process.versions.node.split(".").map(Number);
+const kitRuns = nodeMajor > 22 || (nodeMajor === 22 && nodeMinor >= 17);
+const { dbscHandle } = kitRuns
+  ? await import("./index.js")
+  : ({} as typeof import("./index.js"));
 import { MemoryStorage } from "../core/testing/memory-storage-stub.js";
 
 function mockEvent(method: string, path: string, cookies: Record<string, string> = {}): RequestEvent {
@@ -26,7 +34,7 @@ function mockEvent(method: string, path: string, cookies: Record<string, string>
 
 const downstream = async () => new Response("downstream", { status: 299 });
 
-describe("sveltekit dbscHandle", () => {
+describe.skipIf(!kitRuns)("sveltekit dbscHandle", () => {
   it("answers the bound state route", async () => {
     const handle = dbscHandle({ storage: new MemoryStorage(), secure: false });
     const res = await handle({ event: mockEvent("GET", "/dbsc-bound/state"), resolve: downstream });
@@ -42,7 +50,7 @@ describe("sveltekit dbscHandle", () => {
   });
 });
 
-describe("sveltekit dbscHandle — bound: false", () => {
+describe.skipIf(!kitRuns)("sveltekit dbscHandle — bound: false", () => {
   it("state answers unbound and the bound challenge route falls through", async () => {
     const handle = dbscHandle({ storage: new MemoryStorage(), secure: false, bound: false });
     const state = await handle({ event: mockEvent("GET", "/dbsc-bound/state"), resolve: downstream });
