@@ -47,6 +47,13 @@ export class MemoryStorage implements StorageAdapter {
     this.keys.set(`${key.sessionId}:${key.kind}`, key);
   }
 
+  async setBoundKeyIfAbsent(key: BoundKey): Promise<boolean> {
+    const slot = `${key.sessionId}:${key.kind}`;
+    if (this.keys.has(slot)) return false;
+    this.keys.set(slot, key);
+    return true;
+  }
+
   async deleteBoundKey(sessionId: string, kind?: BoundKeyKind): Promise<void> {
     if (kind) {
       this.keys.delete(`${sessionId}:${kind}`);

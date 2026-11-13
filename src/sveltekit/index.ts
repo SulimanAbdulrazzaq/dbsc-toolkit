@@ -3,6 +3,7 @@ import {
   handleRegistration,
   handleRefresh,
   handleBoundRegistration,
+  startBinding,
   handleBoundRefresh,
   issueChallenge,
   buildRegistrationHeader,
@@ -135,18 +136,7 @@ export async function bindSession(
   const { domain } = resolveCookieScope(scope);
   const COOKIES = cookieNames(scope);
 
-  const existing = await storage.getSession(sessionId);
-  const now = Date.now();
-  if (!existing) {
-    await storage.setSession({
-      id: sessionId,
-      userId: opts.userId,
-      tier: "none",
-      createdAt: now,
-      expiresAt: now + sessionTtl,
-      lastRefreshAt: 0,
-    });
-  }
+  await startBinding(storage, { sessionId, userId: opts.userId, sessionTtlMs: sessionTtl });
 
   const challenge = await issueChallenge(sessionId, storage);
   const regHeader = buildRegistrationHeader({ registrationPath, challenge: challenge.jti, cookieName: COOKIES.bound });
@@ -175,6 +165,7 @@ export function dbscHandle(opts: DbscSvelteKitOptions): Handle {
     boundRegistrationPath = "/dbsc-bound/registration",
     boundRefreshPath = "/dbsc-bound/refresh",
     bound = true,
+    boundRegistrationWindowMs,
     boundCookieTtl = DEFAULT_BOUND_TTL,
     refreshGraceMs = 30_000,
     rateLimiter = new NoopRateLimiter(),
@@ -332,7 +323,7 @@ export function dbscHandle(opts: DbscSvelteKitOptions): Handle {
       }
       if (!body.publicKey || !body.signature || !body.challenge) return jsonResponse(400, { error: "publicKey, signature, and challenge are required" }, { headers });
       try {
-        await handleBoundRegistration({ sessionId: sid, publicKey: body.publicKey, signature: body.signature, expectedJti: body.challenge }, storage);
+        await handleBoundRegistration({ sessionId: sid, publicKey: body.publicKey, signature: body.signature, expectedJti: body.challenge }, storage, { ...(boundRegistrationWindowMs !== undefined && { registrationWindowMs: boundRegistrationWindowMs }) });
         emit(onEvent, { type: "registration", sessionId: sid, tier: "bound", timestamp: Date.now(), algorithm: "ES256", ip });
         return jsonResponse(200, { session_identifier: sid, refresh_url: boundRefreshPath, tier: "bound" }, { headers, cookies: [serializeCookie(COOKIES.bound, sid, scope, boundCookieTtl / 1000)] });
       } catch (err) {

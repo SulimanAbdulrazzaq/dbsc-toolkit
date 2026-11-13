@@ -101,6 +101,13 @@ export class RedisStorage implements StorageAdapter {
     }
   }
 
+  async setBoundKeyIfAbsent(key: BoundKey): Promise<boolean> {
+    const result = await this.client.set(KEY.key(key.sessionId, key.kind), JSON.stringify(key), "NX");
+    if (result !== "OK") return false;
+    if (key.kind === "native") await this.client.del(KEY.legacyKey(key.sessionId));
+    return true;
+  }
+
   async deleteBoundKey(sessionId: string, kind?: BoundKeyKind): Promise<void> {
     if (kind) {
       await this.client.del(KEY.key(sessionId, kind));

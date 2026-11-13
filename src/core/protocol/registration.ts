@@ -1,6 +1,7 @@
 import { parseRegistrationJws } from "../crypto/jws.js";
 import { DbscProtocolError, DbscVerificationError, ErrorCodes } from "../errors.js";
 import type { BoundKey, StorageAdapter } from "../types.js";
+import { storeKeyOnce } from "../bound/registration.js";
 
 export interface RegistrationRequest {
   sessionId: string;
@@ -68,7 +69,7 @@ export async function handleRegistration(
     algorithm,
   };
 
-  await storage.setBoundKey(boundKey);
+  await storeKeyOnce(storage, boundKey);
 
   const session = await storage.getSession(req.sessionId);
   if (session) {

@@ -14,9 +14,17 @@ export interface BoundRegistrationResult {
   boundKey: BoundKey;
 }
 
+export interface BoundRegistrationOptions {
+  /** See DbscOptions.boundRegistrationWindowMs. Default 300000. */
+  registrationWindowMs?: number;
+}
+
+export const DEFAULT_BOUND_REGISTRATION_WINDOW_MS = 5 * 60 * 1000;
+
 export async function handleBoundRegistration(
   req: BoundRegistrationRequest,
   storage: StorageAdapter,
+  opts: BoundRegistrationOptions = {},
 ): Promise<BoundRegistrationResult> {
   if (!req.publicKey || !req.signature) {
     throw new DbscProtocolError(
@@ -53,11 +61,28 @@ export async function handleBoundRegistration(
     throw new DbscVerificationError(ErrorCodes.SIGNATURE_INVALID, "signature does not verify against publicKey");
   }
 
+  const session = await storage.getSession(req.sessionId);
+  if (!session) {
+    throw new DbscVerificationError(ErrorCodes.SESSION_NOT_FOUND, "session not found");
+  }
+
   const existing = await storage.getBoundKey(req.sessionId, "bound");
   if (existing) {
     throw new DbscVerificationError(
       ErrorCodes.SESSION_ALREADY_REGISTERED,
       "session already has a polyfill bound key; cannot register again",
+    );
+  }
+
+  // The cookie alone must not be enough to attach a new key to a live session:
+  // only accept the polyfill key shortly after the binding started.
+  const nativeKey = await storage.getBoundKey(req.sessionId, "native");
+  const windowStart = nativeKey ? nativeKey.createdAt : session.createdAt;
+  const windowMs = opts.registrationWindowMs ?? DEFAULT_BOUND_REGISTRATION_WINDOW_MS;
+  if (Date.now() - windowStart > windowMs) {
+    throw new DbscVerificationError(
+      ErrorCodes.REGISTRATION_WINDOW_CLOSED,
+      "polyfill registration window has closed; sign in again",
     );
   }
 
@@ -75,21 +100,31 @@ export async function handleBoundRegistration(
     algorithm,
   };
 
-  await storage.setBoundKey(boundKey);
+  await storeKeyOnce(storage, boundKey);
 
   // Co-existence: on Chromium, a "native" key may already exist. We do not
   // demote tier from "dbsc" to "bound" in that case — native remains the
   // authoritative refresh path. Only set tier="bound" when there is no
   // native key (Firefox/Safari/older Chromium).
-  const session = await storage.getSession(req.sessionId);
-  if (session) {
-    const hasNative = await storage.getBoundKey(req.sessionId, "native");
-    if (hasNative) {
-      await storage.setSession({ ...session, lastRefreshAt: now });
-    } else {
-      await storage.setSession({ ...session, tier: "bound", lastRefreshAt: now });
-    }
+  if (nativeKey) {
+    await storage.setSession({ ...session, lastRefreshAt: now });
+  } else {
+    await storage.setSession({ ...session, tier: "bound", lastRefreshAt: now });
   }
 
   return { boundKey };
+}
+
+/** Writes a key only if its slot is empty; throws SESSION_ALREADY_REGISTERED otherwise. */
+export async function storeKeyOnce(storage: StorageAdapter, key: BoundKey): Promise<void> {
+  if (storage.setBoundKeyIfAbsent) {
+    if (!(await storage.setBoundKeyIfAbsent(key))) {
+      throw new DbscVerificationError(
+        ErrorCodes.SESSION_ALREADY_REGISTERED,
+        `session already has a ${key.kind} key; cannot register again`,
+      );
+    }
+    return;
+  }
+  await storage.setBoundKey(key);
 }

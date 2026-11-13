@@ -46,7 +46,7 @@ export class PostgresStorage implements StorageAdapter {
     await this.pool.query(
       `INSERT INTO dbsc_sessions (id, user_id, tier, created_at, expires_at, last_refresh_at)
        VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (id) DO UPDATE SET tier = $3, expires_at = $5, last_refresh_at = $6`,
+       ON CONFLICT (id) DO UPDATE SET user_id = $2, tier = $3, created_at = $4, expires_at = $5, last_refresh_at = $6`,
       [session.id, session.userId, session.tier, session.createdAt, session.expiresAt, session.lastRefreshAt],
     );
   }
@@ -99,6 +99,16 @@ export class PostgresStorage implements StorageAdapter {
        ON CONFLICT (session_id, kind) DO UPDATE SET jwk = $3, algorithm = $4`,
       [key.sessionId, key.kind, JSON.stringify(key.jwk), key.algorithm, key.createdAt],
     );
+  }
+
+  async setBoundKeyIfAbsent(key: BoundKey): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `INSERT INTO dbsc_bound_keys (session_id, kind, jwk, algorithm, created_at)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (session_id, kind) DO NOTHING`,
+      [key.sessionId, key.kind, JSON.stringify(key.jwk), key.algorithm, key.createdAt],
+    );
+    return (rowCount ?? 0) > 0;
   }
 
   async deleteBoundKey(sessionId: string, kind?: BoundKeyKind): Promise<void> {

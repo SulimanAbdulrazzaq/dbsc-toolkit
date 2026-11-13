@@ -68,6 +68,13 @@ export interface StorageAdapter {
   getBoundKey(sessionId: string, kind?: BoundKeyKind): Promise<BoundKey | null>;
   setBoundKey(key: BoundKey): Promise<void>;
   /**
+   * Optional. Store `key` only if no key of the same kind exists for the
+   * session; return `false` when one already does. Registration uses it so two
+   * racing registrations cannot overwrite each other. Adapters without it fall
+   * back to a read-then-write.
+   */
+  setBoundKeyIfAbsent?(key: BoundKey): Promise<boolean>;
+  /**
    * Delete the bound key(s) for a session. Pass `kind` to remove just one
    * slot; without `kind` both slots are removed.
    */
@@ -182,6 +189,16 @@ export interface DbscOptions {
    * Firefox / Safari then get no binding and `requireProof()` 403s them.
    */
   bound?: boolean;
+  /**
+   * How long after the binding starts a polyfill (`bound`) key may still be
+   * registered, in ms. Default 300000 (5 min). The window starts when the
+   * native key registered (Chromium) or when `bind()` ran (other browsers).
+   *
+   * Without a window, anyone holding the session cookie could register their
+   * own polyfill key on a session that had none yet and pass `requireProof()`.
+   * A session that misses the window stays unbound until the next sign-in.
+   */
+  boundRegistrationWindowMs?: number;
   boundCookieTtl?: number;
   registrationCookieTtl?: number;
   /**

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { handleBoundRegistration } from "./registration.js";
 import { issueChallenge } from "../protocol/challenge.js";
 import { MemoryStorage } from "../testing/memory-storage-stub.js";
-import { DbscVerificationError } from "../errors.js";
+import { DbscVerificationError, ErrorCodes } from "../errors.js";
 
 async function setupSession(storage: MemoryStorage, sessionId: string) {
   await storage.setSession({
@@ -196,5 +196,57 @@ describe("handleBoundRegistration", () => {
         storage,
       ),
     ).rejects.toBeInstanceOf(DbscVerificationError);
+  });
+});
+
+describe("handleBoundRegistration registration window", () => {
+  async function attempt(nativeAgeMs: number | null, sessionAgeMs: number) {
+    const storage = new MemoryStorage();
+    const now = Date.now();
+    await storage.setSession({
+      id: "win",
+      userId: "u",
+      tier: nativeAgeMs === null ? "none" : "dbsc",
+      createdAt: now - sessionAgeMs,
+      expiresAt: now + 3_600_000,
+      lastRefreshAt: now,
+    });
+    if (nativeAgeMs !== null) {
+      await storage.setBoundKey({
+        sessionId: "win",
+        kind: "native",
+        jwk: { kty: "EC", crv: "P-256", x: "x", y: "y" },
+        createdAt: now - nativeAgeMs,
+        algorithm: "ES256",
+      });
+    }
+    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+    const publicKey = await crypto.subtle.exportKey("jwk", pair.publicKey);
+    const challenge = await issueChallenge("win", storage);
+    const sig = await crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      pair.privateKey,
+      new TextEncoder().encode(challenge.jti),
+    );
+    return handleBoundRegistration(
+      { sessionId: "win", publicKey, signature: Buffer.from(sig).toString("base64url"), expectedJti: challenge.jti },
+      storage,
+    );
+  }
+
+  it("refuses a polyfill key on a native session after the window (stolen-cookie takeover)", async () => {
+    await expect(attempt(10 * 60_000, 10 * 60_000)).rejects.toMatchObject({
+      code: ErrorCodes.REGISTRATION_WINDOW_CLOSED,
+    });
+  });
+
+  it("accepts the co-registration shortly after native registration", async () => {
+    await expect(attempt(5_000, 60_000)).resolves.toBeDefined();
+  });
+
+  it("refuses a first polyfill key long after bind()", async () => {
+    await expect(attempt(null, 10 * 60_000)).rejects.toMatchObject({
+      code: ErrorCodes.REGISTRATION_WINDOW_CLOSED,
+    });
   });
 });

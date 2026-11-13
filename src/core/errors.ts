@@ -47,6 +47,9 @@ export const ErrorCodes = {
   KEY_NOT_FOUND_BOUND: "KEY_NOT_FOUND_BOUND",
   SESSION_NOT_FOUND: "SESSION_NOT_FOUND",
   SESSION_ALREADY_REGISTERED: "SESSION_ALREADY_REGISTERED",
+  // A polyfill key arrived after the registration window closed (see
+  // DbscOptions.boundRegistrationWindowMs). The user has to sign in again.
+  REGISTRATION_WINDOW_CLOSED: "REGISTRATION_WINDOW_CLOSED",
   RATE_LIMITED: "RATE_LIMITED",
   MISSING_PROOF: "MISSING_PROOF",
   MALFORMED_PROOF: "MALFORMED_PROOF",

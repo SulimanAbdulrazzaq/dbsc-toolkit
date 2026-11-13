@@ -4,6 +4,7 @@ import {
   handleRegistration,
   handleRefresh,
   handleBoundRegistration,
+  startBinding,
   handleBoundRefresh,
   issueChallenge,
   buildRegistrationHeader,
@@ -130,18 +131,7 @@ export async function bindSession(
   };
   const { domain } = resolveCookieScope(scope);
 
-  const existing = await storage.getSession(sessionId);
-  const now = Date.now();
-  if (!existing) {
-    await storage.setSession({
-      id: sessionId,
-      userId: opts.userId,
-      tier: "none",
-      createdAt: now,
-      expiresAt: now + sessionTtl,
-      lastRefreshAt: 0,
-    });
-  }
+  await startBinding(storage, { sessionId, userId: opts.userId, sessionTtlMs: sessionTtl });
 
   const COOKIES = cookieNames(scope);
   const challenge = await issueChallenge(sessionId, storage);
@@ -175,6 +165,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
     boundRegistrationPath = "/dbsc-bound/registration",
     boundRefreshPath = "/dbsc-bound/refresh",
     bound = true,
+    boundRegistrationWindowMs,
     boundCookieTtl = DEFAULT_BOUND_TTL_MS,
     refreshGraceMs = 30_000,
     registrationCookieTtl = DEFAULT_REG_TTL_MS,
@@ -440,7 +431,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
       try {
         await handleBoundRegistration(
           { sessionId: sid, publicKey: body.publicKey, signature: body.signature, expectedJti: body.challenge },
-          storage,
+          storage, { ...(boundRegistrationWindowMs !== undefined && { registrationWindowMs: boundRegistrationWindowMs }) },
         );
         emit(onEvent, {
           type: "registration",

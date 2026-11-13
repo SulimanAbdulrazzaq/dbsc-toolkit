@@ -3,6 +3,7 @@ import {
   handleRegistration,
   handleRefresh,
   handleBoundRegistration,
+  startBinding,
   handleBoundRefresh,
   issueChallenge,
   buildRegistrationHeader,
@@ -203,18 +204,7 @@ export async function bindSession(
   };
   const COOKIES = cookieNames(scope);
 
-  const existing = await storage.getSession(sessionId);
-  const now = Date.now();
-  if (!existing) {
-    await storage.setSession({
-      id: sessionId,
-      userId: opts.userId,
-      tier: "none",
-      createdAt: now,
-      expiresAt: now + sessionTtl,
-      lastRefreshAt: 0,
-    });
-  }
+  await startBinding(storage, { sessionId, userId: opts.userId, sessionTtlMs: sessionTtl });
 
   const challenge = await issueChallenge(sessionId, storage);
   const regHeader = buildRegistrationHeader({
@@ -241,6 +231,7 @@ export function dbsc(opts: DbscNodeOptions): DbscNodeHandler {
     boundRegistrationPath = "/dbsc-bound/registration",
     boundRefreshPath = "/dbsc-bound/refresh",
     bound = true,
+    boundRegistrationWindowMs,
     boundCookieTtl = DEFAULT_BOUND_TTL,
     refreshGraceMs = 30_000,
     registrationCookieTtl = DEFAULT_REG_TTL,
@@ -413,7 +404,7 @@ export function dbsc(opts: DbscNodeOptions): DbscNodeHandler {
     }
 
     try {
-      await handleBoundRegistration({ sessionId, publicKey: body.publicKey, signature: body.signature, expectedJti: body.challenge }, storage);
+      await handleBoundRegistration({ sessionId, publicKey: body.publicKey, signature: body.signature, expectedJti: body.challenge }, storage, { ...(boundRegistrationWindowMs !== undefined && { registrationWindowMs: boundRegistrationWindowMs }) });
       emit(onEvent, { type: "registration", sessionId, tier: "bound", timestamp: Date.now(), algorithm: "ES256", ip });
       appendSetCookie(res, serializeCookie(COOKIES.bound, sessionId, cookieOpts(boundCookieTtl, scope)));
       sendJson(res, 200, { session_identifier: sessionId, refresh_url: boundRefreshPath, tier: "bound" });
