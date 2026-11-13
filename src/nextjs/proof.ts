@@ -61,7 +61,7 @@ export async function requireBoundProof(
         sessionId: session.sessionId,
         proofHeader: req.headers.get("x-dbsc-bound-proof") ?? undefined,
         method: req.method,
-        path: req.nextUrl.pathname,
+        path: new URL(req.url).pathname,
         timestampWindowMs: opts.timestampWindowMs,
         signBody,
         bodyBytes,

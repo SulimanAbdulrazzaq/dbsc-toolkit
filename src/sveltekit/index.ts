@@ -3,6 +3,7 @@ import {
   handleRegistration,
   handleRefresh,
   handleBoundRegistration,
+  readJsonObject,
   startBinding,
   handleBoundRefresh,
   issueChallenge,
@@ -73,7 +74,7 @@ function serializeCookie(name: string, value: string, scope: ScopeArgs, maxAgeSe
   const { domain } = resolveCookieScope(scope);
   const parts = [`${name}=${value}`, "HttpOnly"];
   if (scope.secure) parts.push("Secure");
-  parts.push("SameSite=Lax", `Max-Age=${maxAgeSec}`, "Path=/");
+  parts.push("SameSite=Lax", `Max-Age=${Math.floor(maxAgeSec)}`, "Path=/");
   if (domain) parts.push(`Domain=${domain}`);
   return parts.join("; ");
 }
@@ -167,6 +168,8 @@ export function dbscHandle(opts: DbscSvelteKitOptions): Handle {
     bound = true,
     boundRegistrationWindowMs,
     boundCookieTtl = DEFAULT_BOUND_TTL,
+    registrationCookieTtl,
+    autoBind,
     refreshGraceMs = 30_000,
     rateLimiter = new NoopRateLimiter(),
     replayCache,
@@ -244,6 +247,7 @@ export function dbscHandle(opts: DbscSvelteKitOptions): Handle {
       const sessionId = get(request, "sec-secure-session-id") ?? event.cookies.get(COOKIES.bound);
       if (!sessionId) return emptyResponse(403);
       if (!(await rateLimiter.checkRefresh(ip, sessionId))) return jsonResponse(429, { error: "rate limited" });
+      if (!(await storage.getSession(sessionId))) return emptyResponse(401);
 
       const responseHeader = get(request, "secure-session-response") ?? get(request, "sec-session-response");
       const expectedJti = event.cookies.get(COOKIES.challenge);
@@ -297,7 +301,7 @@ export function dbscHandle(opts: DbscSvelteKitOptions): Handle {
         const challenge = await issueChallenge(sid, storage);
         return jsonResponse(200, { phase: "needs-bound-registration", sessionId: sid, tier: session.tier, challenge: challenge.jti, refreshIntervalMs: boundCookieTtl, ...(nativeSkipped && { nativeSkipped }) }, { headers });
       }
-      return jsonResponse(200, { phase: "bound", sessionId: sid, tier: session.tier, refreshIntervalMs: boundCookieTtl, ...(nativeSkipped && { nativeSkipped }) }, { headers });
+      return jsonResponse(200, { phase: "bound", sessionId: sid, tier: nativeKey ? "dbsc" : session.tier, refreshIntervalMs: boundCookieTtl, ...(nativeSkipped && { nativeSkipped }) }, { headers });
     }
 
     if (bound && method === "GET" && url.pathname === boundChallengePath) {
@@ -317,7 +321,7 @@ export function dbscHandle(opts: DbscSvelteKitOptions): Handle {
       if (!sid) return jsonResponse(400, { error: "missing session cookie" }, { headers });
       let body: { publicKey?: JsonWebKey; signature?: string; challenge?: string };
       try {
-        body = (await request.json()) ?? {};
+        body = await readJsonObject(request);
       } catch {
         return jsonResponse(400, { error: "body must be JSON" }, { headers });
       }
@@ -343,7 +347,7 @@ export function dbscHandle(opts: DbscSvelteKitOptions): Handle {
       if (!(await rateLimiter.checkRefresh(ip, sid))) return jsonResponse(429, { error: "rate limited" }, { headers });
       let body: { challenge?: string; signature?: string; timestamp?: number };
       try {
-        body = (await request.json()) ?? {};
+        body = await readJsonObject(request);
       } catch {
         return jsonResponse(400, { error: "body must be JSON" }, { headers });
       }
@@ -379,6 +383,18 @@ export function dbscHandle(opts: DbscSvelteKitOptions): Handle {
           await maybeEmitPolyfillMissing({ storage, session, ip, emitted: polyfillMissingEmitted, onEvent });
         }
       }
+    } else if (autoBind && !event.cookies.get(COOKIES.reg)) {
+      const result = await autoBind(event);
+      if (result) {
+        await bindSession(event, result.sessionId, storage, {
+          userId: result.userId,
+          secure,
+          ...(cookieScope !== undefined && { cookieScope }),
+          ...(cookieDomain !== undefined && { cookieDomain }),
+          registrationPath,
+          ...(registrationCookieTtl !== undefined && { registrationCookieTtl }),
+        });
+      }
     }
 
     const dbscSession: DbscSvelteKitSession = {
@@ -387,7 +403,8 @@ export function dbscHandle(opts: DbscSvelteKitOptions): Handle {
       skipped,
       revoke: async () => {
         if (sessionId) await storage.revokeSession(sessionId);
-        event.cookies.delete(COOKIES.bound, { path: "/" });
+        const { domain } = resolveCookieScope(scope);
+        event.cookies.delete(COOKIES.bound, { path: "/", secure, ...(domain !== undefined && { domain }) });
       },
     };
     (dbscSession as unknown as Record<PropertyKey, unknown>)[DBSC_INTERNAL] = {

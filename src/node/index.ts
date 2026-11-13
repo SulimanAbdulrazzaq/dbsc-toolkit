@@ -62,6 +62,12 @@ const DEFAULT_REG_TTL = 24 * 60 * 60 * 1000;
 const DEFAULT_SESSION_TTL = 24 * 60 * 60 * 1000;
 
 export interface DbscNodeOptions extends DbscOptions {
+  /**
+   * Rate-limiter key for a request. Defaults to the socket address, which is
+   * the proxy's address behind a reverse proxy (every client then shares one
+   * bucket). Behind a proxy, return the client IP your proxy reports.
+   */
+  ipExtractor?: (req: IncomingMessage) => string;
   secure?: boolean;
   boundStatePath?: string;
   boundChallengePath?: string;
@@ -106,7 +112,7 @@ function serializeCookie(name: string, value: string, opts: ReturnType<typeof co
   if (opts.secure) parts.push("Secure");
   const sameSite = opts.sameSite.charAt(0).toUpperCase() + opts.sameSite.slice(1);
   parts.push(`SameSite=${sameSite}`);
-  parts.push(`Max-Age=${opts.maxAge}`);
+  parts.push(`Max-Age=${Math.floor(opts.maxAge)}`);
   parts.push(`Path=${opts.path}`);
   if (opts.domain) parts.push(`Domain=${opts.domain}`);
   return parts.join("; ");
@@ -124,7 +130,13 @@ function appendSetCookie(res: ServerResponse, cookies: string | string[]): void 
 }
 
 function reqUrl(req: IncomingMessage): URL {
-  return new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  // Fixed base: only path and query are read, and a hostile Host header
+  // (e.g. "a b") must not make every request throw.
+  try {
+    return new URL(req.url ?? "/", "http://x");
+  } catch {
+    return new URL("/", "http://x");
+  }
 }
 
 function reqOrigin(req: IncomingMessage): string {
@@ -154,7 +166,14 @@ function sendStatus(res: ServerResponse, status: number): void {
   res.end();
 }
 
-/** Reads and JSON-parses the raw request body. Returns `{}` on empty/invalid. */
+/** Protocol request bodies are a key and a signature; anything larger is refused. */
+export const MAX_JSON_BODY_BYTES = 16 * 1024;
+
+/**
+ * Reads and JSON-parses the raw request body. Returns `{}` on an empty,
+ * invalid, oversized, or non-object body (a body of `null` must not reach
+ * property access).
+ */
 export async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   const cached = (req as unknown as Record<PropertyKey, unknown>)["__dbscRawBody"];
   let raw: Buffer;
@@ -162,13 +181,21 @@ export async function readJsonBody(req: IncomingMessage): Promise<Record<string,
     raw = cached;
   } else {
     const chunks: Buffer[] = [];
-    for await (const chunk of req) chunks.push(chunk as Buffer);
+    let size = 0;
+    for await (const chunk of req) {
+      size += (chunk as Buffer).length;
+      if (size > MAX_JSON_BODY_BYTES) return {};
+      chunks.push(chunk as Buffer);
+    }
     raw = Buffer.concat(chunks);
     (req as unknown as Record<PropertyKey, unknown>)["__dbscRawBody"] = raw;
   }
   if (raw.length === 0) return {};
   try {
-    return JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
+    const parsed: unknown = JSON.parse(raw.toString("utf8"));
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
   } catch {
     return {};
   }
@@ -239,11 +266,13 @@ export function dbsc(opts: DbscNodeOptions): DbscNodeHandler {
     replayCache,
     onEvent,
     autoBind,
+    ipExtractor,
     secure = true,
     cookieScope,
     cookieDomain,
   } = opts;
 
+  const ipOf = ipExtractor ?? reqIp;
   const scope: ScopeArgs = {
     secure,
     ...(cookieScope !== undefined && { cookieScope }),
@@ -264,7 +293,7 @@ export function dbsc(opts: DbscNodeOptions): DbscNodeHandler {
   }
 
   async function handleRegistrationRoute(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const ip = reqIp(req);
+    const ip = ipOf(req);
     const allowed = await rateLimiter.checkRegistration(ip);
     if (!allowed) return sendJson(res, 429, { error: "rate limited" });
 
@@ -301,7 +330,7 @@ export function dbsc(opts: DbscNodeOptions): DbscNodeHandler {
   }
 
   async function handleRefreshRoute(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const ip = reqIp(req);
+    const ip = ipOf(req);
     const cookies = reqCookies(req);
     const idHeader = req.headers["sec-secure-session-id"];
     const sessionId = (Array.isArray(idHeader) ? idHeader[0] : idHeader) ?? cookies[COOKIES.bound];
@@ -309,6 +338,8 @@ export function dbsc(opts: DbscNodeOptions): DbscNodeHandler {
 
     const allowed = await rateLimiter.checkRefresh(ip, sessionId);
     if (!allowed) return sendJson(res, 429, { error: "rate limited" });
+
+    if (!(await storage.getSession(sessionId))) return sendStatus(res, 401);
 
     const responseHeader = readSessionResponseHeader(req.headers);
     const expectedJti = cookies[COOKIES.challenge];
@@ -376,7 +407,7 @@ export function dbsc(opts: DbscNodeOptions): DbscNodeHandler {
         ...(nativeSkipped && { nativeSkipped }),
       });
     }
-    sendJson(res, 200, { phase: "bound", sessionId, tier: session.tier, refreshIntervalMs: boundCookieTtl, ...(nativeSkipped && { nativeSkipped }) });
+    sendJson(res, 200, { phase: "bound", sessionId, tier: nativeKey ? "dbsc" : session.tier, refreshIntervalMs: boundCookieTtl, ...(nativeSkipped && { nativeSkipped }) });
   }
 
   async function handleBoundChallengeRoute(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -391,7 +422,7 @@ export function dbsc(opts: DbscNodeOptions): DbscNodeHandler {
 
   async function handleBoundRegistrationRoute(req: IncomingMessage, res: ServerResponse): Promise<void> {
     res.setHeader("X-Server-Time", String(Date.now()));
-    const ip = reqIp(req);
+    const ip = ipOf(req);
     const allowed = await rateLimiter.checkRegistration(ip);
     if (!allowed) return sendJson(res, 429, { error: "rate limited" });
 
@@ -420,7 +451,7 @@ export function dbsc(opts: DbscNodeOptions): DbscNodeHandler {
 
   async function handleBoundRefreshRoute(req: IncomingMessage, res: ServerResponse): Promise<void> {
     res.setHeader("X-Server-Time", String(Date.now()));
-    const ip = reqIp(req);
+    const ip = ipOf(req);
     const sessionId = readBoundSessionId(reqCookies(req));
     if (!sessionId) return sendJson(res, 403, { error: "no session" });
 
@@ -514,7 +545,7 @@ export function dbsc(opts: DbscNodeOptions): DbscNodeHandler {
         const refreshable = stored.tier === "dbsc" || stored.tier === "bound";
         session.tier = refreshable && Date.now() > staleAfter ? "none" : stored.tier;
         if (onEvent) {
-          await maybeEmitPolyfillMissing({ storage, session: stored, ip: reqIp(req), emitted: polyfillMissingEmitted, onEvent });
+          await maybeEmitPolyfillMissing({ storage, session: stored, ip: ipOf(req), emitted: polyfillMissingEmitted, onEvent });
         }
       }
     } else if (autoBind && !cookies[COOKIES.reg]) {

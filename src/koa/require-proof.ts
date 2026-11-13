@@ -11,14 +11,22 @@ import {
 } from "../core/index.js";
 import { DBSC_INTERNAL, type DbscInternal, type DbscNodeSession } from "../node/index.js";
 
-async function readRawBody(ctx: Context): Promise<Uint8Array> {
+/** Upper bound on a guarded request body read for the body hash (1 MiB). */
+export const MAX_GUARD_BODY_BYTES = 1024 * 1024;
+
+async function readRawBody(ctx: Context): Promise<Uint8Array | null> {
   const rawBody = (ctx.request as unknown as { rawBody?: string }).rawBody;
   if (typeof rawBody === "string") return new TextEncoder().encode(rawBody);
   const req = ctx.req as IncomingMessage;
   const cached = (req as unknown as Record<PropertyKey, unknown>)["__dbscRawBody"];
   if (Buffer.isBuffer(cached)) return new Uint8Array(cached);
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_GUARD_BODY_BYTES) return null;
+    chunks.push(chunk as Buffer);
+  }
   const raw = Buffer.concat(chunks);
   (req as unknown as Record<PropertyKey, unknown>)["__dbscRawBody"] = raw;
   return new Uint8Array(raw);
@@ -62,6 +70,12 @@ export function requireProof(opts: RequireProofOptions<Context> = {}): Middlewar
     }
 
     const proofHeader = ctx.get("x-dbsc-bound-proof") || undefined;
+    const bodyBytes = await readRawBody(ctx);
+    if (!bodyBytes) {
+      ctx.status = 413;
+      ctx.body = { error: "request body too large for proof verification" };
+      return;
+    }
     try {
       await verifyBoundProof(
         {
@@ -71,7 +85,7 @@ export function requireProof(opts: RequireProofOptions<Context> = {}): Middlewar
           // Full pathname: koa-mount rewrites ctx.path but the client signs the whole URL.
           path: new URL(ctx.originalUrl, "http://x").pathname,
           signBody: true,
-          bodyBytes: await readRawBody(ctx),
+          bodyBytes,
           ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
           ...(internal?.replayCache !== undefined && { replayCache: internal.replayCache }),
         },

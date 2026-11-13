@@ -229,15 +229,15 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
 
   fastify.post(registrationPath, async (req: FastifyRequest, reply: FastifyReply) => {
     const ip = req.ip;
+    const allowed = await rateLimiter.checkRegistration(ip);
+    if (!allowed) return reply.status(429).send({ error: "rate limited" });
+
     const sessionId = req.cookies?.[COOKIES.reg];
     const expectedJti = req.cookies?.[COOKIES.challenge];
 
     if (!sessionId || !expectedJti) {
       return reply.status(400).send({ error: "missing session or challenge cookie" });
     }
-
-    const allowed = await rateLimiter.checkRegistration(ip);
-    if (!allowed) return reply.status(429).send({ error: "rate limited" });
 
     try {
       const { boundKey: registered } = await handleRegistration(
@@ -300,6 +300,10 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
 
     const allowed = await rateLimiter.checkRefresh(ip, sessionId);
     if (!allowed) return reply.status(429).send({ error: "rate limited" });
+
+    // Unknown or expired session: no challenge (nothing is stored for an
+    // arbitrary id) and a non-403 status, so Chrome ends the dead binding.
+    if (!(await storage.getSession(sessionId))) return reply.status(401).send();
 
     const responseHeader = readSessionResponseHeader(req.headers as Record<string, string | string[] | undefined>);
 
@@ -421,7 +425,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     return reply.status(200).send({
       phase: "bound",
       sessionId,
-      tier: session.tier,
+      tier: nativeKey ? "dbsc" : session.tier,
       refreshIntervalMs: boundCookieTtl,
       ...(nativeSkipped && { nativeSkipped }),
     });

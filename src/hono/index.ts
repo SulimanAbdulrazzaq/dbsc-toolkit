@@ -4,6 +4,7 @@ import {
   handleRegistration,
   handleRefresh,
   handleBoundRegistration,
+  readJsonObject,
   startBinding,
   handleBoundRefresh,
   issueChallenge,
@@ -237,7 +238,8 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
           ...cookieOpts,
           maxAge: boundCookieTtl / 1000,
         });
-        deleteCookie(c, COOKIES.challenge);
+        // deleteCookie() without options throws for __Host-/__Secure- names.
+        setCookie(c, COOKIES.challenge, "", { ...cookieOpts, maxAge: 0 });
         return c.json(
           {
             session_identifier: sessionId,
@@ -275,6 +277,8 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
       const allowed = await rateLimiter.checkRefresh(ip, sessionId);
       if (!allowed) return c.json({ error: "rate limited" }, 429);
 
+      if (!(await storage.getSession(sessionId))) return c.body(null, 401);
+
       const responseHeader = c.req.header("secure-session-response") ?? c.req.header("sec-session-response");
 
       if (!responseHeader) {
@@ -306,7 +310,8 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
         });
 
         setCookie(c, COOKIES.bound, sessionId, { ...cookieOpts, maxAge: boundCookieTtl / 1000 });
-        deleteCookie(c, COOKIES.challenge);
+        // deleteCookie() without options throws for __Host-/__Secure- names.
+        setCookie(c, COOKIES.challenge, "", { ...cookieOpts, maxAge: 0 });
         return c.json(
           {
             session_identifier: sessionId,
@@ -394,7 +399,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
       return c.json({
         phase: "bound",
         sessionId: sid,
-        tier: session.tier,
+        tier: nativeKey ? "dbsc" : session.tier,
         refreshIntervalMs: boundCookieTtl,
         ...(nativeSkipped && { nativeSkipped }),
       });
@@ -420,7 +425,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
 
       let body: { publicKey?: JsonWebKey; signature?: string; challenge?: string };
       try {
-        body = (await c.req.json()) ?? {};
+        body = await readJsonObject(c.req.raw);
       } catch {
         return c.json({ error: "body must be JSON" }, 400);
       }
@@ -470,7 +475,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
 
       let body: { challenge?: string; signature?: string; timestamp?: number };
       try {
-        body = (await c.req.json()) ?? {};
+        body = await readJsonObject(c.req.raw);
       } catch {
         return c.json({ error: "body must be JSON" }, 400);
       }
@@ -584,10 +589,16 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
  * strips client-supplied XFF should pass their own `ipExtractor`.
  */
 function defaultIpExtractor(c: Context): string {
-  // Cloudflare Workers — c.req.header("cf-connecting-ip") is the verified
-  // edge-set client IP.
-  const cf = c.req.header("cf-connecting-ip");
-  if (cf) return cf;
+  // cf-connecting-ip is only trustworthy when Cloudflare set it, i.e. when this
+  // code runs inside Workers; anywhere else a client can send it.
+  const ua = (globalThis as { navigator?: { userAgent?: string } }).navigator?.userAgent;
+  if (ua === "Cloudflare-Workers") {
+    const cf = c.req.header("cf-connecting-ip");
+    if (cf) return cf;
+  }
+  // @hono/node-server exposes the Node request as c.env.incoming.
+  const incoming = (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming;
+  if (incoming?.socket?.remoteAddress) return incoming.socket.remoteAddress;
   // Some runtimes expose the remote address on `c.env.requestIP` or on
   // the raw request socket. Try both.
   const env = (c.env as { requestIP?: unknown } | undefined) ?? undefined;

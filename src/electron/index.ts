@@ -38,6 +38,12 @@ export { createElectronDbsc, type ElectronDbscKit } from "./create-dbsc.js";
 export interface DbscProtocolResult {
   handled: boolean;
   response: Response;
+  /**
+   * Runs a node guard (`kit.requireProof()`, `kit.requireDpop()`) against this
+   * request. Resolves `null` when the guard lets the request through, or the
+   * guard's error `Response` to return instead.
+   */
+  guard(g: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>): Promise<Response | null>;
   session: DbscNodeSession | undefined;
 }
 
@@ -130,9 +136,20 @@ export async function handleDbscProtocol(
   request: Request,
   handler: DbscNodeHandler,
 ): Promise<DbscProtocolResult> {
-  const raw = new Uint8Array(await request.clone().arrayBuffer());
+  // Only buffer a body that can exist; GET/HEAD requests on the custom scheme
+  // (pages, assets) are not copied into memory.
+  const hasBody = request.method !== "GET" && request.method !== "HEAD";
+  const raw = hasBody ? new Uint8Array(await request.clone().arrayBuffer()) : new Uint8Array(0);
   const req = makeReq(request, raw);
   const { res, toResponse } = makeRes();
   const handled = await handler(req, res);
-  return { handled, response: toResponse(), session: getDbscSession(req) };
+  return {
+    handled,
+    response: toResponse(),
+    session: getDbscSession(req),
+    guard: async (g) => {
+      const out = makeRes();
+      return (await g(req, out.res)) ? null : out.toResponse();
+    },
+  };
 }

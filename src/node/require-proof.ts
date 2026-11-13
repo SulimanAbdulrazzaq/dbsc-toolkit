@@ -13,11 +13,19 @@ import { getDbscSession, DBSC_INTERNAL, type DbscInternal } from "./index.js";
 /** A node:http proof guard: `true` if the request passed, `false` if it was rejected (403 already written). */
 export type NodeProofGuard = (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
 
-async function readRawBody(req: IncomingMessage): Promise<Uint8Array> {
+/** Upper bound on a guarded request body read for the body hash (1 MiB). */
+export const MAX_GUARD_BODY_BYTES = 1024 * 1024;
+
+async function readRawBody(req: IncomingMessage): Promise<Uint8Array | null> {
   const cached = (req as unknown as Record<PropertyKey, unknown>)["__dbscRawBody"];
   if (Buffer.isBuffer(cached)) return new Uint8Array(cached);
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_GUARD_BODY_BYTES) return null;
+    chunks.push(chunk as Buffer);
+  }
   const raw = Buffer.concat(chunks);
   (req as unknown as Record<PropertyKey, unknown>)["__dbscRawBody"] = raw;
   return new Uint8Array(raw);
@@ -71,6 +79,14 @@ export function requireProof(opts: RequireProofOptions<IncomingMessage> = {}): N
     const proofHeaderRaw = req.headers["x-dbsc-bound-proof"];
     const proofHeader = Array.isArray(proofHeaderRaw) ? proofHeaderRaw[0] : proofHeaderRaw;
 
+    const bodyBytes = await readRawBody(req);
+    if (!bodyBytes) {
+      res.setHeader("Content-Type", "application/json");
+      res.statusCode = 413;
+      res.end(JSON.stringify({ error: "request body too large for proof verification" }));
+      return false;
+    }
+
     try {
       await verifyBoundProof(
         {
@@ -79,7 +95,7 @@ export function requireProof(opts: RequireProofOptions<IncomingMessage> = {}): N
           method: req.method ?? "GET",
           path: url.pathname,
           signBody: true,
-          bodyBytes: await readRawBody(req),
+          bodyBytes,
           ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
           ...(internal?.replayCache !== undefined && { replayCache: internal.replayCache }),
         },

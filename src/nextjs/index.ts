@@ -1,10 +1,10 @@
-import { randomBytes } from "node:crypto";
 import type { NextRequest } from "next/server.js";
 import { NextResponse } from "next/server.js";
 import {
   handleRegistration,
   handleRefresh,
   handleBoundRegistration,
+  readJsonObject,
   startBinding,
   handleBoundRefresh,
   issueChallenge,
@@ -63,6 +63,17 @@ export interface DbscNextOptions extends DbscOptions {
   boundChallengePath?: string;
   boundRegistrationPath?: string;
   boundRefreshPath?: string;
+}
+
+/**
+ * Rate-limiter key. x-real-ip and the last X-Forwarded-For hop are written by
+ * the nearest proxy; the whole XFF chain (the old key) is client-controlled.
+ */
+function clientIp(req: NextRequest): string {
+  const real = req.headers.get("x-real-ip")?.trim();
+  if (real) return real;
+  const hops = req.headers.get("x-forwarded-for")?.split(",").map((h) => h.trim()).filter(Boolean);
+  return hops?.[hops.length - 1] ?? "unknown";
 }
 
 function cookieBase(scope: ScopeArgs) {
@@ -161,8 +172,10 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
   const COOKIES = cookieNames(scope);
 
   return async function middleware(req: NextRequest): Promise<NextResponse> {
-    const url = req.nextUrl.pathname;
-    const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+    // req.url keeps basePath and locale; nextUrl.pathname strips them while the
+    // client and Chrome use the full path.
+    const url = new URL(req.url).pathname;
+    const ip = clientIp(req);
 
     if (req.method === "POST" && url === registrationPath) {
       const sessionId = req.cookies.get(COOKIES.reg)?.value;
@@ -220,7 +233,8 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
           ...cookieBase(scope),
           maxAge: boundCookieTtl / 1000,
         });
-        res.cookies.delete(COOKIES.challenge);
+        // delete() emits no Secure/Domain, which browsers ignore for prefixed names.
+        res.cookies.set(COOKIES.challenge, "", { ...cookieBase(scope), maxAge: 0 });
         return res;
       } catch (err) {
         await rateLimiter.recordFailure(ip, sessionId);
@@ -242,6 +256,9 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
       const allowed = await rateLimiter.checkRefresh(ip, sessionId);
       if (!allowed) {
         return NextResponse.json({ error: "rate limited" }, { status: 429 });
+      }
+      if (!(await storage.getSession(sessionId))) {
+        return new NextResponse(null, { status: 401 });
       }
 
       const responseHeader =
@@ -305,7 +322,8 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
           ...cookieBase(scope),
           maxAge: boundCookieTtl / 1000,
         });
-        res.cookies.delete(COOKIES.challenge);
+        // delete() emits no Secure/Domain, which browsers ignore for prefixed names.
+        res.cookies.set(COOKIES.challenge, "", { ...cookieBase(scope), maxAge: 0 });
         return res;
       } catch (err) {
         await rateLimiter.recordFailure(ip, sessionId);
@@ -395,7 +413,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
       const res = NextResponse.json({
         phase: "bound",
         sessionId: sid,
-        tier: session.tier,
+        tier: nativeKey ? "dbsc" : session.tier,
         refreshIntervalMs: boundCookieTtl,
         ...(nativeSkipped && { nativeSkipped }),
       });
@@ -437,7 +455,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
 
       let body: { publicKey?: JsonWebKey; signature?: string; challenge?: string };
       try {
-        body = (await req.json()) ?? {};
+        body = await readJsonObject(req);
       } catch {
         return withTime(NextResponse.json({ error: "body must be JSON" }, { status: 400 }));
       }
@@ -498,7 +516,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
 
       let body: { challenge?: string; signature?: string; timestamp?: number };
       try {
-        body = (await req.json()) ?? {};
+        body = await readJsonObject(req);
       } catch {
         return NextResponse.json({ error: "body must be JSON" }, { status: 400 });
       }
@@ -605,7 +623,7 @@ export async function getDbscSession(
   const revoke = async () => {
     if (sessionId) await storage.revokeSession(sessionId);
     if (opts.res) {
-      opts.res.cookies.delete(COOKIES.bound);
+      opts.res.cookies.set(COOKIES.bound, "", { ...cookieBase(scope), maxAge: 0 });
     }
   };
 
@@ -623,7 +641,7 @@ export async function getDbscSession(
   }
 
   if (opts.onEvent) {
-    const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+    const ip = clientIp(req);
     await maybeEmitPolyfillMissing({
       storage,
       session,

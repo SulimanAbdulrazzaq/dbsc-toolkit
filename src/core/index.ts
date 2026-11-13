@@ -68,6 +68,7 @@ export { noBindingReason, sessionBindingMatches, SESSION_MISMATCH_MESSAGE } from
 export type { RequireProofOptions, SessionBindingHook } from "./protect-policy.js";
 
 export { parseCookieHeader } from "./protocol/cookies.js";
+export { readJsonObject, MAX_PROTOCOL_BODY_BYTES } from "./protocol/body.js";
 
 export {
   resolveCookieScope,

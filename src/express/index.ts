@@ -107,7 +107,7 @@ function serializeCookie(name: string, value: string, opts: ReturnType<typeof co
   if (opts.secure) parts.push("Secure");
   const sameSite = opts.sameSite.charAt(0).toUpperCase() + opts.sameSite.slice(1);
   parts.push(`SameSite=${sameSite}`);
-  parts.push(`Max-Age=${opts.maxAge}`);
+  parts.push(`Max-Age=${Math.floor(opts.maxAge)}`);
   parts.push(`Path=${opts.path}`);
   if (opts.domain) parts.push(`Domain=${opts.domain}`);
   return parts.join("; ");
@@ -295,6 +295,13 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
     const allowed = await rateLimiter.checkRefresh(ip, sessionId);
     if (!allowed) {
       res.status(429).json({ error: "rate limited" });
+      return;
+    }
+
+    // Unknown or expired session: no challenge (nothing is stored for an
+    // arbitrary id) and a non-403 status, so Chrome ends the dead binding.
+    if (!(await storage.getSession(sessionId))) {
+      res.status(401).end();
       return;
     }
 
