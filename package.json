@@ -81,6 +81,7 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
+    "fastify-plugin": "^6.0.1",
     "jose": "^6.2.3"
   },
   "peerDependencies": {
@@ -148,7 +149,6 @@
     "express": "^5.2.1",
     "fake-indexeddb": "^6.2.5",
     "fastify": "^5.8.5",
-    "fastify-plugin": "^6.0.1",
     "hono": "^4.0.0",
     "ioredis": "^6.0.0",
     "jsdom": "^29.1.1",
