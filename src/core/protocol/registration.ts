@@ -47,6 +47,11 @@ export async function handleRegistration(
     );
   }
 
+  const session = await storage.getSession(req.sessionId);
+  if (!session) {
+    throw new DbscVerificationError(ErrorCodes.SESSION_NOT_FOUND, "session not found");
+  }
+
   const existingKey = await storage.getBoundKey(req.sessionId, "native");
   if (existingKey) {
     throw new DbscVerificationError(
@@ -71,10 +76,7 @@ export async function handleRegistration(
 
   await storeKeyOnce(storage, boundKey);
 
-  const session = await storage.getSession(req.sessionId);
-  if (session) {
-    await storage.setSession({ ...session, tier: "dbsc", lastRefreshAt: now });
-  }
+  await storage.setSession({ ...session, tier: "dbsc", lastRefreshAt: now });
 
   return { boundKey };
 }

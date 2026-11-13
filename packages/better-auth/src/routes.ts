@@ -19,7 +19,7 @@
  * declared body schema would 415 the empty body. The bound routes take JSON
  * bodies and keep a schema.
  */
-import { createAuthEndpoint, APIError } from "better-auth/api";
+import { createAuthEndpoint, getSessionFromCtx, APIError } from "better-auth/api";
 import {
   handleRegistration,
   handleRefresh,
@@ -49,6 +49,8 @@ export interface RouteDeps {
   cookies: DbscCookies;
   basePath: string;
   boundCookieTtl: number;
+  /** See DbscOptions.boundRegistrationWindowMs in dbsc-toolkit. */
+  boundRegistrationWindowMs?: number;
   /**
    * Mount the bound polyfill endpoints. Default true. When false, only the
    * two native endpoints are returned; the state endpoint still answers
@@ -84,12 +86,44 @@ function sessionConfig(sessionId: string, refreshUrl: string, boundName: string,
 }
 
 function originOf(ctx: any): string {
-  try {
-    const u = new URL(ctx.request?.url ?? "http://localhost");
-    return `${u.protocol}//${u.host}`;
-  } catch {
-    return "http://localhost";
+  // Better Auth's configured baseURL is authoritative; the request URL can read
+  // http:// behind a TLS-terminating proxy.
+  for (const candidate of [ctx.context?.baseURL, ctx.request?.url]) {
+    if (typeof candidate !== "string") continue;
+    try {
+      return new URL(candidate).origin;
+    } catch {
+      continue;
+    }
   }
+  return "http://localhost";
+}
+
+/** Rate-limit / telemetry IP: x-real-ip, else the last X-Forwarded-For hop (proxy-written). */
+function ipOf(ctx: any): string {
+  const real = header(ctx, "x-real-ip")?.trim();
+  if (real) return real;
+  const hops = header(ctx, "x-forwarded-for")?.split(",").map((h) => h.trim()).filter(Boolean);
+  return hops?.[hops.length - 1] ?? "";
+}
+
+/**
+ * True when the caller holds the Better Auth session whose id is `sessionId`.
+ * The DBSC id is the Better Auth session id, which is not a secret, so the
+ * polyfill routes must not trust it from a cookie alone.
+ */
+async function callerOwns(ctx: any, sessionId: string): Promise<boolean> {
+  try {
+    const current = (await getSessionFromCtx(ctx)) as { session?: { id?: string } } | null;
+    return current?.session?.id === sessionId;
+  } catch {
+    return false;
+  }
+}
+
+/** One response for unknown, expired and foreign sessions, so ids cannot be probed. */
+function unauthorized(): APIError {
+  return new APIError("UNAUTHORIZED", { error: "unauthorized" });
 }
 
 export function buildDbscRoutes(deps: RouteDeps): Record<string, unknown> {
@@ -111,17 +145,17 @@ export function buildDbscRoutes(deps: RouteDeps): Record<string, unknown> {
         throw new APIError("BAD_REQUEST", { error: "missing session or challenge cookie" });
       }
       try {
-        await handleRegistration(
+        const { boundKey: registered } = await handleRegistration(
           { sessionId, secSessionResponseHeader: header(ctx, "secure-session-response"), expectedJti },
           storage,
         );
-        emit(onEvent, { type: "registration", sessionId, tier: "dbsc", timestamp: Date.now(), algorithm: "ES256", ip: "" });
+        emit(onEvent, { type: "registration", sessionId, tier: "dbsc", timestamp: Date.now(), algorithm: registered.algorithm, ip: ipOf(ctx) });
         cookies.setBound(cctx, sessionId, boundCookieTtl);
         cookies.clearChallenge(cctx);
         return ctx.json(sessionConfig(sessionId, refreshUrl, cookies.names.bound, cookies.attributesString, originOf(ctx)));
       } catch (err) {
         if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {
-          emit(onEvent, { type: "verification_failure", sessionId, tier: "dbsc", timestamp: Date.now(), reason: err.code, ip: "" });
+          emit(onEvent, { type: "verification_failure", sessionId, tier: "dbsc", timestamp: Date.now(), reason: err.code, ip: ipOf(ctx) });
           throw new APIError("BAD_REQUEST", { error: err.message });
         }
         throw err;
@@ -139,6 +173,10 @@ export function buildDbscRoutes(deps: RouteDeps): Record<string, unknown> {
       const sessionId = header(ctx, "sec-secure-session-id") ?? cookies.readBoundOrReg(cctx);
       if (!sessionId) throw new APIError("FORBIDDEN", { error: "no session" });
 
+      // Unknown, expired or signed-out session: no challenge (nothing is
+      // written for an arbitrary id) and 401, which ends Chrome's binding.
+      if (!(await storage.getSession(sessionId))) throw unauthorized();
+
       const responseHeader = readSessionResponseHeader(headersRecord(ctx));
       const expectedJti = cookies.readChallenge(cctx);
 
@@ -154,17 +192,17 @@ export function buildDbscRoutes(deps: RouteDeps): Record<string, unknown> {
 
       try {
         await handleRefresh({ sessionId, secSessionResponseHeader: responseHeader, expectedJti }, storage);
-        emit(onEvent, { type: "refresh", sessionId, tier: "dbsc", timestamp: Date.now(), ip: "" });
+        emit(onEvent, { type: "refresh", sessionId, tier: "dbsc", timestamp: Date.now(), ip: ipOf(ctx) });
         cookies.setBound(cctx, sessionId, boundCookieTtl);
         cookies.clearChallenge(cctx);
         return ctx.json(sessionConfig(sessionId, refreshUrl, cookies.names.bound, cookies.attributesString, originOf(ctx)));
       } catch (err) {
         const stolen = await storage.getBoundKey(sessionId);
         if (stolen && err instanceof DbscVerificationError && err.code === ErrorCodes.SIGNATURE_INVALID) {
-          emit(onEvent, { type: "session_stolen", sessionId, tier: "dbsc", timestamp: Date.now(), ip: "" });
+          emit(onEvent, { type: "session_stolen", sessionId, tier: "dbsc", timestamp: Date.now(), ip: ipOf(ctx) });
         }
         if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {
-          emit(onEvent, { type: "verification_failure", sessionId, tier: "dbsc", timestamp: Date.now(), reason: (err as DbscVerificationError).code, ip: "" });
+          emit(onEvent, { type: "verification_failure", sessionId, tier: "dbsc", timestamp: Date.now(), reason: (err as DbscVerificationError).code, ip: ipOf(ctx) });
           const challenge = await issueChallenge(sessionId, storage);
           ctx.setHeader(CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
           ctx.setHeader(LEGACY_CHALLENGE_HEADER, buildChallengeHeader(challenge.jti, sessionId));
@@ -191,7 +229,9 @@ export function buildDbscRoutes(deps: RouteDeps): Record<string, unknown> {
       const sessionId = cookies.readBoundOrReg(cctx);
       if (!sessionId) return ctx.json({ phase: "unbound", sessionId: null, ...(nativeSkipped && { nativeSkipped }) });
       const session = await storage.getSession(sessionId);
-      if (!session) return ctx.json({ phase: "unbound", sessionId: null, ...(nativeSkipped && { nativeSkipped }) });
+      if (!session || !(await callerOwns(ctx, sessionId))) {
+        return ctx.json({ phase: "unbound", sessionId: null, ...(nativeSkipped && { nativeSkipped }) });
+      }
       const nativeKey = await storage.getBoundKey(sessionId, "native");
       const boundKey = await storage.getBoundKey(sessionId, "bound");
       if (!nativeKey && !boundKey) {
@@ -202,7 +242,7 @@ export function buildDbscRoutes(deps: RouteDeps): Record<string, unknown> {
         const challenge = await issueChallenge(sessionId, storage);
         return ctx.json({ phase: "needs-bound-registration", sessionId, tier: session.tier, challenge: challenge.jti, refreshIntervalMs: boundCookieTtl, ...(nativeSkipped && { nativeSkipped }) });
       }
-      return ctx.json({ phase: "bound", sessionId, tier: session.tier, refreshIntervalMs: boundCookieTtl, ...(nativeSkipped && { nativeSkipped }) });
+      return ctx.json({ phase: "bound", sessionId, tier: nativeKey ? "dbsc" : session.tier, refreshIntervalMs: boundCookieTtl, ...(nativeSkipped && { nativeSkipped }) });
     },
   );
 
@@ -215,9 +255,9 @@ export function buildDbscRoutes(deps: RouteDeps): Record<string, unknown> {
       const storage = storageFromCtx(ctx);
       const cctx = ctx as unknown as CookieCtx;
       const sessionId = cookies.readBoundOrReg(cctx);
-      if (!sessionId) throw new APIError("FORBIDDEN", { error: "no session" });
+      if (!sessionId) throw unauthorized();
       const session = await storage.getSession(sessionId);
-      if (!session) throw new APIError("FORBIDDEN", { error: "no session" });
+      if (!session || !(await callerOwns(ctx, sessionId))) throw unauthorized();
       const challenge = await issueChallenge(sessionId, storage);
       return ctx.json({ challenge: challenge.jti });
     },
@@ -232,20 +272,24 @@ export function buildDbscRoutes(deps: RouteDeps): Record<string, unknown> {
       const storage = storageFromCtx(ctx);
       const cctx = ctx as unknown as CookieCtx;
       const sessionId = cookies.readBoundOrReg(cctx);
-      if (!sessionId) throw new APIError("BAD_REQUEST", { error: "missing session cookie" });
+      if (!sessionId || !(await callerOwns(ctx, sessionId))) throw unauthorized();
       const body = (ctx.body ?? {}) as { publicKey?: unknown; signature?: string; challenge?: string };
       if (!body.publicKey || !body.signature || !body.challenge) {
         throw new APIError("BAD_REQUEST", { error: "publicKey, signature, and challenge are required" });
       }
       const { publicKey, signature, challenge } = body as { publicKey: any; signature: string; challenge: string };
       try {
-        await handleBoundRegistration({ sessionId, publicKey, signature, expectedJti: challenge }, storage);
-        emit(onEvent, { type: "registration", sessionId, tier: "bound", timestamp: Date.now(), algorithm: "ES256", ip: "" });
+        await handleBoundRegistration(
+          { sessionId, publicKey, signature, expectedJti: challenge },
+          storage,
+          { ...(deps.boundRegistrationWindowMs !== undefined && { registrationWindowMs: deps.boundRegistrationWindowMs }) },
+        );
+        emit(onEvent, { type: "registration", sessionId, tier: "bound", timestamp: Date.now(), algorithm: "ES256", ip: ipOf(ctx) });
         cookies.setBound(cctx, sessionId, boundCookieTtl);
         return ctx.json({ session_identifier: sessionId, refresh_url: boundRefreshUrl, tier: "bound" });
       } catch (err) {
         if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {
-          emit(onEvent, { type: "verification_failure", sessionId, tier: "bound", timestamp: Date.now(), reason: err.code, ip: "" });
+          emit(onEvent, { type: "verification_failure", sessionId, tier: "bound", timestamp: Date.now(), reason: err.code, ip: ipOf(ctx) });
           throw new APIError("BAD_REQUEST", { error: err.message });
         }
         throw err;
@@ -262,7 +306,7 @@ export function buildDbscRoutes(deps: RouteDeps): Record<string, unknown> {
       const storage = storageFromCtx(ctx);
       const cctx = ctx as unknown as CookieCtx;
       const sessionId = cookies.readBoundOrReg(cctx);
-      if (!sessionId) throw new APIError("FORBIDDEN", { error: "no session" });
+      if (!sessionId || !(await callerOwns(ctx, sessionId))) throw unauthorized();
       const body = (ctx.body ?? {}) as { challenge?: string; signature?: string; timestamp?: number };
       if (!body.challenge || !body.signature || typeof body.timestamp !== "number") {
         throw new APIError("BAD_REQUEST", { error: "challenge, signature, and timestamp are required" });
@@ -270,16 +314,16 @@ export function buildDbscRoutes(deps: RouteDeps): Record<string, unknown> {
       const { challenge, signature, timestamp } = body as { challenge: string; signature: string; timestamp: number };
       try {
         await handleBoundRefresh({ sessionId, signature, expectedJti: challenge, timestamp }, storage);
-        emit(onEvent, { type: "refresh", sessionId, tier: "bound", timestamp: Date.now(), ip: "" });
+        emit(onEvent, { type: "refresh", sessionId, tier: "bound", timestamp: Date.now(), ip: ipOf(ctx) });
         cookies.setBound(cctx, sessionId, boundCookieTtl);
         return ctx.json({ session_identifier: sessionId, refresh_url: boundRefreshUrl, tier: "bound" });
       } catch (err) {
         const stolen = await storage.getBoundKey(sessionId);
         if (stolen && err instanceof DbscVerificationError && err.code === ErrorCodes.SIGNATURE_INVALID) {
-          emit(onEvent, { type: "session_stolen", sessionId, tier: "bound", timestamp: Date.now(), ip: "" });
+          emit(onEvent, { type: "session_stolen", sessionId, tier: "bound", timestamp: Date.now(), ip: ipOf(ctx) });
         }
         if (err instanceof DbscVerificationError || err instanceof DbscProtocolError) {
-          emit(onEvent, { type: "verification_failure", sessionId, tier: "bound", timestamp: Date.now(), reason: err.code, ip: "" });
+          emit(onEvent, { type: "verification_failure", sessionId, tier: "bound", timestamp: Date.now(), reason: err.code, ip: ipOf(ctx) });
           throw new APIError("UNAUTHORIZED", { error: err.message });
         }
         throw err;

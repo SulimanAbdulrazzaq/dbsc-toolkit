@@ -61,7 +61,20 @@ export function createBetterAuthStorageAdapter(
         model: "dbscSession",
         where: [{ field: "id", value: id }],
       });
-      return row ? rowToSession(row) : null;
+      if (!row) return null;
+      // The binding is only valid while the Better Auth session it belongs to
+      // exists and has not expired. Sign-out, revocation, bans and expiry all
+      // remove or end that row, so the binding ends with it: refresh answers
+      // 401, the state route reports unbound and requireProof sees no tier.
+      const owner = await db.findOne<Record<string, unknown>>({
+        model: "session",
+        where: [{ field: "id", value: id }],
+      });
+      if (!owner) return null;
+      const ownerExpiry = toMillis(owner["expiresAt"]);
+      if (ownerExpiry !== null && ownerExpiry <= Date.now()) return null;
+      const session = rowToSession(row);
+      return ownerExpiry !== null ? { ...session, expiresAt: ownerExpiry } : session;
     },
 
     async setSession(session: Session): Promise<void> {
@@ -87,6 +100,10 @@ export function createBetterAuthStorageAdapter(
     },
 
     async deleteSession(id: string): Promise<void> {
+      await db.delete({
+        model: "dbscBoundKey",
+        where: [{ field: "sessionId", value: id }],
+      });
       await db.delete({
         model: "dbscSession",
         where: [{ field: "id", value: id }],
@@ -218,6 +235,16 @@ export function createBetterAuthStorageAdapter(
       });
     },
   };
+}
+
+function toMillis(value: unknown): number | null {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const t = Date.parse(value);
+    return Number.isNaN(t) ? null : t;
+  }
+  return null;
 }
 
 function rowToSession(row: Record<string, unknown>): Session {

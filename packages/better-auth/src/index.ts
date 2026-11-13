@@ -13,8 +13,10 @@
  *     plugins: [dbsc()]
  *   })
  */
+import type { BetterAuthPlugin } from "better-auth";
 import {
   issueChallenge,
+  startBinding,
   buildRegistrationHeader,
   REGISTRATION_HEADER,
   LEGACY_REGISTRATION_HEADER,
@@ -32,6 +34,7 @@ import {
   DPOP_WWW_AUTHENTICATE,
   type RequireDpopOptions,
 } from "dbsc-toolkit/dpop";
+import { MemoryReplayCache } from "dbsc-toolkit/storage/memory";
 
 import { createAuthEndpoint } from "better-auth/api";
 
@@ -58,6 +61,12 @@ export interface DbscPluginOptions {
   /** Bound cookie lifetime / refresh cadence (ms) used by the protocol routes. Default: 600_000. */
   boundCookieTtl?: number;
   /**
+   * How long after sign-in (or after Chrome's native registration) the
+   * polyfill key may still register, in ms. Default 300000. See
+   * `boundRegistrationWindowMs` in dbsc-toolkit.
+   */
+  boundRegistrationWindowMs?: number;
+  /**
    * Mount the Web Crypto polyfill routes. Default true. Set false to run
    * native DBSC only (Chromium 145+): the bound endpoints are not mounted
    * (the state endpoint answers `unbound`), non-Chromium browsers stay
@@ -77,6 +86,10 @@ export interface DbscPluginOptions {
    * and resource endpoints live in your app — Better Auth issues session tokens,
    * not OAuth bearers, so the bearer lifecycle stays yours.
    */
+  /**
+   * @deprecated Has no effect: the plugin never read it. Pass `iatWindowMs`
+   * and the other DPoP options to `dbscDpop.verify()` instead.
+   */
   dpop?: {
     enabled?: boolean;
     /** Acceptable DPoP proof `iat` window in ms. Default 300000. */
@@ -90,7 +103,7 @@ const REGISTRATION_PATH = "/dbsc/registration";
 const DEFAULT_COOKIE_TTL = 600_000;
 const DEFAULT_BASE_PATH = "/api/auth";
 
-export function dbsc(opts: DbscPluginOptions = {}): object {
+export function dbsc(opts: DbscPluginOptions = {}): BetterAuthPlugin {
   const {
     basePath = DEFAULT_BASE_PATH,
     cookieScope = "host",
@@ -125,7 +138,8 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
       "HttpOnly",
       "Path=/",
       "SameSite=Lax",
-      `Max-Age=${Math.floor(cookieTtl / 1000)}`,
+      // Same lifetime the protocol routes use when they re-issue it.
+      `Max-Age=${Math.floor(boundCookieTtl / 1000)}`,
       ...(secure ? ["Secure"] : []),
       ...(cookieDomain ? [`Domain=${cookieDomain}`] : []),
     ].join("; ");
@@ -157,6 +171,7 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
     cookies,
     basePath,
     boundCookieTtl,
+    ...(opts.boundRegistrationWindowMs !== undefined && { boundRegistrationWindowMs: opts.boundRegistrationWindowMs }),
     ...(opts.bound !== undefined && { bound: opts.bound }),
     ...(opts.onEvent !== undefined && { onEvent: opts.onEvent }),
   });
@@ -237,13 +252,16 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
 
             let sessionId: string | undefined;
             let userId: string | undefined;
+            let sessionExpiresAt: number | undefined;
 
             try {
               const result = await internalAdapter.findSession(token) as
-                | { session?: { id?: string; userId?: string }; user?: { id?: string } }
+                | { session?: { id?: string; userId?: string; expiresAt?: Date | string | number }; user?: { id?: string } }
                 | null;
               sessionId = result?.session?.id;
               userId = result?.session?.userId ?? result?.user?.id;
+              const exp = result?.session?.expiresAt;
+              if (exp !== undefined) sessionExpiresAt = new Date(exp).getTime();
             } catch {
               return empty;
             }
@@ -254,19 +272,13 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
               ctx.context.adapter,
               ctx.context.internalAdapter,
             );
-            const now = Date.now();
-
-            const existing = await store.getSession(sessionId);
-            if (!existing) {
-              await store.setSession({
-                id: sessionId,
-                userId,
-                tier: "none",
-                createdAt: now,
-                expiresAt: now + cookieTtl,
-                lastRefreshAt: now,
-              });
-            }
+            // A fresh binding per sign-in: the registration window starts now,
+            // and the row's expiry tracks the Better Auth session.
+            const ttl =
+              sessionExpiresAt !== undefined && Number.isFinite(sessionExpiresAt)
+                ? Math.max(1, sessionExpiresAt - Date.now())
+                : cookieTtl;
+            await startBinding(store, { sessionId, userId, sessionTtlMs: ttl });
 
             const { jti } = await issueChallenge(sessionId, store, cookieTtl);
 
@@ -293,7 +305,7 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
         },
       ],
     },
-  } satisfies object;
+  } satisfies BetterAuthPlugin;
 }
 
 /**
@@ -310,6 +322,48 @@ export function dbsc(opts: DbscPluginOptions = {}): object {
  *   const denied = await dbscDpop.verify(request, { getBoundJkt });
  *   if (denied) return denied; // 401 + WWW-Authenticate: DPoP
  */
+// Default jti replay store for dbscDpop.verify(); pass a RedisReplayCache when
+// running more than one instance.
+const defaultDpopReplayCache = new MemoryReplayCache();
+
+/**
+ * Returns an `expectSessionId` hook for `requireProof()` from
+ * `dbsc-toolkit/<framework>` that resolves the Better Auth session of the
+ * request. Without it, the guard accepts a stolen Better Auth cookie paired
+ * with the attacker's own bound DBSC session.
+ *
+ *   app.get("/profile", requireProof({ expectSessionId: expectBetterAuthSession(auth) }), handler)
+ *
+ * Works with Express/Node requests, Fastify requests, Hono contexts, Next.js
+ * requests and SvelteKit events.
+ */
+export function expectBetterAuthSession(auth: {
+  api: { getSession(input: { headers: Headers }): Promise<{ session?: { id?: string } } | null> };
+}): (req: unknown) => Promise<string | undefined> {
+  return async (req) => {
+    const result = await auth.api.getSession({ headers: requestHeaders(req) });
+    return result?.session?.id;
+  };
+}
+
+function requestHeaders(req: unknown): Headers {
+  const r = req as {
+    headers?: unknown;
+    req?: { raw?: Request };
+    request?: { headers?: unknown };
+  };
+  if (r?.headers instanceof Headers) return r.headers;
+  if (r?.req?.raw instanceof Request) return r.req.raw.headers;
+  if (r?.request?.headers instanceof Headers) return r.request.headers;
+  const out = new Headers();
+  const raw = (r?.headers ?? {}) as Record<string, string | string[] | undefined>;
+  for (const [k, v] of Object.entries(raw)) {
+    if (v === undefined) continue;
+    for (const item of Array.isArray(v) ? v : [v]) out.append(k, item);
+  }
+  return out;
+}
+
 export const dbscDpop = {
   /** Returns `{ jkt }` to embed as the access token's `cnf.jkt`. */
   bind: dpopConfirmation,
@@ -332,10 +386,11 @@ export const dbscDpop = {
       method: request.method,
       url: request.url,
       boundJkt,
-      replayCache: opts.replayCache,
+      replayCache: opts.replayCache ?? defaultDpopReplayCache,
       opts: {
         ...(opts.requireTokenBinding !== undefined && { requireTokenBinding: opts.requireTokenBinding }),
         ...(opts.iatWindowMs !== undefined && { iatWindowMs: opts.iatWindowMs }),
+        ...(opts.origin !== undefined && { origin: opts.origin }),
       },
     });
     if (outcome.ok) return undefined;
