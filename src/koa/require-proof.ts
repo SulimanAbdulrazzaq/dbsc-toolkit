@@ -3,6 +3,9 @@ import type { IncomingMessage } from "node:http";
 import {
   verifyBoundProof,
   noBindingReason,
+  sessionBindingMatches,
+  SESSION_MISMATCH_MESSAGE,
+  ErrorCodes,
   DbscVerificationError,
   type RequireProofOptions,
 } from "../core/index.js";
@@ -26,7 +29,7 @@ async function readRawBody(ctx: Context): Promise<Uint8Array> {
  * `ctx.state.dbsc`. Reads the raw body from `ctx.request.rawBody` when a body
  * parser populated it, else from the socket.
  */
-export function requireProof(opts: RequireProofOptions = {}): Middleware {
+export function requireProof(opts: RequireProofOptions<Context> = {}): Middleware {
   return async (ctx, next) => {
     const session = (ctx.state as { dbsc?: DbscNodeSession }).dbsc;
     const tier = session?.tier ?? "none";
@@ -45,6 +48,12 @@ export function requireProof(opts: RequireProofOptions = {}): Middleware {
       return;
     }
 
+    if (!(await sessionBindingMatches(opts, ctx, session.sessionId, storage))) {
+      ctx.status = 403;
+      ctx.body = { error: SESSION_MISMATCH_MESSAGE, code: ErrorCodes.SESSION_MISMATCH };
+      return;
+    }
+
     const allowDbscWithoutProof =
       opts.allowDbscWithoutProof ?? (internal?.boundEnabled === false ? true : undefined);
     if (tier === "dbsc" && allowDbscWithoutProof) {
@@ -59,7 +68,8 @@ export function requireProof(opts: RequireProofOptions = {}): Middleware {
           sessionId: session.sessionId,
           proofHeader,
           method: ctx.method,
-          path: ctx.path,
+          // Full pathname: koa-mount rewrites ctx.path but the client signs the whole URL.
+          path: new URL(ctx.originalUrl, "http://x").pathname,
           signBody: true,
           bodyBytes: await readRawBody(ctx),
           ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),

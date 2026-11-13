@@ -73,6 +73,32 @@ describe("express guard fixes", () => {
     expect(await res.json()).toEqual({ handled: true });
   });
 
+  it("expectSessionId rejects a valid proof from someone else's bound session", async () => {
+    const { storage, sessionId, kp } = await boundSession();
+    const app = express();
+    app.use(dbsc({ storage, secure: false }));
+    app.get(
+      "/x",
+      requireProof({ expectSessionId: (req) => req.get("x-app-session") }),
+      (_req, res) => res.json({ ok: true }),
+    );
+    const srv = await serve(app);
+    const call = async (appSession: string) =>
+      fetch(`${srv.base}/x`, {
+        headers: {
+          cookie: `dbsc-session=${sessionId}`,
+          "x-app-session": appSession,
+          "x-dbsc-bound-proof": await proof(kp, sessionId, "/x"),
+        },
+      });
+    const stolen = await call("victim-session");
+    const own = await call(sessionId);
+    srv.close();
+    expect(stolen.status).toBe(403);
+    expect((await stolen.json()).code).toBe("SESSION_MISMATCH");
+    expect(own.status).toBe(200);
+  });
+
   it("revoke() keeps cookies the app already set on the response", async () => {
     const { storage, sessionId } = await boundSession();
     const app = express();

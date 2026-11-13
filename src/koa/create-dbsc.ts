@@ -24,7 +24,7 @@ export interface DbscKit {
   /** Start a binding for an explicit session id. */
   bind(ctx: Context, sessionId: string, opts: BindOptions): Promise<string>;
   /** The route guard — requires a bound device + a per-request proof. */
-  requireProof(opts?: RequireProofOptions): Middleware;
+  requireProof(opts?: RequireProofOptions<Context>): Middleware;
   /** DPoP (RFC 9449) route guard for token-bound API calls. Optional layer. */
   requireDpop(opts?: RequireDpopOptions<Context>): Middleware;
 }

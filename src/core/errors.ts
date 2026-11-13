@@ -51,6 +51,9 @@ export const ErrorCodes = {
   MISSING_PROOF: "MISSING_PROOF",
   MALFORMED_PROOF: "MALFORMED_PROOF",
   PROOF_REPLAY: "PROOF_REPLAY",
+  // The DBSC session presented with the request is not the one bound to the
+  // app's own login (expectSessionId / expectUserId).
+  SESSION_MISMATCH: "SESSION_MISMATCH",
   // DPoP (RFC 9449). Optional layer, reached only via the dbsc-toolkit/dpop
   // subpath. A failed DPoP check maps to HTTP 401 + WWW-Authenticate: DPoP
   // (resource-server semantics) — not the 403 the DBSC per-request proof uses.

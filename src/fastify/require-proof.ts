@@ -1,5 +1,11 @@
 import type { FastifyRequest, FastifyReply, preHandlerAsyncHookHandler } from "fastify";
-import { noBindingReason, type RequireProofOptions } from "../core/index.js";
+import {
+  noBindingReason,
+  sessionBindingMatches,
+  SESSION_MISMATCH_MESSAGE,
+  ErrorCodes,
+  type RequireProofOptions,
+} from "../core/index.js";
 import { requireBoundProof } from "./proof.js";
 import { DBSC_INTERNAL, type DbscInternal } from "./index.js";
 
@@ -13,7 +19,7 @@ import { DBSC_INTERNAL, type DbscInternal } from "./index.js";
  * route must register a buffer body parser. Storage is read from the request
  * context the `dbsc` plugin populates; pass `{ storage }` only to override.
  */
-export function requireProof(opts: RequireProofOptions = {}): preHandlerAsyncHookHandler {
+export function requireProof(opts: RequireProofOptions<FastifyRequest> = {}): preHandlerAsyncHookHandler {
   return async function preHandler(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const dbsc = req.dbsc;
     const tier = dbsc?.tier ?? "none";
@@ -36,6 +42,10 @@ export function requireProof(opts: RequireProofOptions = {}): preHandlerAsyncHoo
         error:
           "requireProof: storage unavailable — register the dbsc plugin / createDbsc().install() first, or pass { storage }",
       });
+      return;
+    }
+    if (!(await sessionBindingMatches(opts, req, dbsc!.sessionId!, storage))) {
+      reply.status(403).send({ error: SESSION_MISMATCH_MESSAGE, code: ErrorCodes.SESSION_MISMATCH });
       return;
     }
     // bound polyfill off → no bound key exists → auto-relax the dbsc tier.

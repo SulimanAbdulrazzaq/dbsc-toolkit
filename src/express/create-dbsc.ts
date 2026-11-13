@@ -79,7 +79,7 @@ export interface DbscKit {
   bind(res: Response, sessionId: string, opts: BindOptions): Promise<string>;
   bind(res: Response, opts: BindOptions): Promise<string>;
   /** The route guard — requires a bound device + a per-request proof. */
-  requireProof(opts?: RequireProofOptions): RequestHandler;
+  requireProof(opts?: RequireProofOptions<Request>): RequestHandler;
   /** DPoP (RFC 9449) route guard for token-bound API calls. Optional layer. */
   requireDpop(opts?: RequireDpopOptions<Request>): RequestHandler;
 }

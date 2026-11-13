@@ -8,7 +8,12 @@ import type { SkippedEntry } from "./protocol/headers.js";
  * As of v2.7 Chromium sessions register a polyfill key alongside the TPM
  * key, so the per-request signature works the same way on every tier.
  */
-export interface RequireProofOptions {
+/** Returns the app's own value for this request, or nothing when there is no login. */
+export type SessionBindingHook<Req> = (
+  req: Req,
+) => string | null | undefined | Promise<string | null | undefined>;
+
+export interface RequireProofOptions<Req = unknown> {
   /**
    * Skip the per-request proof header on `tier: "dbsc"`. **Default `false`
    * as of v2.7.** v2.6 and earlier defaulted to `true`, which left a
@@ -38,6 +43,48 @@ export interface RequireProofOptions {
    * shared context. An explicit `allowDbscWithoutProof` still wins.
    */
   bound?: boolean;
+  /**
+   * Ties the device-bound session to the app's own login. Return the session
+   * id you passed to `bind()` for the user this request is authenticated as.
+   * The guard rejects with 403 `SESSION_MISMATCH` when it differs from the
+   * DBSC session on the request, or when it returns nothing.
+   *
+   * Without this (or `expectUserId`) the guard only proves the request came
+   * from *some* bound device: an attacker can pair a stolen app cookie with
+   * their own bound DBSC session and pass. Set one of the two on every route
+   * where the app identifies the user from a separate cookie or token.
+   */
+  expectSessionId?: SessionBindingHook<Req>;
+  /**
+   * Like `expectSessionId`, but compares against the `userId` passed to
+   * `bind()`. Use it when the app has no stable session id (JWT mode).
+   */
+  expectUserId?: SessionBindingHook<Req>;
+}
+
+export const SESSION_MISMATCH_MESSAGE = "device-bound session does not belong to this login";
+
+/**
+ * Runs the `expectSessionId` / `expectUserId` hooks. Returns `true` when the
+ * DBSC session on the request belongs to the app's login (or no hook is set).
+ */
+export async function sessionBindingMatches<Req>(
+  opts: RequireProofOptions<Req>,
+  req: Req,
+  sessionId: string,
+  storage: StorageAdapter,
+): Promise<boolean> {
+  if (opts.expectSessionId) {
+    const want = await opts.expectSessionId(req);
+    if (!want || want !== sessionId) return false;
+  }
+  if (opts.expectUserId) {
+    const want = await opts.expectUserId(req);
+    if (!want) return false;
+    const sess = await storage.getSession(sessionId);
+    if (!sess || sess.userId !== want) return false;
+  }
+  return true;
 }
 
 /** Human-readable reason for a `tier: "none"` rejection — quota-aware. */

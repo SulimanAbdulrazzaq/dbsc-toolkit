@@ -2,6 +2,9 @@ import type { NextRequest } from "next/server.js";
 import { NextResponse } from "next/server.js";
 import {
   noBindingReason,
+  sessionBindingMatches,
+  SESSION_MISMATCH_MESSAGE,
+  ErrorCodes,
   type RequireProofOptions,
   type ProtectionTier,
   type SkippedEntry,
@@ -31,7 +34,7 @@ export type RequireProofResult = { ok: true } | { ok: false; response: NextRespo
 export async function requireProof(
   req: NextRequest,
   session: RequireProofSession,
-  opts: RequireProofOptions = {},
+  opts: RequireProofOptions<NextRequest> = {},
 ): Promise<RequireProofResult> {
   const skipped = session.skipped ?? [];
   if (session.tier === "none") {
@@ -55,6 +58,12 @@ export async function requireProof(
         { error: "requireProof: storage required — pass { storage }" },
         { status: 500 },
       ),
+    };
+  }
+  if (!session.sessionId || !(await sessionBindingMatches(opts, req, session.sessionId, opts.storage))) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: SESSION_MISMATCH_MESSAGE, code: ErrorCodes.SESSION_MISMATCH }, { status: 403 }),
     };
   }
   // bound polyfill off → no bound key exists → auto-relax the dbsc tier.

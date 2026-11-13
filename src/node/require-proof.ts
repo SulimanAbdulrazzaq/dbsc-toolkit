@@ -2,6 +2,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   verifyBoundProof,
   noBindingReason,
+  sessionBindingMatches,
+  SESSION_MISMATCH_MESSAGE,
+  ErrorCodes,
   DbscVerificationError,
   type RequireProofOptions,
 } from "../core/index.js";
@@ -31,7 +34,7 @@ async function readRawBody(req: IncomingMessage): Promise<Uint8Array> {
  * cached on the request, so a downstream handler can re-read it via
  * `readJsonBody(req)`.
  */
-export function requireProof(opts: RequireProofOptions = {}): NodeProofGuard {
+export function requireProof(opts: RequireProofOptions<IncomingMessage> = {}): NodeProofGuard {
   return async (req, res) => {
     const session = getDbscSession(req);
     const tier = session?.tier ?? "none";
@@ -52,11 +55,19 @@ export function requireProof(opts: RequireProofOptions = {}): NodeProofGuard {
       return false;
     }
 
+    if (!(await sessionBindingMatches(opts, req, session.sessionId, storage))) {
+      res.setHeader("Content-Type", "application/json");
+      res.statusCode = 403;
+      res.end(JSON.stringify({ error: SESSION_MISMATCH_MESSAGE, code: ErrorCodes.SESSION_MISMATCH }));
+      return false;
+    }
+
     const allowDbscWithoutProof =
       opts.allowDbscWithoutProof ?? (internal?.boundEnabled === false ? true : undefined);
     if (tier === "dbsc" && allowDbscWithoutProof) return true;
 
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    // Fixed base: only the pathname is needed, and a hostile Host header must not throw.
+    const url = new URL(req.url ?? "/", "http://x");
     const proofHeaderRaw = req.headers["x-dbsc-bound-proof"];
     const proofHeader = Array.isArray(proofHeaderRaw) ? proofHeaderRaw[0] : proofHeaderRaw;
 

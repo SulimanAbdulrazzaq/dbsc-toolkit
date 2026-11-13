@@ -1,5 +1,11 @@
-import type { MiddlewareHandler } from "hono";
-import { noBindingReason, type RequireProofOptions } from "../core/index.js";
+import type { Context, MiddlewareHandler } from "hono";
+import {
+  noBindingReason,
+  sessionBindingMatches,
+  SESSION_MISMATCH_MESSAGE,
+  ErrorCodes,
+  type RequireProofOptions,
+} from "../core/index.js";
 import { requireBoundProof } from "./proof.js";
 import { DBSC_INTERNAL, type DbscInternal } from "./index.js";
 
@@ -12,7 +18,7 @@ import { DBSC_INTERNAL, type DbscInternal } from "./index.js";
  * every browser. Storage is read from the context the `dbsc()` middleware
  * populates; pass `{ storage }` only to override.
  */
-export function requireProof(opts: RequireProofOptions = {}): MiddlewareHandler {
+export function requireProof(opts: RequireProofOptions<Context> = {}): MiddlewareHandler {
   return async (c, next) => {
     const dbsc = c.get("dbsc");
     const tier = dbsc?.tier ?? "none";
@@ -40,6 +46,9 @@ export function requireProof(opts: RequireProofOptions = {}): MiddlewareHandler 
         },
         500,
       );
+    }
+    if (!(await sessionBindingMatches(opts, c, dbsc!.sessionId!, storage))) {
+      return c.json({ error: SESSION_MISMATCH_MESSAGE, code: ErrorCodes.SESSION_MISMATCH }, 403);
     }
     // bound polyfill off → no bound key exists → auto-relax the dbsc tier.
     // Resolved per request — boundEnabled can differ between requests (e.g. two

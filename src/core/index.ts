@@ -62,8 +62,8 @@ export { maybeEmitPolyfillMissing, POLYFILL_MISSING_GRACE_MS } from "./telemetry
 export { deriveSessionId } from "./derive-session-id.js";
 export type { DeriveSessionIdInput } from "./derive-session-id.js";
 
-export { noBindingReason } from "./protect-policy.js";
-export type { RequireProofOptions } from "./protect-policy.js";
+export { noBindingReason, sessionBindingMatches, SESSION_MISMATCH_MESSAGE } from "./protect-policy.js";
+export type { RequireProofOptions, SessionBindingHook } from "./protect-policy.js";
 
 export { parseCookieHeader } from "./protocol/cookies.js";
 

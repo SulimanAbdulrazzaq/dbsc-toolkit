@@ -1,6 +1,8 @@
 import { error, type RequestEvent } from "@sveltejs/kit";
 import {
   verifyBoundProof,
+  sessionBindingMatches,
+  SESSION_MISMATCH_MESSAGE,
   DbscVerificationError,
   type RequireProofOptions,
 } from "../core/index.js";
@@ -17,7 +19,7 @@ import { DBSC_INTERNAL, type DbscInternal, type DbscSvelteKitSession } from "./i
  *
  * Throws a SvelteKit `error(403)` when there is no binding or the proof fails.
  */
-export function requireProof(opts: RequireProofOptions = {}) {
+export function requireProof(opts: RequireProofOptions<RequestEvent> = {}) {
   return async (event: RequestEvent): Promise<void> => {
     const session = (event.locals as Record<string, unknown>).dbsc as DbscSvelteKitSession | undefined;
     const tier = session?.tier ?? "none";
@@ -29,6 +31,10 @@ export function requireProof(opts: RequireProofOptions = {}) {
     const storage = opts.storage ?? internal?.storage;
     if (!storage) {
       throw error(500, "requireProof: storage unavailable — add dbscHandle to hooks.server.ts, or pass { storage }");
+    }
+
+    if (!(await sessionBindingMatches(opts, event, session.sessionId, storage))) {
+      throw error(403, SESSION_MISMATCH_MESSAGE);
     }
 
     const allowDbscWithoutProof =

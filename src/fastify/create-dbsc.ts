@@ -65,7 +65,7 @@ export interface DbscKit {
   bind(reply: FastifyReply, sessionId: string, opts: BindOptions): Promise<string>;
   bind(reply: FastifyReply, opts: BindOptions): Promise<string>;
   /** The route guard (use as a `preHandler`). */
-  requireProof(opts?: RequireProofOptions): preHandlerAsyncHookHandler;
+  requireProof(opts?: RequireProofOptions<FastifyRequest>): preHandlerAsyncHookHandler;
   /** DPoP (RFC 9449) route guard (use as a `preHandler`). Optional layer. */
   requireDpop(opts?: RequireDpopOptions<FastifyRequest>): preHandlerAsyncHookHandler;
 }

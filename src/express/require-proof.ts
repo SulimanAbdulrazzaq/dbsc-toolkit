@@ -1,5 +1,11 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
-import { noBindingReason, type RequireProofOptions } from "../core/index.js";
+import {
+  noBindingReason,
+  sessionBindingMatches,
+  SESSION_MISMATCH_MESSAGE,
+  ErrorCodes,
+  type RequireProofOptions,
+} from "../core/index.js";
 import { requireBoundProof } from "./proof.js";
 import { DBSC_INTERNAL, type DbscInternal } from "./index.js";
 
@@ -19,10 +25,10 @@ import { DBSC_INTERNAL, type DbscInternal } from "./index.js";
  * body and need no parser. Storage is read from the context the `dbsc()`
  * middleware populates; pass `{ storage }` only to override.
  */
-export function requireProof(opts: RequireProofOptions = {}): RequestHandler {
+export function requireProof(opts: RequireProofOptions<Request> = {}): RequestHandler {
   // Returns the guard's promise so Express 5 routes a rejection (storage
   // outage, a throwing hook) to the error handler instead of leaking it.
-  return (req: Request, res: Response, next: NextFunction): void | Promise<void> => {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const dbsc = res.locals.dbsc;
     const tier = dbsc?.tier ?? "none";
     const skipped = dbsc?.skipped ?? [];
@@ -46,6 +52,10 @@ export function requireProof(opts: RequireProofOptions = {}): RequestHandler {
       });
       return;
     }
+    if (!(await sessionBindingMatches(opts, req, dbsc!.sessionId!, storage))) {
+      res.status(403).json({ error: SESSION_MISMATCH_MESSAGE, code: ErrorCodes.SESSION_MISMATCH });
+      return;
+    }
     // When the bound polyfill is disabled, no bound key is ever registered, so a
     // native dbsc-tier session has nothing to prove with. Auto-relax: pass dbsc
     // through. An explicit option still wins. Resolved per request — boundEnabled
@@ -60,6 +70,6 @@ export function requireProof(opts: RequireProofOptions = {}): RequestHandler {
       ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
       ...(internal?.replayCache !== undefined && { replayCache: internal.replayCache }),
     });
-    return proofHandler(req, res, next) as Promise<void>;
+    await (proofHandler(req, res, next) as Promise<void>);
   };
 }

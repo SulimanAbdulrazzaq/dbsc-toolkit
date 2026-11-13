@@ -16,6 +16,8 @@ import {
   verifyBoundProof,
   proofBodyBytes,
   noBindingReason,
+  sessionBindingMatches,
+  SESSION_MISMATCH_MESSAGE,
   DbscVerificationError,
   ErrorCodes,
   type RequireProofOptions,
@@ -79,7 +81,7 @@ export class DbscModule implements NestModule {
   }
 }
 
-async function runProof(req: Request, res: Response, opts: RequireProofOptions): Promise<void> {
+async function runProof(req: Request, res: Response, opts: RequireProofOptions<Request>): Promise<void> {
   const dbscLocals = res.locals.dbsc;
   const tier = dbscLocals?.tier ?? "none";
   const skipped = dbscLocals?.skipped ?? [];
@@ -91,6 +93,10 @@ async function runProof(req: Request, res: Response, opts: RequireProofOptions):
   const storage = opts.storage ?? internal?.storage;
   if (!storage) {
     throw new InternalServerErrorException("requireProof: storage unavailable — import DbscModule.forRoot(...)");
+  }
+
+  if (!(await sessionBindingMatches(opts, req, dbscLocals.sessionId, storage))) {
+    throw new ForbiddenException({ error: SESSION_MISMATCH_MESSAGE, code: ErrorCodes.SESSION_MISMATCH });
   }
 
   const allowDbscWithoutProof =
@@ -150,7 +156,7 @@ export class DbscGuard implements CanActivate {
 }
 
 /** Builds a guard with options baked in (e.g. a storage override or timestamp window). */
-export function createDbscGuard(opts: RequireProofOptions): new () => CanActivate {
+export function createDbscGuard(opts: RequireProofOptions<Request>): new () => CanActivate {
   @Injectable()
   class ConfiguredDbscGuard implements CanActivate {
     async canActivate(context: ExecutionContext): Promise<boolean> {
