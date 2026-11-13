@@ -195,6 +195,17 @@ export class PostgresStorage implements StorageAdapter {
   }
 
   /**
+   * Deletes expired sessions (their keys and challenges go with them through
+   * the cascades) and expired challenges of live sessions. Nothing else removes
+   * these rows, so call it on a schedule, e.g. hourly. Returns rows removed.
+   */
+  async deleteExpired(now: number = Date.now()): Promise<number> {
+    const sessions = await this.pool.query("DELETE FROM dbsc_sessions WHERE expires_at < $1", [now]);
+    const challenges = await this.pool.query("DELETE FROM dbsc_challenges WHERE expires_at < $1", [now]);
+    return (sessions.rowCount ?? 0) + (challenges.rowCount ?? 0);
+  }
+
+  /**
    * Apply every bundled `migrations/*.sql` file in order, idempotently. The
    * `dbsc_migrations` table records which scripts have already run so this
    * can be called on every boot — already-applied scripts are skipped.

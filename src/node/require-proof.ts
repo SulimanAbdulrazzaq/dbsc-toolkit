@@ -7,6 +7,7 @@ import {
   ErrorCodes,
   DbscVerificationError,
   type RequireProofOptions,
+  proofTarget,
 } from "../core/index.js";
 import { getDbscSession, DBSC_INTERNAL, type DbscInternal } from "./index.js";
 
@@ -93,7 +94,7 @@ export function requireProof(opts: RequireProofOptions<IncomingMessage> = {}): N
           sessionId: session.sessionId,
           proofHeader,
           method: req.method ?? "GET",
-          path: url.pathname,
+          path: proofTarget(url.pathname, url.search, opts.signQuery),
           signBody: true,
           bodyBytes,
           ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),

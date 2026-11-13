@@ -12,7 +12,6 @@ export class MemoryStorage implements StorageAdapter {
   // (one per kind) — see BoundKey.kind in core/types.ts.
   private keys = new Map<string, BoundKey>();
   private challenges = new Map<string, Challenge>();
-  private revoked = new Set<string>();
 
   async getSession(id: string): Promise<Session | null> {
     const sess = this.sessions.get(id);
@@ -85,7 +84,6 @@ export class MemoryStorage implements StorageAdapter {
   }
 
   async revokeSession(sessionId: string): Promise<void> {
-    this.revoked.add(sessionId);
     this.sessions.delete(sessionId);
     this.keys.delete(`${sessionId}:native`);
     this.keys.delete(`${sessionId}:bound`);
@@ -94,7 +92,6 @@ export class MemoryStorage implements StorageAdapter {
   async revokeAllForUser(userId: string): Promise<void> {
     for (const [id, sess] of this.sessions.entries()) {
       if (sess.userId === userId) {
-        this.revoked.add(id);
         this.sessions.delete(id);
         this.keys.delete(`${id}:native`);
         this.keys.delete(`${id}:bound`);

@@ -47,7 +47,20 @@ export class RedisStorage implements StorageAdapter {
   async setSession(session: Session): Promise<void> {
     const ttlSeconds = Math.max(1, Math.ceil((session.expiresAt - Date.now()) / 1000));
     await this.client.set(KEY.session(session.id), JSON.stringify(session), "EX", ttlSeconds);
-    await this.client.sadd(KEY.userSessions(session.userId), session.id);
+    const setKey = KEY.userSessions(session.userId);
+    await this.client.sadd(setKey, session.id);
+    // The per-user index lives as long as its longest-lived session.
+    const setTtl = await this.client.ttl(setKey);
+    if (setTtl < ttlSeconds) await this.client.expire(setKey, ttlSeconds);
+    // Keys share the session's lifetime instead of outliving it forever.
+    await this.client.expire(KEY.key(session.id, "native"), ttlSeconds);
+    await this.client.expire(KEY.key(session.id, "bound"), ttlSeconds);
+  }
+
+  /** Remaining session lifetime in seconds, or null when the session row is gone. */
+  private async sessionTtl(sessionId: string): Promise<number | null> {
+    const ttl = await this.client.ttl(KEY.session(sessionId));
+    return ttl > 0 ? ttl : null;
   }
 
   async deleteSession(id: string): Promise<void> {
@@ -94,7 +107,9 @@ export class RedisStorage implements StorageAdapter {
   }
 
   async setBoundKey(key: BoundKey): Promise<void> {
-    await this.client.set(KEY.key(key.sessionId, key.kind), JSON.stringify(key));
+    const ttl = await this.sessionTtl(key.sessionId);
+    if (ttl) await this.client.set(KEY.key(key.sessionId, key.kind), JSON.stringify(key), "EX", ttl);
+    else await this.client.set(KEY.key(key.sessionId, key.kind), JSON.stringify(key));
     // Stamp out the legacy unsuffixed key so a future read can't shadow the new layout.
     if (key.kind === "native") {
       await this.client.del(KEY.legacyKey(key.sessionId));
@@ -102,7 +117,11 @@ export class RedisStorage implements StorageAdapter {
   }
 
   async setBoundKeyIfAbsent(key: BoundKey): Promise<boolean> {
-    const result = await this.client.set(KEY.key(key.sessionId, key.kind), JSON.stringify(key), "NX");
+    const ttl = await this.sessionTtl(key.sessionId);
+    const slot = KEY.key(key.sessionId, key.kind);
+    const result = ttl
+      ? await this.client.set(slot, JSON.stringify(key), "EX", ttl, "NX")
+      : await this.client.set(slot, JSON.stringify(key), "NX");
     if (result !== "OK") return false;
     if (key.kind === "native") await this.client.del(KEY.legacyKey(key.sessionId));
     return true;

@@ -31,6 +31,7 @@ import {
   type SkippedEntry,
   type CookieScope,
 } from "../core/index.js";
+import { MemoryReplayCache } from "../storage/memory/replay-cache.js";
 
 export { requireBoundProof } from "./proof.js";
 export type {
@@ -153,7 +154,9 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
     boundCookieTtl = DEFAULT_BOUND_TTL_MS,
     registrationCookieTtl = DEFAULT_REG_TTL_MS,
     rateLimiter = new NoopRateLimiter(),
-    replayCache,
+    // Replay defense on by default; pass a RedisReplayCache when running
+    // more than one instance.
+    replayCache = new MemoryReplayCache(),
     onEvent,
     autoBind,
     secure = true,

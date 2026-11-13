@@ -66,6 +66,7 @@ export function requireProof(opts: RequireProofOptions<Request> = {}): RequestHa
     const proofHandler = requireBoundProof({
       storage,
       signBody: true,
+      ...(opts.signQuery !== undefined && { signQuery: opts.signQuery }),
       ...(allowDbscWithoutProof !== undefined && { allowDbscWithoutProof }),
       ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
       ...(internal?.replayCache !== undefined && { replayCache: internal.replayCache }),

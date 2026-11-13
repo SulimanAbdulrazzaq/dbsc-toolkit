@@ -4,10 +4,13 @@ import {
   DbscVerificationError,
   type StorageAdapter,
   type ProofReplayCache,
+  proofTarget,
 } from "../core/index.js";
 
 export interface RequireBoundProofOptions {
   storage: StorageAdapter;
+  /** Include the query string in the signed path (see RequireProofOptions.signQuery). */
+  signQuery?: boolean;
   /**
    * Skip the per-request proof header on `tier: "dbsc"`. **Default `false`
    * as of v2.7.** Older versions defaulted to `true`, which left a
@@ -48,7 +51,7 @@ export function requireBoundProof(opts: RequireBoundProofOptions): MiddlewareHan
           sessionId: dbsc.sessionId,
           proofHeader,
           method: c.req.method,
-          path: url.pathname,
+          path: proofTarget(url.pathname, url.search, opts.signQuery),
           timestampWindowMs: opts.timestampWindowMs,
           signBody,
           bodyBytes,

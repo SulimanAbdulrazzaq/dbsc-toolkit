@@ -21,6 +21,7 @@ import {
   DbscVerificationError,
   ErrorCodes,
   type RequireProofOptions,
+  proofTarget,
 } from "../core/index.js";
 import {
   runDpopGuard,
@@ -119,7 +120,7 @@ async function runProof(req: Request, res: Response, opts: RequireProofOptions<R
         sessionId: dbscLocals.sessionId,
         proofHeader: req.headers["x-dbsc-bound-proof"] as string | undefined,
         method: req.method,
-        path: new URL(req.originalUrl, "http://x").pathname,
+        path: proofTarget(new URL(req.originalUrl, "http://x").pathname, new URL(req.originalUrl, "http://x").search, opts.signQuery),
         signBody: true,
         bodyBytes,
         ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
@@ -190,6 +191,7 @@ async function runDpop(
     opts: {
       ...(opts.requireTokenBinding !== undefined && { requireTokenBinding: opts.requireTokenBinding }),
       ...(opts.iatWindowMs !== undefined && { iatWindowMs: opts.iatWindowMs }),
+      ...(opts.origin !== undefined && { origin: opts.origin }),
     },
   });
 

@@ -8,6 +8,7 @@ import {
   ErrorCodes,
   DbscVerificationError,
   type RequireProofOptions,
+  proofTarget,
 } from "../core/index.js";
 import { DBSC_INTERNAL, type DbscInternal, type DbscNodeSession } from "../node/index.js";
 
@@ -83,7 +84,7 @@ export function requireProof(opts: RequireProofOptions<Context> = {}): Middlewar
           proofHeader,
           method: ctx.method,
           // Full pathname: koa-mount rewrites ctx.path but the client signs the whole URL.
-          path: new URL(ctx.originalUrl, "http://x").pathname,
+          path: proofTarget(new URL(ctx.originalUrl, "http://x").pathname, new URL(ctx.originalUrl, "http://x").search, opts.signQuery),
           signBody: true,
           bodyBytes,
           ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),

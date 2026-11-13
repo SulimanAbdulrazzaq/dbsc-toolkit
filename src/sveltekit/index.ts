@@ -30,6 +30,7 @@ import {
   type SkippedEntry,
   type CookieScope,
 } from "../core/index.js";
+import { MemoryReplayCache } from "../storage/memory/replay-cache.js";
 
 export { requireProof } from "./require-proof.js";
 export { requireDpop } from "./require-dpop.js";
@@ -172,7 +173,9 @@ export function dbscHandle(opts: DbscSvelteKitOptions): Handle {
     autoBind,
     refreshGraceMs = 30_000,
     rateLimiter = new NoopRateLimiter(),
-    replayCache,
+    // Replay defense on by default; pass a RedisReplayCache when running
+    // more than one instance.
+    replayCache = new MemoryReplayCache(),
     onEvent,
     secure = true,
     cookieScope,

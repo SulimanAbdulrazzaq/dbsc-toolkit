@@ -31,6 +31,7 @@ import {
   type SkippedEntry,
   type CookieScope,
 } from "../core/index.js";
+import { MemoryReplayCache } from "../storage/memory/replay-cache.js";
 
 export { requireProof } from "./require-proof.js";
 export { requireDpop } from "./require-dpop.js";
@@ -263,7 +264,9 @@ export function dbsc(opts: DbscNodeOptions): DbscNodeHandler {
     refreshGraceMs = 30_000,
     registrationCookieTtl = DEFAULT_REG_TTL,
     rateLimiter = new NoopRateLimiter(),
-    replayCache,
+    // Replay defense on by default; pass a RedisReplayCache when running
+    // more than one instance.
+    replayCache = new MemoryReplayCache(),
     onEvent,
     autoBind,
     ipExtractor,

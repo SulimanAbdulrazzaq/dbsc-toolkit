@@ -1,5 +1,5 @@
 import type { ProofReplayCache } from "../types.js";
-import { DbscVerificationError } from "../errors.js";
+import { DbscVerificationError, ErrorCodes } from "../errors.js";
 import { verifyDpopProof } from "./verify.js";
 
 /**
@@ -23,6 +23,14 @@ export interface RequireDpopOptions<Req = unknown> {
   iatWindowMs?: number;
   /** jti replay store. Falls back to the DBSC middleware's replayCache. */
   replayCache?: ProofReplayCache;
+  /**
+   * The public origin of this API (`https://api.example.com`). The `htu` claim
+   * is checked against this origin plus the request's path. Without it the
+   * origin comes from the request's Host / X-Forwarded-* headers, which a
+   * client controls: a proof minted for another server would then pass `htu`.
+   * Set it in production.
+   */
+  origin?: string;
 }
 
 export interface DpopGuardInput {
@@ -32,7 +40,7 @@ export interface DpopGuardInput {
   url: string;
   boundJkt: string | undefined;
   replayCache: ProofReplayCache | undefined;
-  opts: { requireTokenBinding?: boolean; iatWindowMs?: number };
+  opts: { requireTokenBinding?: boolean; iatWindowMs?: number; origin?: string };
 }
 
 export interface DpopGuardOutcome {
@@ -55,12 +63,28 @@ export function parseDpopAuthorization(authorization: string | undefined): strin
  * fields, calls this, then writes its own 401 + WWW-Authenticate on failure.
  */
 export async function runDpopGuard(input: DpopGuardInput): Promise<DpopGuardOutcome> {
+  // A bearer token on a DPoP-guarded route is a downgrade: a stolen DPoP-bound
+  // token sent as Bearer with the thief's own proof would skip ath/jkt checks.
+  if (input.opts.requireTokenBinding !== false && /^bearer\s/i.test(input.authorization?.trim() ?? "")) {
+    return {
+      ok: false,
+      error: {
+        code: ErrorCodes.DPOP_TOKEN_BINDING_REQUIRED,
+        message: "bearer token presented on a DPoP-guarded route; use the DPoP scheme",
+      },
+    };
+  }
   const accessToken = parseDpopAuthorization(input.authorization);
+  let url = input.url;
+  if (input.opts.origin) {
+    const actual = new URL(input.url, "http://x");
+    url = new URL(actual.pathname + actual.search, input.opts.origin).href;
+  }
   try {
     const { jkt } = await verifyDpopProof({
       proof: input.proof,
       method: input.method,
-      url: input.url,
+      url,
       ...(accessToken !== undefined && { accessToken }),
       ...(input.boundJkt !== undefined && { boundJkt: input.boundJkt }),
       ...(input.opts.requireTokenBinding !== undefined && {

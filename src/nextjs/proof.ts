@@ -6,10 +6,13 @@ import {
   type StorageAdapter,
   type ProofReplayCache,
   type ProtectionTier,
+  proofTarget,
 } from "../core/index.js";
 
 export interface RequireBoundProofOptions {
   storage: StorageAdapter;
+  /** Include the query string in the signed path (see RequireProofOptions.signQuery). */
+  signQuery?: boolean;
   /**
    * Skip the per-request proof header on `tier: "dbsc"`. **Default `false`
    * as of v2.7.** Older versions defaulted to `true`, which left a
@@ -61,7 +64,7 @@ export async function requireBoundProof(
         sessionId: session.sessionId,
         proofHeader: req.headers.get("x-dbsc-bound-proof") ?? undefined,
         method: req.method,
-        path: new URL(req.url).pathname,
+        path: proofTarget(new URL(req.url).pathname, new URL(req.url).search, opts.signQuery),
         timestampWindowMs: opts.timestampWindowMs,
         signBody,
         bodyBytes,

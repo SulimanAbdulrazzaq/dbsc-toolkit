@@ -12,12 +12,20 @@ export interface WrapFetchOptions {
    * supported.
    */
   signBody?: boolean;
+  /**
+   * Include the query string in the signed message (`/path?a=1`). Off by
+   * default for compatibility; turn it on together with the server's
+   * `requireProof({ signQuery: true })` for routes that act on query
+   * parameters, which are otherwise not covered by the proof.
+   */
+  signQuery?: boolean;
 }
 
 export function wrapFetch(opts: WrapFetchOptions = {}): typeof fetch {
   const base = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const headerName = opts.headerName ?? "X-Dbsc-Bound-Proof";
   const signBody = opts.signBody ?? true;
+  const signQuery = opts.signQuery ?? false;
 
   return (async (input, init = {}) => {
     const rec = await getKeyRecord().catch(() => null);
@@ -43,9 +51,10 @@ export function wrapFetch(opts: WrapFetchOptions = {}): typeof fetch {
       bodyHash = await sha256B64Url(bodyBytes);
     }
 
+    const target = signQuery ? url.pathname + url.search : url.pathname;
     const message = signBody
-      ? `${rec.sessionId}.${method}.${url.pathname}.${ts}.${bodyHash}`
-      : `${rec.sessionId}.${method}.${url.pathname}.${ts}`;
+      ? `${rec.sessionId}.${method}.${target}.${ts}.${bodyHash}`
+      : `${rec.sessionId}.${method}.${target}.${ts}`;
 
     const sigBytes = await crypto.subtle.sign(
       { name: "ECDSA", hash: "SHA-256" },

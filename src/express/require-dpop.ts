@@ -48,6 +48,7 @@ async function handle(
     opts: {
       ...(opts.requireTokenBinding !== undefined && { requireTokenBinding: opts.requireTokenBinding }),
       ...(opts.iatWindowMs !== undefined && { iatWindowMs: opts.iatWindowMs }),
+      ...(opts.origin !== undefined && { origin: opts.origin }),
     },
   });
 

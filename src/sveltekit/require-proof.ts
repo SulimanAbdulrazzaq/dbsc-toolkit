@@ -5,6 +5,7 @@ import {
   SESSION_MISMATCH_MESSAGE,
   DbscVerificationError,
   type RequireProofOptions,
+  proofTarget,
 } from "../core/index.js";
 import { DBSC_INTERNAL, type DbscInternal, type DbscSvelteKitSession } from "./index.js";
 
@@ -49,7 +50,7 @@ export function requireProof(opts: RequireProofOptions<RequestEvent> = {}) {
           sessionId: session.sessionId,
           proofHeader,
           method: event.request.method,
-          path: event.url.pathname,
+          path: proofTarget(event.url.pathname, event.url.search, opts.signQuery),
           signBody: true,
           bodyBytes,
           ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),

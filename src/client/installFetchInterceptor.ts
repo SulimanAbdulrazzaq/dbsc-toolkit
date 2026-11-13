@@ -18,6 +18,8 @@ export interface InstallFetchInterceptorOptions {
   pathPrefixes: string[];
   /** Forwarded to `wrapFetch` — defaults to true as of v2.8. */
   signBody?: WrapFetchOptions["signBody"];
+  /** Forwarded to `wrapFetch`. */
+  signQuery?: WrapFetchOptions["signQuery"];
   /** Override the header name passed to `wrapFetch`. */
   headerName?: WrapFetchOptions["headerName"];
   /** Override the global fetch — useful in tests. Defaults to `globalThis.fetch`. */
@@ -72,6 +74,7 @@ export function installFetchInterceptor(opts: InstallFetchInterceptorOptions): (
   const signed = wrapFetch({
     fetch: upstreamFetch,
     ...(opts.signBody !== undefined && { signBody: opts.signBody }),
+    ...(opts.signQuery !== undefined && { signQuery: opts.signQuery }),
     ...(opts.headerName !== undefined && { headerName: opts.headerName }),
   });
 

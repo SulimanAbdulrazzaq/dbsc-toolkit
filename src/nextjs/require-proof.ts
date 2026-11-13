@@ -10,6 +10,11 @@ import {
   type SkippedEntry,
 } from "../core/index.js";
 import { requireBoundProof } from "./proof.js";
+import { MemoryReplayCache } from "../storage/memory/replay-cache.js";
+
+// requireProof() here has no shared middleware context, so it keeps one
+// process-wide replay cache unless the caller passes its own.
+const defaultReplayCache = new MemoryReplayCache();
 
 export interface RequireProofSession {
   sessionId: string | null;
@@ -75,9 +80,10 @@ export async function requireProof(
     {
       storage: opts.storage,
       signBody: true,
+      ...(opts.signQuery !== undefined && { signQuery: opts.signQuery }),
       ...(allowDbscWithoutProof !== undefined && { allowDbscWithoutProof }),
       ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
-      ...(opts.replayCache !== undefined && { replayCache: opts.replayCache }),
+      replayCache: opts.replayCache ?? defaultReplayCache,
     },
   );
 }

@@ -60,6 +60,18 @@ export interface RequireProofOptions<Req = unknown> {
    * `bind()`. Use it when the app has no stable session id (JWT mode).
    */
   expectUserId?: SessionBindingHook<Req>;
+  /**
+   * Verify the query string as part of the signed path (`/path?a=1`). Must
+   * match the client's `wrapFetch({ signQuery: true })`. Off by default: the
+   * proof then covers method, path and body but not the query, so a captured
+   * proof can be replayed with different query parameters inside the window.
+   */
+  signQuery?: boolean;
+}
+
+/** The path string a proof signs: the pathname, plus the query when `signQuery` is on. */
+export function proofTarget(pathname: string, search: string, signQuery: boolean | undefined): string {
+  return signQuery ? pathname + search : pathname;
 }
 
 export const SESSION_MISMATCH_MESSAGE = "device-bound session does not belong to this login";

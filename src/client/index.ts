@@ -48,6 +48,9 @@ export interface InitBoundDbscOptions {
  *   when Chrome explicitly refused native registration (e.g. `quota_exceeded`).
  * - `unbound`: no session is present on the server. User is logged out, or the
  *   bound cookie points at a session row that no longer exists.
+ * - `skipReason: "local-key-missing"`: the server has a polyfill key for this
+ *   session but this browser lost it (site data cleared). Guarded routes will
+ *   403 until the user signs in again; treat it as a logout.
  * - `error`: an exception was thrown somewhere in the flow. `error` carries the
  *   message; consult the console for the underlying object.
  */
@@ -143,8 +146,16 @@ export async function initBoundDbsc(options: InitBoundDbscOptions = {}): Promise
     }
 
     if (state.phase === "bound") {
-      if (state.tier === "dbsc") return { phase: "native-dbsc", tier: "dbsc" };
       const rec = await getKeyRecord().catch(() => null);
+      // The server holds a polyfill key this browser no longer has (site data
+      // cleared). Guarded routes will 403 and the key cannot be replaced from
+      // here, so tell the app to sign the user in again.
+      const localKeyMissing = !rec || rec.sessionId !== state.sessionId;
+      if (state.tier === "dbsc") {
+        return localKeyMissing
+          ? { phase: "native-dbsc", tier: "dbsc", skipReason: "local-key-missing" }
+          : { phase: "native-dbsc", tier: "dbsc" };
+      }
       if (!rec || rec.sessionId !== state.sessionId) {
         await clearKeyRecord().catch(() => {});
         const fresh = await fetchState(cfg.statePath);
@@ -163,9 +174,9 @@ export async function initBoundDbsc(options: InitBoundDbscOptions = {}): Promise
           return { phase: "native-dbsc", tier: "dbsc" };
         }
         if (fresh.phase === "bound" && fresh.tier === "dbsc") {
-          return { phase: "native-dbsc", tier: "dbsc" };
+          return { phase: "native-dbsc", tier: "dbsc", skipReason: "local-key-missing" };
         }
-        return { phase: "polyfill-bound", tier: "bound" };
+        return { phase: "polyfill-bound", tier: "bound", skipReason: "local-key-missing" };
       }
       scheduleRefresh(cfg, state.refreshIntervalMs);
       return { phase: "polyfill-bound", tier: "bound" };
@@ -317,15 +328,19 @@ async function runRegistration(
   await recordServerTime(res);
 }
 
-async function runRefresh(cfg: ResolvedOptions): Promise<boolean> {
+type RefreshOutcome = "ok" | "retry" | "stop";
+
+async function runRefresh(cfg: ResolvedOptions): Promise<RefreshOutcome> {
   const rec = await getKeyRecord().catch(() => null);
-  if (!rec) return false;
+  if (!rec) return "stop";
 
   const cRes = await fetch(cfg.challengePath, { credentials: "include" });
-  if (!cRes.ok) return false;
+  if (!cRes.ok) return cRes.status >= 500 ? "retry" : "stop";
   const { challenge } = (await cRes.json()) as { challenge: string };
 
-  const timestamp = Date.now();
+  // Same clock correction as wrapFetch; without it a skewed device signs
+  // guarded requests fine but fails every refresh.
+  const timestamp = Date.now() + (rec.clockOffsetMs ?? 0);
   const message = `${challenge}.${timestamp}`;
   const signature = await signMessage(rec.keyPair.privateKey, message);
 
@@ -337,19 +352,26 @@ async function runRefresh(cfg: ResolvedOptions): Promise<boolean> {
   });
 
   await recordServerTime(res);
-  return res.ok;
+  if (res.ok) return "ok";
+  return res.status >= 500 ? "retry" : "stop";
 }
 
-function scheduleRefresh(cfg: ResolvedOptions, intervalMs: number): void {
+const RETRY_BASE_MS = 2000;
+
+/**
+ * Refreshes before the bound cookie lapses. A network error or 5xx retries with
+ * backoff (capped at the refresh interval) instead of ending background
+ * refresh for the rest of the page's life; a 4xx is definitive and stops.
+ */
+function scheduleRefresh(cfg: ResolvedOptions, intervalMs: number, attempt = 0): void {
   if (refreshTimer !== null) clearTimeout(refreshTimer);
-  const wait = Math.max(1000, intervalMs - cfg.refreshMarginMs);
+  const base = Math.max(1000, intervalMs - cfg.refreshMarginMs);
+  const wait = attempt === 0 ? base : Math.min(base, RETRY_BASE_MS * 2 ** (attempt - 1));
   refreshTimer = setTimeout(async () => {
-    const ok = await runRefresh(cfg).catch(() => false);
-    if (ok) {
-      scheduleRefresh(cfg, intervalMs);
-    } else {
-      refreshTimer = null;
-    }
+    const outcome = await runRefresh(cfg).catch((): RefreshOutcome => "retry");
+    if (outcome === "ok") scheduleRefresh(cfg, intervalMs);
+    else if (outcome === "retry") scheduleRefresh(cfg, intervalMs, attempt + 1);
+    else refreshTimer = null;
   }, wait);
 }
 
