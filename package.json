@@ -140,7 +140,7 @@
     "fastify-plugin": "^5.0.1",
     "@nestjs/common": "^10.0.0",
     "@nestjs/core": "^10.0.0",
-    "@sveltejs/kit": "^2.0.0",
+    "@sveltejs/kit": "^3.0.0",
     "@types/express": "^5.0.6",
     "@types/koa": "^2.15.0",
     "@types/node": "^20.0.0",
