@@ -74,8 +74,10 @@ describe("initBoundDbsc outcome", () => {
     });
     vi.stubGlobal("fetch", srv.fetch);
 
+    // No key record in this browser while the server reports a bound
+    // session: the SDK flags it so the app can sign the user in again.
     const outcome = await initBoundDbsc({ nativeProbeWindowMs: 100 });
-    expect(outcome).toEqual({ phase: "native-dbsc", tier: "dbsc" });
+    expect(outcome).toEqual({ phase: "native-dbsc", tier: "dbsc", skipReason: "local-key-missing" });
   });
 
   it("short-circuits with skipReason when first /state already carries nativeSkipped", async () => {

@@ -58,7 +58,7 @@ describe("bindSession() helper", () => {
     }
   });
 
-  it("preserves an existing session row instead of overwriting userId", async () => {
+  it("starts a fresh binding when the session id already exists", async () => {
     const ctx = await startServer((storage) => async (req, res) => {
       const now = Date.now();
       await storage.setSession({
@@ -69,6 +69,13 @@ describe("bindSession() helper", () => {
         expiresAt: now + 1000_000,
         lastRefreshAt: 0,
       });
+      await storage.setBoundKey({
+        sessionId: "sess-bind-2",
+        kind: "native",
+        jwk: { kty: "EC", crv: "P-256", x: "x", y: "y" },
+        createdAt: now - 1000,
+        algorithm: "ES256",
+      });
       await bindSession(res, "sess-bind-2", storage, { userId: "different", secure: false });
       res.json({ ok: true });
     });
@@ -76,8 +83,12 @@ describe("bindSession() helper", () => {
     try {
       const res = await fetch(`${ctx.url}/login`, { method: "POST" });
       expect(res.status).toBe(200);
+      // A re-login must be able to register the browser's new key, so the old
+      // key is dropped and the registration window restarts.
       const sess = await ctx.storage.getSession("sess-bind-2");
-      expect(sess?.userId).toBe("original-user");
+      expect(sess?.userId).toBe("different");
+      expect(sess?.tier).toBe("none");
+      expect(await ctx.storage.getBoundKey("sess-bind-2")).toBeNull();
     } finally {
       await ctx.close();
     }

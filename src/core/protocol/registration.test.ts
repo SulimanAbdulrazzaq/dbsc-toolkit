@@ -24,6 +24,14 @@ describe("handleRegistration", () => {
     const storage = new MemoryStorage();
     const jti = "reg-jti-001";
     const sessionId = "sess-001";
+    await storage.setSession({
+      id: sessionId,
+      userId: "user-1",
+      tier: "none",
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+      lastRefreshAt: 0,
+    });
 
     await storage.setChallenge({
       jti,
