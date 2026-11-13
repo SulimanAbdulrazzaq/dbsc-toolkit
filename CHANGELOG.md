@@ -2,6 +2,17 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.15.1] — 2026-11-13
+
+### Fixed
+
+- `dbsc-toolkit/fastify` now lists `fastify-plugin` as a dependency. It was imported at runtime but declared only as a devDependency, so the adapter loaded only when another package (usually `@fastify/cookie`) hoisted it, and failed with "Cannot find module 'fastify-plugin'" under strict installers such as pnpm.
+- `dbscHandle()` (SvelteKit) is typed with a structural `DbscHandle`, assignable to the `Handle` of both SvelteKit 2 and SvelteKit 3, which moved that type to `@sveltejs/kit/hooks`.
+
+### Changed
+
+- The adapters are now tested against NestJS 12, SvelteKit 3 and Koa 3. Peer ranges are unchanged, so NestJS 10, SvelteKit 2 and Koa 2 remain supported.
+
 ## [2.15.0] — 2026-11-13
 
 A security release. It closes several ways a stolen session cookie could still be used, two remote crashes, and a set of adapter bugs found in a full review and in a private report. Upgrade both `dbsc-toolkit` and `@dbsc-toolkit/better-auth` (1.3.0). A GitHub security advisory with the details accompanies this release.
