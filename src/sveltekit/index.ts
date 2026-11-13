@@ -228,11 +228,11 @@ export function dbscHandle(opts: DbscSvelteKitOptions): Handle {
       if (!sessionId || !expectedJti) return jsonResponse(400, { error: "missing session or challenge cookie" });
       if (!(await rateLimiter.checkRegistration(ip))) return jsonResponse(429, { error: "rate limited" });
       try {
-        await handleRegistration(
+        const { boundKey: registered } = await handleRegistration(
           { sessionId, secSessionResponseHeader: get(request, "secure-session-response") ?? get(request, "sec-session-response"), expectedJti },
           storage,
         );
-        emit(onEvent, { type: "registration", sessionId, tier: "dbsc", timestamp: Date.now(), algorithm: "ES256", ip });
+        emit(onEvent, { type: "registration", sessionId, tier: "dbsc", timestamp: Date.now(), algorithm: registered.algorithm, ip });
         return jsonResponse(200, configBody(sessionId, url.origin, refreshPath), {
           cookies: [
             serializeCookie(COOKIES.bound, sessionId, scope, boundCookieTtl / 1000),

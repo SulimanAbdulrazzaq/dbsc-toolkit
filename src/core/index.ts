@@ -51,7 +51,7 @@ export { handleRefresh } from "./protocol/refresh.js";
 export { handleBoundRegistration } from "./bound/registration.js";
 export { handleBoundRefresh } from "./bound/refresh.js";
 export { verifyP256Signature } from "./bound/verify.js";
-export { verifyBoundProof, parseProofHeader, BOUND_PROOF_HEADER } from "./bound/proof.js";
+export { verifyBoundProof, parseProofHeader, proofBodyBytes, BOUND_PROOF_HEADER } from "./bound/proof.js";
 export type { VerifyBoundProofRequest } from "./bound/proof.js";
 
 export { NoopRateLimiter } from "./ratelimit/interface.js";

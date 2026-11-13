@@ -1,7 +1,9 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import {
   verifyBoundProof,
+  proofBodyBytes,
   DbscVerificationError,
+  ErrorCodes,
   type StorageAdapter,
   type ProofReplayCache,
 } from "../core/index.js";
@@ -47,23 +49,20 @@ export function requireBoundProof(opts: RequireBoundProofOptions): RequestHandle
     try {
       let bodyBytes: Uint8Array | undefined;
       if (signBody) {
-        const raw = req.body as unknown;
-        if (raw instanceof Buffer) {
-          bodyBytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
-        } else if (raw instanceof Uint8Array) {
-          bodyBytes = raw;
-        } else if (typeof raw === "string") {
-          bodyBytes = new TextEncoder().encode(raw);
-        } else {
-          bodyBytes = new Uint8Array(0);
+        const raw = proofBodyBytes(req.body);
+        if (!raw) {
+          throw new DbscVerificationError(ErrorCodes.MALFORMED_PROOF, "signBody needs the raw request body; parse this route with a raw body parser");
         }
+        bodyBytes = raw;
       }
       await verifyBoundProof(
         {
           sessionId: dbsc.sessionId,
           proofHeader: req.headers["x-dbsc-bound-proof"] as string | undefined,
           method: req.method,
-          path: req.path,
+          // Full pathname, not req.path: under app.use("/api", router) req.path
+          // drops the mount prefix while the client signs the whole pathname.
+          path: new URL(req.originalUrl, "http://x").pathname,
           timestampWindowMs: opts.timestampWindowMs,
           signBody,
           bodyBytes,

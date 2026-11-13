@@ -249,7 +249,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
     if (!allowed) return reply.status(429).send({ error: "rate limited" });
 
     try {
-      await handleRegistration(
+      const { boundKey: registered } = await handleRegistration(
         {
           sessionId,
           secSessionResponseHeader: readSessionResponseHeader(req.headers as Record<string, string | string[] | undefined>),
@@ -263,7 +263,7 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
         sessionId,
         tier: "dbsc",
         timestamp: Date.now(),
-        algorithm: "ES256",
+        algorithm: registered.algorithm,
         ip,
       });
 

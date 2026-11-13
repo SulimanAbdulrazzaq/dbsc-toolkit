@@ -20,8 +20,8 @@ import { DBSC_INTERNAL, type DbscInternal } from "./index.js";
  * session tier — DPoP guards token-bound API calls, not cookie sessions.
  */
 export function requireDpop(opts: RequireDpopOptions<Request> = {}): RequestHandler {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    void handle(req, res, next, opts);
+  return (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    return handle(req, res, next, opts);
   };
 }
 

@@ -285,7 +285,7 @@ export function dbsc(opts: DbscNodeOptions): DbscNodeHandler {
     }
 
     try {
-      await handleRegistration(
+      const { boundKey: registered } = await handleRegistration(
         {
           sessionId,
           secSessionResponseHeader: readSessionResponseHeader(req.headers),
@@ -293,7 +293,7 @@ export function dbsc(opts: DbscNodeOptions): DbscNodeHandler {
         },
         storage,
       );
-      emit(onEvent, { type: "registration", sessionId, tier: "dbsc", timestamp: Date.now(), algorithm: "ES256", ip });
+      emit(onEvent, { type: "registration", sessionId, tier: "dbsc", timestamp: Date.now(), algorithm: registered.algorithm, ip });
       appendSetCookie(res, [
         serializeCookie(COOKIES.bound, sessionId, cookieOpts(boundCookieTtl, scope)),
         serializeCookie(COOKIES.challenge, "", { ...cookieOpts(0, scope), maxAge: 0 }),

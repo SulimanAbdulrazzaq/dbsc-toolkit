@@ -20,7 +20,9 @@ import { DBSC_INTERNAL, type DbscInternal } from "./index.js";
  * middleware populates; pass `{ storage }` only to override.
  */
 export function requireProof(opts: RequireProofOptions = {}): RequestHandler {
-  return (req: Request, res: Response, next: NextFunction): void => {
+  // Returns the guard's promise so Express 5 routes a rejection (storage
+  // outage, a throwing hook) to the error handler instead of leaking it.
+  return (req: Request, res: Response, next: NextFunction): void | Promise<void> => {
     const dbsc = res.locals.dbsc;
     const tier = dbsc?.tier ?? "none";
     const skipped = dbsc?.skipped ?? [];
@@ -58,6 +60,6 @@ export function requireProof(opts: RequireProofOptions = {}): RequestHandler {
       ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),
       ...(internal?.replayCache !== undefined && { replayCache: internal.replayCache }),
     });
-    proofHandler(req, res, next);
+    return proofHandler(req, res, next) as Promise<void>;
   };
 }

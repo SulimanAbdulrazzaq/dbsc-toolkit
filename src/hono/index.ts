@@ -224,7 +224,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
 
       try {
         const respHdr = c.req.header("secure-session-response") ?? c.req.header("sec-session-response");
-        await handleRegistration(
+        const { boundKey: registered } = await handleRegistration(
           {
             sessionId,
             secSessionResponseHeader: respHdr,
@@ -238,7 +238,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
           sessionId,
           tier: "dbsc",
           timestamp: Date.now(),
-          algorithm: "ES256",
+          algorithm: registered.algorithm,
           ip,
         });
 

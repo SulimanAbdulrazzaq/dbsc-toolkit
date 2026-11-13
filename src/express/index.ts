@@ -231,7 +231,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
     }
 
     try {
-      await handleRegistration(
+      const { boundKey: registered } = await handleRegistration(
         {
           sessionId,
           secSessionResponseHeader: readSessionResponseHeader(req.headers as Record<string, string | string[] | undefined>),
@@ -245,7 +245,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
         sessionId,
         tier: "dbsc",
         timestamp: Date.now(),
-        algorithm: "ES256",
+        algorithm: registered.algorithm,
         ip,
       });
 
@@ -680,9 +680,12 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       skipped,
       revoke: async () => {
         if (sessionId) await storage.revokeSession(sessionId);
-        res.setHeader("Set-Cookie", [
+        // Append, never replace: the app may already have cleared its own
+        // session cookie on this response.
+        res.append(
+          "Set-Cookie",
           serializeCookie(COOKIES.bound, "", { ...cookieOpts(0, scope), maxAge: 0 }),
-        ]);
+        );
       },
     };
     (res.locals as Record<PropertyKey, unknown>)[DBSC_INTERNAL] = {

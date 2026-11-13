@@ -187,7 +187,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
       }
 
       try {
-        await handleRegistration(
+        const { boundKey: registered } = await handleRegistration(
           {
             sessionId,
             secSessionResponseHeader:
@@ -204,7 +204,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
           sessionId,
           tier: "dbsc",
           timestamp: Date.now(),
-          algorithm: "ES256",
+          algorithm: registered.algorithm,
           ip,
         });
 

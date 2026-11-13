@@ -14,8 +14,10 @@ import {
 import type { Request, Response } from "express";
 import {
   verifyBoundProof,
+  proofBodyBytes,
   noBindingReason,
   DbscVerificationError,
+  ErrorCodes,
   type RequireProofOptions,
 } from "../core/index.js";
 import {
@@ -95,20 +97,23 @@ async function runProof(req: Request, res: Response, opts: RequireProofOptions):
     opts.allowDbscWithoutProof ?? (internal?.boundEnabled === false ? true : undefined);
   if (tier === "dbsc" && allowDbscWithoutProof) return;
 
-  let bodyBytes: Uint8Array;
-  const raw = req.body as unknown;
-  if (raw instanceof Buffer) bodyBytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
-  else if (raw instanceof Uint8Array) bodyBytes = raw;
-  else if (typeof raw === "string") bodyBytes = new TextEncoder().encode(raw);
-  else bodyBytes = new Uint8Array(0);
-
   try {
+    // NestFactory.create(..., { rawBody: true }) keeps the original bytes on
+    // req.rawBody even when the JSON parser ran; prefer them.
+    const rawBody = (req as Request & { rawBody?: unknown }).rawBody;
+    const bodyBytes = proofBodyBytes(rawBody ?? req.body);
+    if (!bodyBytes) {
+      throw new DbscVerificationError(
+        ErrorCodes.MALFORMED_PROOF,
+        "signBody needs the raw request body; create the app with { rawBody: true }",
+      );
+    }
     await verifyBoundProof(
       {
         sessionId: dbscLocals.sessionId,
         proofHeader: req.headers["x-dbsc-bound-proof"] as string | undefined,
         method: req.method,
-        path: req.path,
+        path: new URL(req.originalUrl, "http://x").pathname,
         signBody: true,
         bodyBytes,
         ...(opts.timestampWindowMs !== undefined && { timestampWindowMs: opts.timestampWindowMs }),

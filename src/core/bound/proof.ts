@@ -142,3 +142,20 @@ function base64UrlBytes(b: Uint8Array): string {
   for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i] as number);
   return Buffer.from(s, "binary").toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
+
+/**
+ * Raw bytes of a request body for the per-request body hash. Returns `null`
+ * when the body was already parsed into a non-empty object: the original bytes
+ * are gone, and hashing a re-serialization (or nothing) would either reject the
+ * real client or let a captured empty-body proof cover any parsed body.
+ */
+export function proofBodyBytes(body: unknown): Uint8Array | null {
+  if (body === undefined || body === null) return new Uint8Array(0);
+  if (body instanceof Uint8Array) return body;
+  if (body instanceof ArrayBuffer) return new Uint8Array(body);
+  if (typeof body === "string") return new TextEncoder().encode(body);
+  if (typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === 0) {
+    return new Uint8Array(0);
+  }
+  return null;
+}
