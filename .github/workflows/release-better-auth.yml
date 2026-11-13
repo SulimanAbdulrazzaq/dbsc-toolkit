@@ -27,6 +27,14 @@ jobs:
           npm ci
           npm run build
 
+      # dbsc-toolkit is pinned as workspace:* in devDeps for local monorepo
+      # work. Plain npm rejects the workspace: protocol (EUNSUPPORTEDPROTOCOL)
+      # on install as well as on publish, so drop it before either. The dep is
+      # dev-only and the consumer contract is the peerDependency.
+      - name: Strip workspace devDependency
+        working-directory: packages/better-auth
+        run: npm pkg delete devDependencies.dbsc-toolkit
+
       # The plugin lives outside any npm workspace and pins dbsc-toolkit as
       # workspace:* in devDeps, which plain npm install rejects. Point it at the
       # freshly built root package instead, then install its other deps.
@@ -39,14 +47,6 @@ jobs:
       - name: Build the plugin
         working-directory: packages/better-auth
         run: npm run build
-
-      # dbsc-toolkit is pinned as workspace:* in devDeps for local monorepo
-      # work. pnpm rewrites that on publish; plain `npm publish` rejects the
-      # workspace: protocol (EUNSUPPORTEDPROTOCOL). The dep is dev-only and the
-      # consumer contract is the peerDependency, so drop it before publishing.
-      - name: Strip workspace devDependency before publish
-        working-directory: packages/better-auth
-        run: npm pkg delete devDependencies.dbsc-toolkit
 
       - name: Publish to npm
         working-directory: packages/better-auth
