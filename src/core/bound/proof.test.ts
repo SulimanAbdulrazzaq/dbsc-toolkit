@@ -498,3 +498,43 @@ describe("verifyBoundProof — replay cache", () => {
     ).resolves.toBeUndefined();
   });
 });
+
+describe("verifyBoundProof hardening", () => {
+  it("rejects a non-base64url signature as MALFORMED_PROOF instead of throwing a DOMException", async () => {
+    const { storage, sessionId } = await bootstrapBoundSession("sess-malformed-sig");
+    await expect(
+      verifyBoundProof(
+        { sessionId, proofHeader: `ts=${Date.now()};sig=!!!!`, method: "GET", path: "/x" },
+        storage,
+      ),
+    ).rejects.toMatchObject({ code: ErrorCodes.MALFORMED_PROOF });
+  });
+
+  it("rejects a malleated (r, n - s) copy of a used proof as a replay", async () => {
+    const N = BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
+    const { storage, sessionId, privateKey } = await bootstrapBoundSession("sess-malleable");
+    const ts = Date.now();
+    const header = await buildProof(privateKey, sessionId, "GET", "/x", ts);
+    const sig = Buffer.from(header.split("sig=")[1]!, "base64url");
+    const s = BigInt("0x" + sig.subarray(32).toString("hex"));
+    const flipped = Buffer.concat([
+      sig.subarray(0, 32),
+      Buffer.from((N - s).toString(16).padStart(64, "0"), "hex"),
+    ]).toString("base64url");
+    const seen = new Set<string>();
+    const replayCache = {
+      async checkAndRecord(key: string) {
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      },
+    };
+    await verifyBoundProof({ sessionId, proofHeader: header, method: "GET", path: "/x", replayCache }, storage);
+    await expect(
+      verifyBoundProof(
+        { sessionId, proofHeader: `ts=${ts};sig=${flipped}`, method: "GET", path: "/x", replayCache },
+        storage,
+      ),
+    ).rejects.toMatchObject({ code: ErrorCodes.PROOF_REPLAY });
+  });
+});

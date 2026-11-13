@@ -6,7 +6,7 @@ export const BOUND_PROOF_HEADER = "X-Dbsc-Bound-Proof";
 const DEFAULT_WINDOW_MS = 5 * 60 * 1000;
 const MAX_HEADER_LEN = 8 * 1024;
 const MAX_SEGMENTS = 8;
-const SIG_PREFIX_LEN = 43; // 256 bits in base64url — enough uniqueness for a replay key
+const B64U = /^[A-Za-z0-9_-]+$/;
 
 export interface VerifyBoundProofRequest {
   sessionId: string;
@@ -89,9 +89,11 @@ export async function verifyBoundProof(
   // the cache by replaying garbage and locking legitimate replays. TTL is
   // 2 * window because a proof at the edge of the future window survives
   // until the past window closes.
+  // Keyed on r only. ECDSA is malleable: (r, n - s) verifies too, so any key
+  // that includes bits of s lets a captured proof be replayed once more.
   if (req.replayCache) {
-    const sigPrefix = parsed.sig.slice(0, SIG_PREFIX_LEN);
-    const replayKey = `${req.sessionId}.${parsed.ts}.${sigPrefix}`;
+    const r = Buffer.from(parsed.sig, "base64url").subarray(0, 32).toString("base64url");
+    const replayKey = `${req.sessionId}.${parsed.ts}.${r}`;
     const fresh = await req.replayCache.checkAndRecord(replayKey, 2 * windowMs);
     if (!fresh) {
       throw new DbscVerificationError(ErrorCodes.PROOF_REPLAY, "proof already used (replay)");
@@ -118,6 +120,8 @@ export function parseProofHeader(s: string): { ts: number; sig: string; bh?: str
   }
   const ts = Number(parts.ts);
   if (!Number.isFinite(ts) || !parts.sig) return null;
+  if (!B64U.test(parts.sig)) return null;
+  if (parts.bh !== undefined && !B64U.test(parts.bh)) return null;
   const out: { ts: number; sig: string; bh?: string } = { ts, sig: parts.sig };
   if (parts.bh) out.bh = parts.bh;
   return out;

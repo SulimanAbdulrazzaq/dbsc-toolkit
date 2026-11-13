@@ -56,3 +56,9 @@ describe("detectAlgorithm", () => {
     expect(detectAlgorithm(validRsa)).toBe("RS256");
   });
 });
+
+describe("validateJwk private members", () => {
+  it("rejects an EC JWK that carries the private scalar d", () => {
+    expect(() => validateJwk({ ...validP256, d: "AAAA" })).toThrow(DbscVerificationError);
+  });
+});

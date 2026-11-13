@@ -22,6 +22,9 @@ export async function verifyP256Signature(
   // MAX_HEADER_LEN), so the decoded length is bounded and the verify call
   // is constant-time in practice. Pass Uint8Array directly to SubtleCrypto
   // — accepts it as a BufferSource on every runtime, no slice juggling.
+  if (typeof signatureB64Url !== "string" || !/^[A-Za-z0-9_-]+$/.test(signatureB64Url)) {
+    throw new DbscVerificationError(ErrorCodes.SIGNATURE_INVALID, "signature is not base64url");
+  }
   const sig = base64urlDecode(signatureB64Url);
   const msg = new TextEncoder().encode(message);
 

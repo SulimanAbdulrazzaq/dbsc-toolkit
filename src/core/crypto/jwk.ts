@@ -2,8 +2,17 @@ import { DbscVerificationError, ErrorCodes } from "../errors.js";
 
 const SUPPORTED_CURVES = new Set(["P-256"]);
 const MIN_RSA_BITS = 2048;
+const PRIVATE_MEMBERS = ["d", "p", "q", "dp", "dq", "qi", "k", "oth"] as const;
 
 export function validateJwk(jwk: JsonWebKey): void {
+  if (!jwk || typeof jwk !== "object") {
+    throw new DbscVerificationError(ErrorCodes.INVALID_JWK, "jwk must be an object");
+  }
+  for (const m of PRIVATE_MEMBERS) {
+    if (m in jwk) {
+      throw new DbscVerificationError(ErrorCodes.INVALID_JWK, "jwk contains private key material");
+    }
+  }
   if (jwk.kty === "EC") {
     if (!SUPPORTED_CURVES.has(jwk.crv ?? "")) {
       throw new DbscVerificationError(
