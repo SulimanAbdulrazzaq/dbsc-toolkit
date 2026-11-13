@@ -7,10 +7,10 @@
     "start": "node src/server.js"
   },
   "dependencies": {
-    "bcryptjs": "^2.4.3",
-    "dbsc-toolkit": "^2.14.1",
-    "express": "^5.2.1",
-    "express-session": "^1.18.0",
-    "ioredis": "^5.4.1"
+    "bcryptjs": "^3.0.3",
+    "dbsc-toolkit": "^2.15.0",
+    "express": "^5.3.0",
+    "express-session": "^1.19.0",
+    "ioredis": "^6.0.0"
   }
 }
