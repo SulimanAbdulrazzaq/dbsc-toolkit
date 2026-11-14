@@ -2,6 +2,21 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.16.2] — 2026-11-14
+
+Documentation release. No code changes.
+
+### Fixed
+
+- The docs described the polyfill's stored key as an "encrypted key blob" protected by the OS keystore. That overstated it. `extractable: false` only stops JavaScript from exporting the key; the browser still writes the key material into the profile directory in software. `docs/polyfill.md`, the threat model and `SECURITY.md` now say so. The guidance is unchanged: the `bound` tier does not stop malware that can read the browser profile, and only the `dbsc` tier does.
+- Two blog posts and the pull request template said Chrome 146 where the rest of the docs say 145. Chrome shipped DBSC in 145 on Windows, and Google announced public availability with 146.
+
+### Changed
+
+- The README links the docs site, the live demo and the security policy under the badges, and lists the published advisories.
+- The landing page has a "Live demo" button and a share image.
+- The npm description names every adapter, and the package homepage points at the docs site.
+
 ## [2.16.1] — 2026-11-14
 
 ### Fixed
