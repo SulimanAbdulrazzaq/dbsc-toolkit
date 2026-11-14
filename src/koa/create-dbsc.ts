@@ -5,6 +5,7 @@ import {
   withKitBinding,
   checkKitSetup,
   clientScriptTag,
+  deriveSessionId,
   resolveLoginBinding,
   validatePathPatterns,
   splitProtectOptions,
@@ -17,16 +18,26 @@ import {
 } from "../core/index.js";
 import type { RequireDpopOptions } from "../core/dpop/index.js";
 import { dbsc, bindSession, type DbscKoaOptions } from "./index.js";
+import { deviceHintFor } from "../node/index.js";
+import { readClientAsset } from "../node/client-assets.js";
 import { requireProof } from "./require-proof.js";
 import { requireDpop } from "./require-dpop.js";
 
 export interface CreateDbscOptions extends DbscKoaOptions, KitSessionBinding<Context> {
+  /** Mount path for the browser SDK (`dist/client`). Default "/dbsc-client". `false` skips it. */
+  clientPath?: string | false;
   /** Default session TTL (ms) for `bind()`. */
   sessionTtl?: number;
 }
 
 export interface BindOptions {
   userId: string;
+  /**
+   * Manual per-device value. Optional — on the no-sessionId (JWT) path the
+   * kit manages a per-device cookie itself.
+   */
+  deviceHint?: string;
+  /** Namespace to scope derived ids. */
   namespace?: string;
 }
 
@@ -35,14 +46,15 @@ export interface DbscKit {
   install(app: Application): Application;
   /** The raw dbsc middleware, for manual mounting. */
   middleware(): Middleware;
-  /** Start a binding for an explicit session id. */
+  /** Start a binding. Pass a sessionId, or omit it to derive one from `userId` (JWT apps). */
   bind(ctx: Context, sessionId: string, opts: BindOptions): Promise<string>;
+  bind(ctx: Context, opts: BindOptions): Promise<string>;
   /**
    * The route guard — requires a bound device + a per-request proof. Uses the
    * kit's `expectSessionId` / `expectUserId` unless the call passes its own.
    */
   requireProof(opts?: RequireProofOptions<Context>): Middleware;
-  /** The `<script>` tag that loads the browser side. Serve `dist/client/` at `/dbsc-client`. */
+  /** The `<script>` tag that loads the browser side, served by `install()`. */
   clientScript(opts?: ClientScriptOptions): string;
   /** DPoP (RFC 9449) route guard for token-bound API calls. Optional layer. */
   requireDpop(opts?: RequireDpopOptions<Context>): Middleware;
@@ -60,18 +72,33 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
   const cookieScope = opts.cookieScope;
   const cookieDomain = opts.cookieDomain;
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
+  const clientPath = opts.clientPath ?? "/dbsc-client";
   const middleware = dbsc(opts);
   const binding: KitSessionBinding<Context> = {
     ...(opts.expectSessionId !== undefined && { expectSessionId: opts.expectSessionId }),
     ...(opts.expectUserId !== undefined && { expectUserId: opts.expectUserId }),
   };
   checkKitSetup({ storage: opts.storage, ...binding });
-  if (opts.bindOnLogin && !opts.expectSessionId) {
-    throw new Error("createDbsc: bindOnLogin needs expectSessionId on this adapter (the id to bind)");
-  }
   const protectedPatterns: string[] = [];
 
-  async function bind(ctx: Context, sessionId: string, bindOpts: BindOptions): Promise<string> {
+  const scope = {
+    secure,
+    ...(cookieScope !== undefined && { cookieScope }),
+    ...(cookieDomain !== undefined && { cookieDomain }),
+  };
+
+  async function bind(ctx: Context, a: string | BindOptions, b?: BindOptions): Promise<string> {
+    const bindOpts = typeof a === "string" ? (b as BindOptions) : a;
+    let sessionId: string;
+    if (typeof a === "string") {
+      sessionId = a;
+    } else {
+      sessionId = await deriveSessionId({
+        userId: bindOpts.userId,
+        deviceHint: bindOpts.deviceHint ?? deviceHintFor(ctx.req, ctx.res, scope),
+        ...(bindOpts.namespace !== undefined && { namespace: bindOpts.namespace }),
+      });
+    }
     await bindSession(ctx, sessionId, opts.storage, {
       userId: bindOpts.userId,
       secure,
@@ -88,8 +115,8 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     const current = (ctx.state as { dbsc?: { sessionId?: string | null } }).dbsc?.sessionId ?? null;
     const plan = await resolveLoginBinding(opts.bindOnLogin!, ctx, {
       storage: opts.storage,
-      expectSessionId: binding.expectSessionId!,
-      deriveSessionId: () => Promise.reject(new Error("unreachable: expectSessionId is required")),
+      ...(binding.expectSessionId !== undefined && { expectSessionId: binding.expectSessionId }),
+      deriveSessionId: (userId) => deriveSessionId({ userId, deviceHint: deviceHintFor(ctx.req, ctx.res, scope) }),
       currentSessionId: current,
       ...(opts.boundRegistrationWindowMs !== undefined && { windowMs: opts.boundRegistrationWindowMs }),
     });
@@ -100,6 +127,14 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
   return {
     middleware: () => middleware,
     install(app: Application): Application {
+      if (clientPath !== false) {
+        app.use(async (ctx, next) => {
+          const asset = ctx.method === "GET" ? await readClientAsset(ctx.path, clientPath) : null;
+          if (!asset) return next();
+          ctx.type = asset.contentType;
+          ctx.body = asset.body;
+        });
+      }
       app.use(middleware);
       // Mount install() after the middleware that identifies the user.
       if (opts.bindOnLogin) app.use(loginBinder);
@@ -120,7 +155,7 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     },
     clientScript: (o?: ClientScriptOptions) => {
       const sign = signPrefixes(protectedPatterns);
-      return clientScriptTag("/dbsc-client", {
+      return clientScriptTag(clientPath === false ? "/dbsc-client" : clientPath, {
         ...(protectedPatterns.length > 0 && sign !== undefined && { sign }),
         ...o,
       });

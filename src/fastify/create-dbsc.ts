@@ -25,6 +25,7 @@ import { dbsc, bindSession, type DbscFastifyOptions } from "./index.js";
 import { requireProof } from "./require-proof.js";
 import { requireDpop } from "./require-dpop.js";
 import { captureProofBody } from "./capture-body.js";
+import { readClientAsset } from "../node/client-assets.js";
 
 const DEVICE_COOKIE_TTL_SEC = 365 * 24 * 60 * 60;
 
@@ -56,6 +57,8 @@ function resolveDeviceHint(reply: FastifyReply, scope: DeviceScope): string {
 }
 
 export interface CreateDbscOptions extends DbscFastifyOptions, KitSessionBinding<FastifyRequest> {
+  /** Mount path for the browser SDK (`dist/client`). Default "/dbsc-client". `false` skips it. */
+  clientPath?: string | false;
   /** Default session TTL (ms) for `bind()`. */
   sessionTtl?: number;
   /**
@@ -87,7 +90,7 @@ export interface DbscKit {
    * `expectSessionId` / `expectUserId` unless the call passes its own.
    */
   requireProof(opts?: RequireProofOptions<FastifyRequest>): preHandlerAsyncHookHandler;
-  /** The `<script>` tag that loads the browser side. Serve `dist/client/` at `/dbsc-client`. */
+  /** The `<script>` tag that loads the browser side, served by `install()`. */
   clientScript(opts?: ClientScriptOptions): string;
   /** DPoP (RFC 9449) route guard (use as a `preHandler`). Optional layer. */
   requireDpop(opts?: RequireDpopOptions<FastifyRequest>): preHandlerAsyncHookHandler;
@@ -113,6 +116,7 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     ...(cookieDomain !== undefined && { cookieDomain }),
   };
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
+  const clientPath = opts.clientPath ?? "/dbsc-client";
   const binding: KitSessionBinding<FastifyRequest> = {
     ...(opts.expectSessionId !== undefined && { expectSessionId: opts.expectSessionId }),
     ...(opts.expectUserId !== undefined && { expectUserId: opts.expectUserId }),
@@ -174,6 +178,13 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
       );
       await fastify.register(dbsc, opts);
       if (opts.bindOnLogin) fastify.addHook("preHandler", loginBinder);
+      if (clientPath !== false) {
+        fastify.get(`${clientPath.replace(/\/$/, "")}/*`, async (req, reply) => {
+          const asset = await readClientAsset(new URL(req.url, "http://x").pathname, clientPath);
+          if (!asset) return reply.callNotFound();
+          return reply.type(asset.contentType).send(asset.body);
+        });
+      }
       return fastify;
     },
     bind,
@@ -193,7 +204,7 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     },
     clientScript: (o?: ClientScriptOptions) => {
       const sign = signPrefixes(protectedPatterns);
-      return clientScriptTag("/dbsc-client", {
+      return clientScriptTag(clientPath === false ? "/dbsc-client" : clientPath, {
         ...(protectedPatterns.length > 0 && sign !== undefined && { sign }),
         ...o,
       });

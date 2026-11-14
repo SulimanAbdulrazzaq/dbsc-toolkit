@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { randomBytes } from "node:crypto";
 import { defaultSecure } from "../core/kit.js";
 import {
   handleRegistration,
@@ -23,6 +24,7 @@ import {
   resolveCookieNames,
   cookieAttributesString,
   resolveCookieScope,
+  deviceCookieName,
   DbscProtocolError,
   DbscVerificationError,
   ErrorCodes,
@@ -132,6 +134,26 @@ function appendSetCookie(res: ServerResponse, cookies: string | string[]): void 
   res.setHeader("Set-Cookie", [...priorList, ...add]);
 }
 
+const DEVICE_COOKIE_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+
+/**
+ * The per-device value for the no-sessionId (JWT) `bind()` path: reads the
+ * device cookie, or mints one and sets it on the response. Two browsers of
+ * the same user thus derive different session ids.
+ */
+export function deviceHintFor(
+  req: IncomingMessage,
+  res: ServerResponse,
+  scope: { secure: boolean; cookieScope?: CookieScope; cookieDomain?: string },
+): string {
+  const name = deviceCookieName(scope);
+  const existing = reqCookies(req)[name];
+  if (existing) return existing;
+  const value = randomBytes(16).toString("hex");
+  appendSetCookie(res, serializeCookie(name, value, cookieOpts(DEVICE_COOKIE_TTL_MS, scope)));
+  return value;
+}
+
 function reqUrl(req: IncomingMessage): URL {
   // Fixed base: only path and query are read, and a hostile Host header
   // (e.g. "a b") must not make every request throw.
@@ -217,6 +239,10 @@ export interface BindSessionOptions {
   sessionTtl?: number;
 }
 
+/**
+ * Lower-level building block: starts a binding with explicit storage and
+ * cookie options. `createDbsc().bind()` wraps it with the kit's config.
+ */
 export async function bindSession(
   res: ServerResponse,
   sessionId: string,
@@ -251,6 +277,11 @@ export async function bindSession(
   ]);
 }
 
+/**
+ * Lower-level building block: the protocol middleware alone. `createDbsc()`
+ * builds it from the same options and adds body capture, the client SDK,
+ * session binding and `protect()`.
+ */
 export function dbsc(opts: DbscNodeOptions): DbscNodeHandler {
   const {
     storage,
