@@ -48,6 +48,17 @@ the session dies.
 | `MALFORMED_PROOF` | The proof header violated a parse rule, or carried `bh` without body signing, or omitted `bh` with it | 04 |
 | `PROOF_REPLAY` | A per-request proof's `(sessionId, ts, r)` tuple was seen before (`r` is the first half of the ECDSA signature, so a re-encoded signature is still a replay) | 04 |
 | `SESSION_MISMATCH` | The DBSC session on a guarded request is not the one the application bound for the authenticated user | 04 |
+| `NO_BINDING` | A guarded request has no active device binding (no DBSC session, or one past its freshness window). Reference implementation; other servers MAY report this as a plain 403 | 04 |
+
+### Rejection bodies (reference implementation)
+
+The Node reference implementation answers a guarded-route rejection with a JSON
+body `{ "error", "code", "hint" }`. `code` is one of the codes above and is the
+stable part; `hint` is a plain-language explanation of the likely setup mistake,
+which describes configuration and never the session. With debugging on
+(`DBSC_DEBUG=1`, or `NODE_ENV=development`) the hint is repeated in an
+`X-Dbsc-Debug: <CODE>: <hint>` response header. None of this is required for
+conformance; clients MUST NOT depend on `hint` text.
 
 ### DPoP codes (optional layer, 10)
 

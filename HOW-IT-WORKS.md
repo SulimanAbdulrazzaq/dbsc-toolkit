@@ -254,7 +254,7 @@ Default TTLs: bound cookie 10 min (browser refreshes it on its own), challenge 5
 
 ## Cross-browser story
 
-| Browser | Tier achieved (out of the box, with `initBoundDbsc()` loaded) |
+| Browser | Tier achieved (out of the box, with the client SDK loaded) |
 |---------|-------------------------------|
 | Chrome 145+ on Windows | `dbsc` (native, TPM) |
 | Edge 145+ on Windows | `dbsc` |
@@ -266,9 +266,9 @@ Default TTLs: bound cookie 10 min (browser refreshes it on its own), challenge 5
 | Mobile Chrome / Safari / Firefox (iOS, Android) | `bound` (Web Crypto polyfill) |
 | Chromium older than its platform rollout, or on Linux | `bound` (Web Crypto polyfill) |
 
-If you load the client SDK (`initBoundDbsc()` from `dbsc-toolkit/client`) on the page, the right tier shows up automatically. The SDK probes for native DBSC for ~3 seconds after login; if no `__Host-dbsc-session` cookie has appeared, it generates a non-extractable ECDSA P-256 keypair, stores it in IndexedDB, and registers the public key with the server. From that point on it signs refresh challenges automatically.
+If you load the client SDK on the page (`kit.clientScript()`, `<script type="module" src="/dbsc-client/auto.js">`, or `startDbsc()` from `dbsc-toolkit/client`), the right tier shows up automatically. The SDK probes for native DBSC for ~3 seconds after login; if no `__Host-dbsc-session` cookie has appeared, it generates a non-extractable ECDSA P-256 keypair, stores it in IndexedDB, and registers the public key with the server. From that point on it signs refresh challenges automatically.
 
-If you *don't* load the client SDK, you get the original behavior: `tier === "dbsc"` on Chromium 145+, `tier === "none"` everywhere else. The bound polyfill is opt-in via the script tag.
+If you *don't* load the client SDK, Chromium 145+ still reaches `tier === "dbsc"` and every other browser stays at `tier === "none"`. But guarded routes then fail everywhere, Chromium included: the per-request proof comes from the polyfill key the SDK registers (since v2.7), so with no SDK there is nothing to sign with and guards answer `KEY_NOT_FOUND_BOUND` or `MISSING_PROOF`. Load it on every page users reach after sign-in.
 
 **How the two tiers relate under the hood.** They share storage (`Session`, `BoundKey`, `Challenge`), the same `__Host-dbsc-session` cookie, the same freshness check (`lastRefreshAt + boundCookieTtl + refreshGraceMs`). The `refreshGraceMs` term (default 30s, added in 2.5.0) absorbs the short in-flight gap between a cookie's freshness lapsing and the browser's next `/dbsc/refresh` landing — without it, a `/me`-style poll in that gap would briefly read `tier: "none"` and could false-alarm an auto-logout. Set `refreshGraceMs: 0` to demote the instant freshness lapses. The only protocol differences are: native DBSC posts JWS in headers and is driven by Chromium without app code; the bound polyfill posts JSON bodies and is driven by `initBoundDbsc()`. Both write to `session.tier` and both demote to `"none"` on a failed refresh. The middleware reads `session.tier` and applies the freshness check uniformly. See [docs/polyfill.md](./docs/polyfill.md) for the bound-tier wire format.
 
