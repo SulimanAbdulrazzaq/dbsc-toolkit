@@ -73,6 +73,9 @@
     },
     "./package.json": "./package.json"
   },
+  "bin": {
+    "dbsc-toolkit": "./dist/cli/index.js"
+  },
   "files": [
     "dist",
     "migrations",

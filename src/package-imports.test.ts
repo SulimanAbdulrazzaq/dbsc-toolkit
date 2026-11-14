@@ -18,6 +18,8 @@ const declared = new Set([
   ...Object.keys(pkg.peerDependencies ?? {}),
 ]);
 const builtins = new Set(builtinModules);
+// Files whose `import` lines are code the CLI prints, not imports it runs.
+const TEMPLATE_FILES = new Set([join("src", "cli", "init.ts")]);
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -37,6 +39,7 @@ describe("published imports", () => {
   it("only imports packages listed in dependencies or peerDependencies", () => {
     const missing: string[] = [];
     for (const file of sourceFiles(join(root, "src"))) {
+      if (TEMPLATE_FILES.has(file.slice(root.length + 1))) continue;
       const text = readFileSync(file, "utf8");
       // Value imports only: `import type` is erased and needs nothing at runtime.
       for (const m of text.matchAll(/^import\s+(?!type\s)[^;]*?from\s+"([^"]+)"/gm)) {
