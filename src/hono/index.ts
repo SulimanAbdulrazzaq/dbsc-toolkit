@@ -1,4 +1,5 @@
 import type { Context, MiddlewareHandler } from "hono";
+import { defaultSecure } from "../core/kit.js";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import {
   handleRegistration,
@@ -106,7 +107,7 @@ declare module "hono" {
 
 export interface BindSessionOptions {
   userId: string;
-  /** Match the value passed to dbsc({ secure }). Defaults true. Mismatch = cookies the middleware cannot read. */
+  /** Match the value passed to dbsc({ secure }). Defaults to `defaultSecure()`. Mismatch = cookies the middleware cannot read. */
   secure?: boolean;
   /** Match the value passed to dbsc({ cookieScope }). Defaults "host". */
   cookieScope?: CookieScope;
@@ -123,7 +124,7 @@ export async function bindSession(
   storage: StorageAdapter,
   opts: BindSessionOptions,
 ): Promise<void> {
-  const secure = opts.secure ?? true;
+  const secure = opts.secure ?? defaultSecure();
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
   const regCookieTtl = opts.registrationCookieTtl ?? DEFAULT_REG_TTL_MS;
   const sessionTtl = opts.sessionTtl ?? DEFAULT_SESSION_TTL_MS;
@@ -178,7 +179,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
     replayCache = new MemoryReplayCache(),
     onEvent,
     autoBind,
-    secure = true,
+    secure = defaultSecure(),
     cookieScope,
     cookieDomain,
     ipExtractor = defaultIpExtractor,

@@ -1,10 +1,16 @@
 import type { Context, Hono, MiddlewareHandler } from "hono";
+import { defaultSecure } from "../core/kit.js";
 import { getCookie, setCookie } from "hono/cookie";
 import { randomBytes } from "node:crypto";
 import {
   deriveSessionId,
   deviceCookieName,
   resolveCookieScope,
+  withKitBinding,
+  checkKitSetup,
+  clientScriptTag,
+  type KitSessionBinding,
+  type ClientScriptOptions,
   type RequireProofOptions,
   type CookieScope,
 } from "../core/index.js";
@@ -42,7 +48,7 @@ function resolveDeviceHint(c: Context, scope: DeviceScope): string {
   return value;
 }
 
-export interface CreateDbscOptions extends DbscHonoOptions {
+export interface CreateDbscOptions extends DbscHonoOptions, KitSessionBinding<Context> {
   /** Default session TTL (ms) for `bind()`. */
   sessionTtl?: number;
 }
@@ -66,8 +72,13 @@ export interface DbscKit {
   /** Start a binding. Pass a sessionId, or omit it to derive one from `userId`. */
   bind(c: Context, sessionId: string, opts: BindOptions): Promise<string>;
   bind(c: Context, opts: BindOptions): Promise<string>;
-  /** The route guard — requires a bound device + a per-request proof. */
+  /**
+   * The route guard — requires a bound device + a per-request proof. Uses the
+   * kit's `expectSessionId` / `expectUserId` unless the call passes its own.
+   */
   requireProof(opts?: RequireProofOptions<Context>): MiddlewareHandler;
+  /** The `<script>` tag that loads the browser side. Serve `dist/client/` at `/dbsc-client`. */
+  clientScript(opts?: ClientScriptOptions): string;
   /** DPoP (RFC 9449) route guard for token-bound API calls. Optional layer. */
   requireDpop(opts?: RequireDpopOptions<Context>): MiddlewareHandler;
 }
@@ -77,7 +88,7 @@ export interface DbscKit {
  * by `install()` — serve `dist/client/` with your runtime's static handler.
  */
 export function createDbsc(opts: CreateDbscOptions): DbscKit {
-  const secure = opts.secure ?? true;
+  const secure = opts.secure ?? defaultSecure();
   const cookieScope = opts.cookieScope;
   const cookieDomain = opts.cookieDomain;
   const scope: DeviceScope = {
@@ -87,6 +98,11 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
   };
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
   const middleware = dbsc(opts);
+  const binding: KitSessionBinding<Context> = {
+    ...(opts.expectSessionId !== undefined && { expectSessionId: opts.expectSessionId }),
+    ...(opts.expectUserId !== undefined && { expectUserId: opts.expectUserId }),
+  };
+  checkKitSetup({ storage: opts.storage, ...binding });
 
   async function bind(c: Context, a: string | BindOptions, b?: BindOptions): Promise<string> {
     const bindOpts = typeof a === "string" ? (b as BindOptions) : a;
@@ -122,7 +138,8 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
       return app;
     },
     bind,
-    requireProof,
+    requireProof: (o?: RequireProofOptions<Context>) => requireProof(withKitBinding(binding, o)),
     requireDpop,
+    clientScript: (o?: ClientScriptOptions) => clientScriptTag("/dbsc-client", o),
   };
 }

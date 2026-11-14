@@ -67,6 +67,16 @@ export type { DeriveSessionIdInput } from "./derive-session-id.js";
 export { noBindingReason, sessionBindingMatches, proofTarget, SESSION_MISMATCH_MESSAGE } from "./protect-policy.js";
 export type { RequireProofOptions, SessionBindingHook } from "./protect-policy.js";
 
+export {
+  defaultSecure,
+  withKitBinding,
+  checkKitSetup,
+  clientScriptTag,
+  warnOnce,
+  resetWarnings,
+} from "./kit.js";
+export type { KitSessionBinding, ClientScriptOptions } from "./kit.js";
+
 export { parseCookieHeader } from "./protocol/cookies.js";
 export { readJsonObject, MAX_PROTOCOL_BODY_BYTES } from "./protocol/body.js";
 

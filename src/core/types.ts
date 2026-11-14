@@ -54,6 +54,13 @@ export interface RefreshProof {
 }
 
 export interface StorageAdapter {
+  /**
+   * `true` for storage that does not survive a restart or reach other
+   * instances (`MemoryStorage`). `createDbsc()` warns when it runs with
+   * `NODE_ENV=production`. Leave it unset on persistent backends.
+   */
+  readonly ephemeral?: boolean;
+
   getSession(id: string): Promise<Session | null>;
   setSession(session: Session): Promise<void>;
   deleteSession(id: string): Promise<void>;
@@ -267,7 +274,7 @@ export interface AutoBindResult {
  * these so `install()`, `bind()`, and `requireProof()` need no re-passing.
  */
 export interface DbscKitExtras {
-  /** Use `__Host-` cookies + the Secure flag. Default true. */
+  /** Use `__Host-` cookies + the Secure flag. Default `true`, or `false` when `NODE_ENV=development`. */
   secure?: boolean;
   /** Mount path for the static client SDK. Default "/dbsc-client". `false` skips it. */
   clientPath?: string | false;

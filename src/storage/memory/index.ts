@@ -7,6 +7,7 @@ import type {
 } from "../../core/index.js";
 
 export class MemoryStorage implements StorageAdapter {
+  readonly ephemeral = true;
   private sessions = new Map<string, Session>();
   // Keyed by `${sessionId}:${kind}`. A session can hold up to two rows
   // (one per kind) — see BoundKey.kind in core/types.ts.

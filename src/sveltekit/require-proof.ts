@@ -6,6 +6,7 @@ import {
   DbscVerificationError,
   type RequireProofOptions,
   proofTarget,
+  withKitBinding,
 } from "../core/index.js";
 import { DBSC_INTERNAL, type DbscInternal, type DbscSvelteKitSession } from "./index.js";
 
@@ -20,7 +21,7 @@ import { DBSC_INTERNAL, type DbscInternal, type DbscSvelteKitSession } from "./i
  *
  * Throws a SvelteKit `error(403)` when there is no binding or the proof fails.
  */
-export function requireProof(opts: RequireProofOptions<RequestEvent> = {}) {
+export function requireProof(guardOpts: RequireProofOptions<RequestEvent> = {}) {
   return async (event: RequestEvent): Promise<void> => {
     const session = (event.locals as Record<string, unknown>).dbsc as DbscSvelteKitSession | undefined;
     const tier = session?.tier ?? "none";
@@ -29,6 +30,8 @@ export function requireProof(opts: RequireProofOptions<RequestEvent> = {}) {
     }
 
     const internal = (session as unknown as Record<PropertyKey, unknown>)[DBSC_INTERNAL] as DbscInternal | undefined;
+    // dbscHandle's expectSessionId / expectUserId apply unless this guard sets its own.
+    const opts = withKitBinding(internal?.binding ?? {}, guardOpts);
     const storage = opts.storage ?? internal?.storage;
     if (!storage) {
       throw error(500, "requireProof: storage unavailable — add dbscHandle to hooks.server.ts, or pass { storage }");

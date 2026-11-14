@@ -1,11 +1,18 @@
 import type { NextRequest } from "next/server.js";
+import { defaultSecure } from "../core/kit.js";
 import { NextResponse } from "next/server.js";
 import { randomBytes } from "node:crypto";
 import {
   deriveSessionId,
   deviceCookieName,
   resolveCookieScope,
+  withKitBinding,
+  checkKitSetup,
+  clientScriptTag,
   type CookieScope,
+  type KitSessionBinding,
+  type ClientScriptOptions,
+  type RequireProofOptions,
 } from "../core/index.js";
 
 const DEVICE_COOKIE_TTL_SEC = 365 * 24 * 60 * 60;
@@ -24,7 +31,7 @@ import {
 } from "./index.js";
 import { requireProof, type RequireProofSession, type RequireProofResult } from "./require-proof.js";
 
-export interface CreateDbscOptions extends DbscNextOptions {
+export interface CreateDbscOptions extends DbscNextOptions, KitSessionBinding<NextRequest> {
   /** Default session TTL (ms) for `bind()`. */
   sessionTtl?: number;
 }
@@ -57,7 +64,21 @@ export interface DbscKit {
   /** Read the DBSC session inside a route handler. */
   getSession(req: NextRequest, res?: NextResponse): Promise<DbscSessionInfo>;
   /** The route guard. Storage is taken from the kit config. */
-  requireProof(req: NextRequest, session: RequireProofSession): Promise<RequireProofResult>;
+  requireProof(
+    req: NextRequest,
+    session: RequireProofSession,
+    opts?: RequireProofOptions<NextRequest>,
+  ): Promise<RequireProofResult>;
+  /**
+   * Reads the session and runs the guard in one call. Returns the error
+   * response to send back, or `null` when the request may proceed:
+   *
+   *   const denied = await dbsc.guard(req);
+   *   if (denied) return denied;
+   */
+  guard(req: NextRequest, opts?: RequireProofOptions<NextRequest>): Promise<NextResponse | null>;
+  /** The `<script>` tag that loads the browser side. Copy `dist/client/` to `public/dbsc-client`, or import `startDbsc` from `dbsc-toolkit/client`. */
+  clientScript(opts?: ClientScriptOptions): string;
 }
 
 /**
@@ -66,7 +87,7 @@ export interface DbscKit {
  * inside route handlers.
  */
 export function createDbsc(opts: CreateDbscOptions): DbscKit {
-  const secure = opts.secure ?? true;
+  const secure = opts.secure ?? defaultSecure();
   const cookieScope = opts.cookieScope;
   const cookieDomain = opts.cookieDomain;
   const scope: DeviceScope = {
@@ -76,6 +97,11 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
   };
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
   const mw = createDbscMiddleware(opts);
+  const binding: KitSessionBinding<NextRequest> = {
+    ...(opts.expectSessionId !== undefined && { expectSessionId: opts.expectSessionId }),
+    ...(opts.expectUserId !== undefined && { expectUserId: opts.expectUserId }),
+  };
+  checkKitSetup({ storage: opts.storage, ...binding });
 
   function resolveDeviceHint(req: NextRequest, res: NextResponse): string {
     const name = deviceCookieName(scope);
@@ -123,24 +149,37 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     return sessionId;
   }
 
+  const getSession = (req: NextRequest, res?: NextResponse): Promise<DbscSessionInfo> =>
+    getDbscSession(req, opts.storage, {
+      ...(opts.boundCookieTtl !== undefined && { boundCookieTtl: opts.boundCookieTtl }),
+      ...(opts.refreshGraceMs !== undefined && { refreshGraceMs: opts.refreshGraceMs }),
+      ...(res !== undefined && { res }),
+      ...(opts.onEvent !== undefined && { onEvent: opts.onEvent }),
+      secure,
+      ...(cookieScope !== undefined && { cookieScope }),
+      ...(cookieDomain !== undefined && { cookieDomain }),
+    });
+  const guardWith = (
+    req: NextRequest,
+    session: RequireProofSession,
+    o?: RequireProofOptions<NextRequest>,
+  ): Promise<RequireProofResult> =>
+    requireProof(req, session, {
+      storage: opts.storage,
+      ...(opts.bound !== undefined && { bound: opts.bound }),
+      ...(opts.replayCache !== undefined && { replayCache: opts.replayCache }),
+      ...withKitBinding(binding, o),
+    });
+
   return {
     middleware: () => mw,
     bind,
-    getSession: (req: NextRequest, res?: NextResponse) =>
-      getDbscSession(req, opts.storage, {
-        ...(opts.boundCookieTtl !== undefined && { boundCookieTtl: opts.boundCookieTtl }),
-        ...(opts.refreshGraceMs !== undefined && { refreshGraceMs: opts.refreshGraceMs }),
-        ...(res !== undefined && { res }),
-        ...(opts.onEvent !== undefined && { onEvent: opts.onEvent }),
-        secure,
-        ...(cookieScope !== undefined && { cookieScope }),
-        ...(cookieDomain !== undefined && { cookieDomain }),
-      }),
-    requireProof: (req: NextRequest, session: RequireProofSession) =>
-      requireProof(req, session, {
-        storage: opts.storage,
-        ...(opts.bound !== undefined && { bound: opts.bound }),
-        ...(opts.replayCache !== undefined && { replayCache: opts.replayCache }),
-      }),
+    getSession,
+    requireProof: guardWith,
+    async guard(req: NextRequest, o?: RequireProofOptions<NextRequest>): Promise<NextResponse | null> {
+      const result = await guardWith(req, await getSession(req), o);
+      return result.ok ? null : result.response;
+    },
+    clientScript: (o?: ClientScriptOptions) => clientScriptTag("/dbsc-client", o),
   };
 }

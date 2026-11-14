@@ -1,4 +1,5 @@
 import type { RequestEvent } from "@sveltejs/kit";
+import { defaultSecure, checkKitSetup, type KitSessionBinding } from "../core/kit.js";
 
 /**
  * The server `handle` hook shape. SvelteKit 3 moved its `Handle` type to
@@ -53,6 +54,8 @@ export interface DbscInternal {
   secure: boolean;
   boundEnabled: boolean;
   replayCache?: ProofReplayCache;
+  /** `expectSessionId` / `expectUserId` from `dbscHandle()`, applied by every `requireProof()`. */
+  binding?: KitSessionBinding<RequestEvent>;
 }
 export const DBSC_INTERNAL: unique symbol = Symbol("dbsc-toolkit.sveltekit.internal");
 
@@ -68,7 +71,7 @@ const DEFAULT_BOUND_TTL = 10 * 60 * 1000;
 const DEFAULT_REG_TTL = 24 * 60 * 60 * 1000;
 const DEFAULT_SESSION_TTL = 24 * 60 * 60 * 1000;
 
-export interface DbscSvelteKitOptions extends DbscOptions {
+export interface DbscSvelteKitOptions extends DbscOptions, KitSessionBinding<RequestEvent> {
   secure?: boolean;
   boundStatePath?: string;
   boundChallengePath?: string;
@@ -138,7 +141,7 @@ export async function bindSession(
   storage: StorageAdapter,
   opts: BindSessionOptions,
 ): Promise<void> {
-  const secure = opts.secure ?? true;
+  const secure = opts.secure ?? defaultSecure();
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
   const regCookieTtl = opts.registrationCookieTtl ?? DEFAULT_REG_TTL;
   const sessionTtl = opts.sessionTtl ?? DEFAULT_SESSION_TTL;
@@ -189,10 +192,17 @@ export function dbscHandle(opts: DbscSvelteKitOptions): DbscHandle {
     // more than one instance.
     replayCache = new MemoryReplayCache(),
     onEvent,
-    secure = true,
+    secure = defaultSecure(),
     cookieScope,
     cookieDomain,
+    expectSessionId,
+    expectUserId,
   } = opts;
+  const binding: KitSessionBinding<RequestEvent> = {
+    ...(expectSessionId !== undefined && { expectSessionId }),
+    ...(expectUserId !== undefined && { expectUserId }),
+  };
+  checkKitSetup({ storage, ...binding });
 
   const scope: ScopeArgs = {
     secure,
@@ -427,6 +437,7 @@ export function dbscHandle(opts: DbscSvelteKitOptions): DbscHandle {
       secure,
       boundEnabled: bound,
       ...(replayCache !== undefined && { replayCache }),
+      binding,
     } satisfies DbscInternal;
     (event.locals as Record<PropertyKey, unknown>).dbsc = dbscSession;
 

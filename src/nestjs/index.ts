@@ -21,7 +21,9 @@ import {
   DbscVerificationError,
   ErrorCodes,
   type RequireProofOptions,
+  type KitSessionBinding,
   proofTarget,
+  withKitBinding,
 } from "../core/index.js";
 import {
   runDpopGuard,
@@ -32,23 +34,26 @@ import {
   dbsc,
   createDbsc,
   DBSC_INTERNAL,
-  type DbscExpressOptions,
+  type CreateDbscOptions,
   type DbscInternal,
   type DbscKit,
   type BindOptions,
 } from "../express/index.js";
 
 export { bindSession } from "../express/index.js";
-export type { DbscExpressOptions as DbscNestOptions, BindOptions } from "../express/index.js";
+export type { CreateDbscOptions as DbscNestOptions, BindOptions } from "../express/index.js";
 
 /** DI token for the DBSC options passed to `DbscModule.forRoot()`. */
 export const DBSC_OPTIONS = Symbol("dbsc-toolkit.nestjs.options");
+
+/** Carries `forRoot({ expectSessionId, expectUserId })` from the middleware to the guards. */
+const NEST_BINDING: unique symbol = Symbol("dbsc-toolkit.nestjs.binding");
 
 /** Injectable wrapper around the Express kit's `bind()` — call it in your login controller. */
 @Injectable()
 export class DbscService {
   private readonly kit: DbscKit;
-  constructor(@Inject(DBSC_OPTIONS) opts: DbscExpressOptions) {
+  constructor(@Inject(DBSC_OPTIONS) opts: CreateDbscOptions) {
     this.kit = createDbsc(opts);
   }
   /** Start a binding for an explicit session id. */
@@ -66,9 +71,13 @@ export class DbscService {
  */
 @Module({})
 export class DbscModule implements NestModule {
-  constructor(@Inject(DBSC_OPTIONS) private readonly opts: DbscExpressOptions) {}
+  constructor(@Inject(DBSC_OPTIONS) private readonly opts: CreateDbscOptions) {}
 
-  static forRoot(opts: DbscExpressOptions): DynamicModule {
+  /**
+   * `expectSessionId` / `expectUserId` set here apply to every `DbscGuard`
+   * and `createDbscGuard()` unless the guard passes its own.
+   */
+  static forRoot(opts: CreateDbscOptions): DynamicModule {
     return {
       module: DbscModule,
       global: true,
@@ -78,11 +87,23 @@ export class DbscModule implements NestModule {
   }
 
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(dbsc(this.opts)).forRoutes("*");
+    const binding: KitSessionBinding<Request> = {
+      ...(this.opts.expectSessionId !== undefined && { expectSessionId: this.opts.expectSessionId }),
+      ...(this.opts.expectUserId !== undefined && { expectUserId: this.opts.expectUserId }),
+    };
+    const carry = (_req: Request, res: Response, next: () => void): void => {
+      (res.locals as Record<PropertyKey, unknown>)[NEST_BINDING] = binding;
+      next();
+    };
+    consumer.apply(carry, dbsc(this.opts)).forRoutes("*");
   }
 }
 
-async function runProof(req: Request, res: Response, opts: RequireProofOptions<Request>): Promise<void> {
+async function runProof(req: Request, res: Response, guardOpts: RequireProofOptions<Request>): Promise<void> {
+  const moduleBinding = (res.locals as Record<PropertyKey, unknown>)[NEST_BINDING] as
+    | KitSessionBinding<Request>
+    | undefined;
+  const opts = withKitBinding(moduleBinding ?? {}, guardOpts);
   const dbscLocals = res.locals.dbsc;
   const tier = dbscLocals?.tier ?? "none";
   const skipped = dbscLocals?.skipped ?? [];

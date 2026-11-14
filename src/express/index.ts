@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
+import { defaultSecure } from "../core/kit.js";
 import {
   handleRegistration,
   handleRefresh,
@@ -40,6 +41,8 @@ export { requireProof } from "./require-proof.js";
 export { requireDpop } from "./require-dpop.js";
 export { createDbsc } from "./create-dbsc.js";
 export type { CreateDbscOptions, DbscKit, BindOptions } from "./create-dbsc.js";
+export { captureProofBody } from "./capture-body.js";
+export type { CaptureProofBodyOptions } from "./capture-body.js";
 
 /** Internal carrier so `requireProof()` can reach storage without re-passing it. */
 export interface DbscInternal {
@@ -117,7 +120,7 @@ function serializeCookie(name: string, value: string, opts: ReturnType<typeof co
 
 export interface BindSessionOptions {
   userId: string;
-  /** Match the value passed to dbsc({ secure }). Defaults true. Mismatch = cookies the middleware cannot read. */
+  /** Match the value passed to dbsc({ secure }). Defaults to `defaultSecure()`. Mismatch = cookies the middleware cannot read. */
   secure?: boolean;
   /** Match the value passed to dbsc({ cookieScope }). Defaults "host". */
   cookieScope?: CookieScope;
@@ -134,7 +137,7 @@ export async function bindSession(
   storage: StorageAdapter,
   opts: BindSessionOptions,
 ): Promise<void> {
-  const secure = opts.secure ?? true;
+  const secure = opts.secure ?? defaultSecure();
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
   const regCookieTtl = opts.registrationCookieTtl ?? DEFAULT_REG_TTL;
   const sessionTtl = opts.sessionTtl ?? DEFAULT_SESSION_TTL;
@@ -190,7 +193,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
     replayCache = new MemoryReplayCache(),
     onEvent,
     autoBind,
-    secure = true,
+    secure = defaultSecure(),
     cookieScope,
     cookieDomain,
   } = opts;

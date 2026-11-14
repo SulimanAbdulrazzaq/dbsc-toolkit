@@ -1,4 +1,5 @@
 import express, { type Express, type Request, type Response, type RequestHandler } from "express";
+import { defaultSecure } from "../core/kit.js";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import {
@@ -6,13 +7,19 @@ import {
   parseCookieHeader,
   deviceCookieName,
   resolveCookieScope,
+  withKitBinding,
+  clientScriptTag,
+  checkKitSetup,
   type RequireProofOptions,
   type CookieScope,
+  type KitSessionBinding,
+  type ClientScriptOptions,
 } from "../core/index.js";
 import type { RequireDpopOptions } from "../core/dpop/index.js";
 import { dbsc, bindSession, type DbscExpressOptions } from "./index.js";
 import { requireProof } from "./require-proof.js";
 import { requireDpop } from "./require-dpop.js";
+import { captureProofBody } from "./capture-body.js";
 
 const DEVICE_COOKIE_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -48,13 +55,18 @@ function resolveDeviceHint(res: Response, scope: DeviceScope): string {
   return value;
 }
 
-export interface CreateDbscOptions extends DbscExpressOptions {
+export interface CreateDbscOptions extends DbscExpressOptions, KitSessionBinding<Request> {
   /** Mount path for the static client SDK. Default "/dbsc-client". `false` skips it. */
   clientPath?: string | false;
   /** Default session TTL (ms) for `bind()`. */
   sessionTtl?: number;
   /** Let `install()` set `trust proxy`. Default true. */
   trustProxy?: boolean;
+  /**
+   * Largest request body `install()` copies for the proof's body hash, in
+   * bytes. Default 1 MiB. Guarded routes with bigger bodies fail the proof.
+   */
+  maxProofBodyBytes?: number;
 }
 
 export interface BindOptions {
@@ -71,15 +83,27 @@ export interface BindOptions {
 }
 
 export interface DbscKit {
-  /** Mount the whole DBSC surface on the app: middleware, bound-route JSON, client SDK. */
+  /**
+   * Mount the whole DBSC surface on the app: body capture for proofs, the
+   * middleware, bound-route JSON and the client SDK. Call it before your
+   * routes and body parsers.
+   */
   install(app: Express): Express;
   /** The raw `dbsc()` middleware, for manual mounting. */
   middleware(): RequestHandler;
   /** Start a binding. Pass a sessionId, or omit it to derive one from `userId` (JWT apps). */
   bind(res: Response, sessionId: string, opts: BindOptions): Promise<string>;
   bind(res: Response, opts: BindOptions): Promise<string>;
-  /** The route guard — requires a bound device + a per-request proof. */
+  /**
+   * The route guard — requires a bound device + a per-request proof. Uses the
+   * kit's `expectSessionId` / `expectUserId` unless the call passes its own.
+   */
   requireProof(opts?: RequireProofOptions<Request>): RequestHandler;
+  /**
+   * The `<script>` tag that loads the browser side: registration, refresh,
+   * and proofs on every same-origin `fetch`. Put it in your page template.
+   */
+  clientScript(opts?: ClientScriptOptions): string;
   /** DPoP (RFC 9449) route guard for token-bound API calls. Optional layer. */
   requireDpop(opts?: RequireDpopOptions<Request>): RequestHandler;
 }
@@ -90,7 +114,7 @@ export interface DbscKit {
  * read this config — nothing is re-passed.
  */
 export function createDbsc(opts: CreateDbscOptions): DbscKit {
-  const secure = opts.secure ?? true;
+  const secure = opts.secure ?? defaultSecure();
   const cookieScope = opts.cookieScope;
   const cookieDomain = opts.cookieDomain;
   const scope: DeviceScope = {
@@ -103,6 +127,11 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
   const boundRegistrationPath = opts.boundRegistrationPath ?? "/dbsc-bound/registration";
   const boundRefreshPath = opts.boundRefreshPath ?? "/dbsc-bound/refresh";
   const middleware = dbsc(opts);
+  const binding: KitSessionBinding<Request> = {
+    ...(opts.expectSessionId !== undefined && { expectSessionId: opts.expectSessionId }),
+    ...(opts.expectUserId !== undefined && { expectUserId: opts.expectUserId }),
+  };
+  checkKitSetup({ storage: opts.storage, ...binding });
 
   async function bind(res: Response, a: string | BindOptions, b?: BindOptions): Promise<string> {
     const bindOpts = typeof a === "string" ? (b as BindOptions) : a;
@@ -137,6 +166,11 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     middleware: () => middleware,
     install(app: Express): Express {
       if (opts.trustProxy !== false) app.set("trust proxy", true);
+      app.use(
+        captureProofBody(
+          opts.maxProofBodyBytes !== undefined ? { limit: opts.maxProofBodyBytes } : {},
+        ),
+      );
       const json = express.json();
       app.use(boundRegistrationPath, json);
       app.use(boundRefreshPath, json);
@@ -148,7 +182,9 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
       return app;
     },
     bind,
-    requireProof,
+    requireProof: (o?: RequireProofOptions<Request>) => requireProof(withKitBinding(binding, o)),
     requireDpop,
+    clientScript: (o?: ClientScriptOptions) =>
+      clientScriptTag(clientPath === false ? "/dbsc-client" : clientPath, o),
   };
 }

@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { defaultSecure } from "../core/kit.js";
 import {
   handleRegistration,
   handleRefresh,
@@ -205,7 +206,7 @@ export async function readJsonBody(req: IncomingMessage): Promise<Record<string,
 
 export interface BindSessionOptions {
   userId: string;
-  /** Match the value passed to dbsc({ secure }). Defaults true. */
+  /** Match the value passed to dbsc({ secure }). Defaults to `defaultSecure()`. */
   secure?: boolean;
   /** Match the value passed to dbsc({ cookieScope }). Defaults "host". */
   cookieScope?: CookieScope;
@@ -222,7 +223,7 @@ export async function bindSession(
   storage: StorageAdapter,
   opts: BindSessionOptions,
 ): Promise<void> {
-  const secure = opts.secure ?? true;
+  const secure = opts.secure ?? defaultSecure();
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
   const regCookieTtl = opts.registrationCookieTtl ?? DEFAULT_REG_TTL;
   const sessionTtl = opts.sessionTtl ?? DEFAULT_SESSION_TTL;
@@ -271,7 +272,7 @@ export function dbsc(opts: DbscNodeOptions): DbscNodeHandler {
     onEvent,
     autoBind,
     ipExtractor,
-    secure = true,
+    secure = defaultSecure(),
     cookieScope,
     cookieDomain,
   } = opts;

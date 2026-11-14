@@ -1,17 +1,24 @@
 import type { FastifyInstance, FastifyReply, preHandlerAsyncHookHandler } from "fastify";
+import { defaultSecure } from "../core/kit.js";
 import { randomBytes } from "node:crypto";
 import {
   deriveSessionId,
   deviceCookieName,
   resolveCookieScope,
+  withKitBinding,
+  checkKitSetup,
+  clientScriptTag,
   type RequireProofOptions,
   type CookieScope,
+  type KitSessionBinding,
+  type ClientScriptOptions,
 } from "../core/index.js";
 import type { FastifyRequest } from "fastify";
 import type { RequireDpopOptions } from "../core/dpop/index.js";
 import { dbsc, bindSession, type DbscFastifyOptions } from "./index.js";
 import { requireProof } from "./require-proof.js";
 import { requireDpop } from "./require-dpop.js";
+import { captureProofBody } from "./capture-body.js";
 
 const DEVICE_COOKIE_TTL_SEC = 365 * 24 * 60 * 60;
 
@@ -42,9 +49,14 @@ function resolveDeviceHint(reply: FastifyReply, scope: DeviceScope): string {
   return value;
 }
 
-export interface CreateDbscOptions extends DbscFastifyOptions {
+export interface CreateDbscOptions extends DbscFastifyOptions, KitSessionBinding<FastifyRequest> {
   /** Default session TTL (ms) for `bind()`. */
   sessionTtl?: number;
+  /**
+   * Largest request body `install()` copies for the proof's body hash, in
+   * bytes. Default 1 MiB.
+   */
+  maxProofBodyBytes?: number;
 }
 
 export interface BindOptions {
@@ -64,8 +76,13 @@ export interface DbscKit {
   /** Start a binding. Pass a sessionId, or omit it to derive one from `userId`. */
   bind(reply: FastifyReply, sessionId: string, opts: BindOptions): Promise<string>;
   bind(reply: FastifyReply, opts: BindOptions): Promise<string>;
-  /** The route guard (use as a `preHandler`). */
+  /**
+   * The route guard (use as a `preHandler`). Uses the kit's
+   * `expectSessionId` / `expectUserId` unless the call passes its own.
+   */
   requireProof(opts?: RequireProofOptions<FastifyRequest>): preHandlerAsyncHookHandler;
+  /** The `<script>` tag that loads the browser side. Serve `dist/client/` at `/dbsc-client`. */
+  clientScript(opts?: ClientScriptOptions): string;
   /** DPoP (RFC 9449) route guard (use as a `preHandler`). Optional layer. */
   requireDpop(opts?: RequireDpopOptions<FastifyRequest>): preHandlerAsyncHookHandler;
 }
@@ -75,7 +92,7 @@ export interface DbscKit {
  * mounted by `install()` — serve `dist/client/` yourself if you have a frontend.
  */
 export function createDbsc(opts: CreateDbscOptions): DbscKit {
-  const secure = opts.secure ?? true;
+  const secure = opts.secure ?? defaultSecure();
   const cookieScope = opts.cookieScope;
   const cookieDomain = opts.cookieDomain;
   const scope: DeviceScope = {
@@ -84,6 +101,11 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     ...(cookieDomain !== undefined && { cookieDomain }),
   };
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
+  const binding: KitSessionBinding<FastifyRequest> = {
+    ...(opts.expectSessionId !== undefined && { expectSessionId: opts.expectSessionId }),
+    ...(opts.expectUserId !== undefined && { expectUserId: opts.expectUserId }),
+  };
+  checkKitSetup({ storage: opts.storage, ...binding });
 
   async function bind(reply: FastifyReply, a: string | BindOptions, b?: BindOptions): Promise<string> {
     const bindOpts = typeof a === "string" ? (b as BindOptions) : a;
@@ -118,11 +140,19 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
         const mod = (await import("@fastify/cookie")) as { default?: unknown };
         await fastify.register((mod.default ?? mod) as Parameters<FastifyInstance["register"]>[0]);
       }
+      fastify.addHook(
+        "preParsing",
+        captureProofBody(
+          opts.maxProofBodyBytes !== undefined ? { limit: opts.maxProofBodyBytes } : {},
+        ),
+      );
       await fastify.register(dbsc, opts);
       return fastify;
     },
     bind,
-    requireProof,
+    requireProof: (o?: RequireProofOptions<FastifyRequest>) =>
+      requireProof(withKitBinding(binding, o)),
     requireDpop,
+    clientScript: (o?: ClientScriptOptions) => clientScriptTag("/dbsc-client", o),
   };
 }

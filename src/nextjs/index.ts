@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server.js";
+import { defaultSecure } from "../core/kit.js";
 import { NextResponse } from "next/server.js";
 import {
   handleRegistration,
@@ -91,7 +92,7 @@ function cookieBase(scope: ScopeArgs) {
 
 export interface BindSessionOptions {
   userId: string;
-  /** Match the value passed to createDbscMiddleware({ secure }). Defaults true. Mismatch = cookies the middleware cannot read. */
+  /** Match the value passed to createDbscMiddleware({ secure }). Defaults to `defaultSecure()`. Mismatch = cookies the middleware cannot read. */
   secure?: boolean;
   /** Match the value passed to createDbscMiddleware({ cookieScope }). Defaults "host". */
   cookieScope?: CookieScope;
@@ -108,7 +109,7 @@ export async function bindSession(
   storage: StorageAdapter,
   opts: BindSessionOptions,
 ): Promise<void> {
-  const secure = opts.secure ?? true;
+  const secure = opts.secure ?? defaultSecure();
   const registrationPath = opts.registrationPath ?? "/dbsc/registration";
   const regCookieTtl = opts.registrationCookieTtl ?? DEFAULT_REG_TTL_MS;
   const sessionTtl = opts.sessionTtl ?? DEFAULT_SESSION_TTL_MS;
@@ -160,7 +161,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
     replayCache = new MemoryReplayCache(),
     onEvent,
     autoBind,
-    secure = true,
+    secure = defaultSecure(),
     cookieScope,
     cookieDomain,
   } = opts;
@@ -615,7 +616,7 @@ export async function getDbscSession(
   };
   const skipped = parseSessionSkippedHeader(skippedRaw);
 
-  const secure = opts.secure ?? true;
+  const secure = opts.secure ?? defaultSecure();
   const scope: ScopeArgs = {
     secure,
     ...(opts.cookieScope !== undefined && { cookieScope: opts.cookieScope }),
