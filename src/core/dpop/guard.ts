@@ -51,11 +51,20 @@ export interface DpopGuardOutcome {
   jkt?: string;
 }
 
+// Line terminators: a token containing one is malformed.
+const LINE_BREAK = new RegExp(`[${String.fromCharCode(0x0a, 0x0d, 0x2028, 0x2029)}]`);
+
 /** Parse a `DPoP <token>` Authorization header. Returns the token or undefined. */
 export function parseDpopAuthorization(authorization: string | undefined): string | undefined {
   if (!authorization) return undefined;
-  const m = /^DPoP\s+(.+)$/i.exec(authorization.trim());
-  return m ? m[1] : undefined;
+  // Parsed by hand: a regex with \s+ followed by .+ backtracks in quadratic
+  // time on long runs of whitespace.
+  const value = authorization.trim();
+  if (value.length < 6 || value.slice(0, 4).toLowerCase() !== "dpop" || !/\s/.test(value[4]!)) {
+    return undefined;
+  }
+  const token = value.slice(5).trimStart();
+  return token && !LINE_BREAK.test(token) ? token : undefined;
 }
 
 /**
