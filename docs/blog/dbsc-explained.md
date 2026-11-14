@@ -1,14 +1,14 @@
 ---
 title: "DBSC Explained: How Device Bound Session Credentials Actually Work"
 published: true
-description: "Chrome shipped DBSC to stable in 146. Here's the whole protocol — registration, challenge signing, the refresh cycle, what the TPM does, and what it actually protects — with no framework in sight."
+description: "Chrome shipped DBSC to stable in 145. Here's the whole protocol — registration, challenge signing, the refresh cycle, what the TPM does, and what it actually protects — with no framework in sight."
 tags: security, webdev, authentication, browsers
 canonical_url: https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/blob/main/docs/blog/dbsc-explained.md
 ---
 
 A session cookie is a bearer token. Whoever holds it is the user — the server has no way to tell the real browser apart from a copy of the cookie pasted into a different one. That single property is behind a huge share of real-world account takeovers: infostealer malware lifts cookies out of the browser profile, ships them to an attacker, and the attacker is logged in as you without ever touching your password or your MFA.
 
-Device Bound Session Credentials (DBSC) is the W3C protocol that removes the "whoever holds it" part. Chrome shipped it to stable in version 146. This post walks the entire protocol end to end with no framework and no specific language — just what travels on the wire and why each piece is shaped the way it is. If you've read the [W3C draft](https://github.com/w3c/webappsec-dbsc) and wanted the version that explains the *reasoning*, this is that.
+Device Bound Session Credentials (DBSC) is the W3C protocol that removes the "whoever holds it" part. Chrome shipped it to stable in version 145. This post walks the entire protocol end to end with no framework and no specific language — just what travels on the wire and why each piece is shaped the way it is. If you've read the [W3C draft](https://github.com/w3c/webappsec-dbsc) and wanted the version that explains the *reasoning*, this is that.
 
 ## The core idea in one paragraph
 
@@ -127,6 +127,6 @@ I wrote a whole separate piece on the threat boundary because it's the part secu
 
 ## Why this matters now
 
-DBSC is the first session-security primitive in a long time that moves the bearer-token problem instead of just shrinking it. SameSite, Secure, HttpOnly, short TTLs — all of those reduce the blast radius of a stolen cookie. DBSC makes the stolen cookie *not work*. And as of Chrome 146 it's in stable, which means it's no longer a research demo — it's something you can turn on for real users.
+DBSC is the first session-security primitive in a long time that moves the bearer-token problem instead of just shrinking it. SameSite, Secure, HttpOnly, short TTLs — all of those reduce the blast radius of a stolen cookie. DBSC makes the stolen cookie *not work*. It shipped in Chrome 145 on Windows, and Google announced public availability with Chrome 146, which means it's no longer a research demo — it's something you can turn on for real users.
 
 If you want to implement the server side, the full wire contract is written up as a [language-neutral spec](https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/blob/main/spec) with round-trip test vectors, and there's a [Node reference implementation](https://github.com/SulimanAbdulrazzaq/dbsc-toolkit) (`dbsc-toolkit`) verified end-to-end against Chrome 147 on real TPM 2.0 hardware. The protocol is small. The details are merciless. Both are worth knowing before you ship it.

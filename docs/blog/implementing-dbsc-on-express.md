@@ -1,14 +1,14 @@
 ---
 title: "Implementing Device Bound Session Credentials (DBSC) on Express"
 published: true
-description: "Chrome 146 shipped DBSC to stable. Here's how to bind your session cookies to the user's hardware key on an Express server — and the wire-format details that silently kill the session if you get them wrong."
+description: "DBSC is in stable Chrome, on Windows since version 145. Here's how to bind your session cookies to the user's hardware key on an Express server — and the wire-format details that silently kill the session if you get them wrong."
 tags: webdev, security, node, express
 canonical_url: https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/blob/main/docs/blog/implementing-dbsc-on-express.md
 ---
 
 A stolen session cookie is a full account takeover. The attacker copies the cookie out of the browser profile — infostealer malware does exactly this, at scale — pastes it into their own browser, and they *are* you. Every defense we've layered on (SameSite, Secure, HttpOnly, short TTLs) reduces the blast radius but doesn't close the hole: a bearer token is a bearer token, and whoever holds it wins.
 
-Device Bound Session Credentials (DBSC) closes it. Chrome shipped it to stable in 146. The idea is small and the consequences are large: at login the browser generates an EC P-256 keypair *inside the device's hardware key store* — TPM 2.0 on Windows, Secure Enclave on Apple Silicon — and hands your server only the public key. The private key never leaves the hardware and can't be exported, not even by malware running as the user. Your server binds the session to that key. Every few minutes the browser proves it still holds the key by signing a server challenge. Copy the cookie to another machine and the next refresh fails, because that machine can't produce the signature. The session dies within one refresh cycle.
+Device Bound Session Credentials (DBSC) closes it. Chrome shipped it to stable in 145. The idea is small and the consequences are large: at login the browser generates an EC P-256 keypair *inside the device's hardware key store* — TPM 2.0 on Windows, Secure Enclave on Apple Silicon — and hands your server only the public key. The private key never leaves the hardware and can't be exported, not even by malware running as the user. Your server binds the session to that key. Every few minutes the browser proves it still holds the key by signing a server challenge. Copy the cookie to another machine and the next refresh fails, because that machine can't produce the signature. The session dies within one refresh cycle.
 
 This post is the server side, on Express, end to end. I'll use [`dbsc-toolkit`](https://github.com/SulimanAbdulrazzaq/dbsc-toolkit) — the library I wrote and verified against Chrome 147 on real TPM 2.0 hardware — so the protocol plumbing is handled and we can focus on what you actually wire.
 
@@ -69,7 +69,7 @@ DBSC uses `__Host-` prefixed cookies, which Chrome will only accept over HTTPS w
 
 ## Watching it work
 
-Open the app in a Chromium 146+ browser over HTTPS, open DevTools → Network, and hit `POST /login`. Within a second or so you'll see a request you never wrote: `POST /dbsc/registration`, initiated by the browser itself. That request carries a JWS signed by the freshly minted hardware key. The server verifies the self-signature, stores the public key under the session ID, sets the `__Host-dbsc-session` cookie, and returns a JSON session config that tells the browser how and when to refresh.
+Open the app in a Chromium 145+ browser over HTTPS, open DevTools → Network, and hit `POST /login`. Within a second or so you'll see a request you never wrote: `POST /dbsc/registration`, initiated by the browser itself. That request carries a JWS signed by the freshly minted hardware key. The server verifies the self-signature, stores the public key under the session ID, sets the `__Host-dbsc-session` cookie, and returns a JSON session config that tells the browser how and when to refresh.
 
 Hit `GET /me` afterward and you'll see `tier: "dbsc"`. That's the proof the session is hardware-bound.
 

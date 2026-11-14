@@ -18,6 +18,13 @@
   <a href="https://nodejs.org"><img src="https://img.shields.io/node/v/dbsc-toolkit.svg" alt="Node"></a>
 </p>
 
+<p align="center">
+  <a href="https://sulimanabdulrazzaq.github.io/dbsc-toolkit/">Docs site</a> ·
+  <a href="https://dbsc-toolkit.onrender.com/">Live demo</a> ·
+  <a href="./docs/quickstart.md">Quickstart</a> ·
+  <a href="./SECURITY.md">Security policy</a>
+</p>
+
 ## The problem
 
 An attacker steals a session cookie — XSS, infostealer malware, a leaked log, a compromised proxy. The moment they have it, they paste it into their own browser and they're you. `HttpOnly` didn't matter. `Secure` didn't matter. Rotating the token only shortens the window; it doesn't close it.
@@ -194,6 +201,8 @@ Not defended (be honest about the boundary):
 
 Full STRIDE analysis: [docs/security/threat-model.md](./docs/security/threat-model.md) · best practices: [docs/security/best-practices.md](./docs/security/best-practices.md).
 
+Report a vulnerability privately through [SECURITY.md](./SECURITY.md). Two advisories have been published so far, both fixed and released: [GHSA-vmr3-pg4h-7f99](https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/security/advisories/GHSA-vmr3-pg4h-7f99) (high, fixed in 2.15.0) and [GHSA-8r9f-mhxv-83w4](https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/security/advisories/GHSA-8r9f-mhxv-83w4) (medium, fixed in 2.15.2).
+
 ## Protection tiers
 
 Every session carries a `tier`. You don't gate on it directly — `requireProof()` does the enforcement — but it tells you how the binding was achieved on a given browser.
@@ -276,6 +285,7 @@ The wire protocol is documented as a language-neutral spec in [`spec/`](./spec/)
 
 ## Docs
 
+- **Docs site:** <https://sulimanabdulrazzaq.github.io/dbsc-toolkit/>
 - **Protocol spec (language-neutral):** [spec/](./spec/) · [conformance](./spec/09-conformance.md) · [test vectors](./spec/vectors)
 - **Other languages — PHP:** [report-uri/dbsc-php](https://github.com/report-uri/dbsc-php) (independent implementation, cross-validated against these vectors)
 - **Concepts & protocol:** [HOW-IT-WORKS.md](./HOW-IT-WORKS.md)

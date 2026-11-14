@@ -1,7 +1,7 @@
 {
   "name": "dbsc-toolkit",
   "version": "2.16.1",
-  "description": "Server-side Device Bound Session Credentials (DBSC) for Node.js — Express, Fastify, Hono and Next.js adapters — plus a Web Crypto polyfill for Firefox, Safari, and older Chromium. Cookie-theft protection on every modern browser.",
+  "description": "Server-side Device Bound Session Credentials (DBSC) for Node.js — Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, Electron and node:http adapters — plus a Web Crypto polyfill for Firefox, Safari, and older Chromium. Cookie-theft protection on every modern browser.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -203,7 +203,7 @@
     "type": "git",
     "url": "https://github.com/SulimanAbdulrazzaq/dbsc-toolkit.git"
   },
-  "homepage": "https://github.com/SulimanAbdulrazzaq/dbsc-toolkit#readme",
+  "homepage": "https://sulimanabdulrazzaq.github.io/dbsc-toolkit/",
   "bugs": {
     "url": "https://github.com/SulimanAbdulrazzaq/dbsc-toolkit/issues"
   },
