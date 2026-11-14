@@ -8,6 +8,12 @@ import {
   withKitBinding,
   checkKitSetup,
   clientScriptTag,
+  resolveLoginBinding,
+  validatePathPatterns,
+  splitProtectOptions,
+  isProtected,
+  signPrefixes,
+  type ProtectOptions,
   type RequireProofOptions,
   type CookieScope,
   type KitSessionBinding,
@@ -85,6 +91,12 @@ export interface DbscKit {
   clientScript(opts?: ClientScriptOptions): string;
   /** DPoP (RFC 9449) route guard (use as a `preHandler`). Optional layer. */
   requireDpop(opts?: RequireDpopOptions<FastifyRequest>): preHandlerAsyncHookHandler;
+  /**
+   * `requireProof()` for every request under the given paths. Patterns:
+   * `"/api/*"` (everything under `/api/`), `"/account"` (the path and its
+   * children), `"*"` (everything). `clientScript()` signs these by default.
+   */
+  protect(patterns: string[], opts?: ProtectOptions<FastifyRequest>): preHandlerAsyncHookHandler;
 }
 
 /**
@@ -106,6 +118,7 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     ...(opts.expectUserId !== undefined && { expectUserId: opts.expectUserId }),
   };
   checkKitSetup({ storage: opts.storage, ...binding });
+  const protectedPatterns: string[] = [];
 
   async function bind(reply: FastifyReply, a: string | BindOptions, b?: BindOptions): Promise<string> {
     const bindOpts = typeof a === "string" ? (b as BindOptions) : a;
@@ -134,6 +147,19 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     return sessionId;
   }
 
+  // bindOnLogin runs as a preHandler so session and auth plugins
+  // (onRequest / preValidation) have already identified the user.
+  async function loginBinder(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const plan = await resolveLoginBinding(opts.bindOnLogin!, req, {
+      storage: opts.storage,
+      ...(binding.expectSessionId !== undefined && { expectSessionId: binding.expectSessionId }),
+      deriveSessionId: (userId) => deriveSessionId({ userId, deviceHint: resolveDeviceHint(reply, scope) }),
+      currentSessionId: req.dbsc?.sessionId ?? null,
+      ...(opts.boundRegistrationWindowMs !== undefined && { windowMs: opts.boundRegistrationWindowMs }),
+    });
+    if (plan) await bind(reply, plan.sessionId, { userId: plan.userId });
+  }
+
   return {
     async install(fastify: FastifyInstance): Promise<FastifyInstance> {
       if (!fastify.hasReplyDecorator("setCookie")) {
@@ -147,12 +173,30 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
         ),
       );
       await fastify.register(dbsc, opts);
+      if (opts.bindOnLogin) fastify.addHook("preHandler", loginBinder);
       return fastify;
     },
     bind,
     requireProof: (o?: RequireProofOptions<FastifyRequest>) =>
       requireProof(withKitBinding(binding, o)),
     requireDpop,
-    clientScript: (o?: ClientScriptOptions) => clientScriptTag("/dbsc-client", o),
+    protect(patterns: string[], o: ProtectOptions<FastifyRequest> = {}): preHandlerAsyncHookHandler {
+      validatePathPatterns(patterns);
+      protectedPatterns.push(...patterns);
+      const { guard, filter } = splitProtectOptions(o);
+      const handler = requireProof(withKitBinding(binding, guard));
+      return async function protectHook(this: unknown, req: FastifyRequest, reply: FastifyReply) {
+        const pathname = new URL(req.url, "http://x").pathname;
+        if (!isProtected(pathname, req.method, patterns, filter)) return;
+        await handler.call(this as never, req, reply);
+      } as preHandlerAsyncHookHandler;
+    },
+    clientScript: (o?: ClientScriptOptions) => {
+      const sign = signPrefixes(protectedPatterns);
+      return clientScriptTag("/dbsc-client", {
+        ...(protectedPatterns.length > 0 && sign !== undefined && { sign }),
+        ...o,
+      });
+    },
   };
 }

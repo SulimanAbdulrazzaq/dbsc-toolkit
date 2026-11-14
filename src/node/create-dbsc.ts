@@ -4,6 +4,12 @@ import {
   withKitBinding,
   checkKitSetup,
   clientScriptTag,
+  resolveLoginBinding,
+  validatePathPatterns,
+  splitProtectOptions,
+  isProtected,
+  signPrefixes,
+  type ProtectOptions,
   type KitSessionBinding,
   type ClientScriptOptions,
   type RequireProofOptions,
@@ -46,6 +52,12 @@ export interface DbscKit {
   clientScript(opts?: ClientScriptOptions): string;
   /** DPoP (RFC 9449) route guard for token-bound API calls. Optional layer. */
   requireDpop(opts?: RequireDpopOptions<IncomingMessage>): NodeDpopGuard;
+  /**
+   * `requireProof()` for every request under the given paths. Patterns:
+   * `"/api/*"` (everything under `/api/`), `"/account"` (the path and its
+   * children), `"*"` (everything). `clientScript()` signs these by default.
+   */
+  protect(patterns: string[], opts?: ProtectOptions<IncomingMessage>): NodeProofGuard;
 }
 
 /**
@@ -64,6 +76,10 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     ...(opts.expectUserId !== undefined && { expectUserId: opts.expectUserId }),
   };
   checkKitSetup({ storage: opts.storage, ...binding });
+  if (opts.bindOnLogin && !opts.expectSessionId) {
+    throw new Error("createDbsc: bindOnLogin needs expectSessionId on this adapter (the id to bind)");
+  }
+  const protectedPatterns: string[] = [];
 
   async function bind(res: ServerResponse, sessionId: string, bindOpts: BindOptions): Promise<string> {
     await bindSession(res, sessionId, opts.storage, {
@@ -78,13 +94,46 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     return sessionId;
   }
 
+  // bindOnLogin runs right after the protocol handler on every app request.
+  const withLoginBinding: DbscNodeHandler = opts.bindOnLogin
+    ? async (req, res) => {
+        if (await handler(req, res)) return true;
+        const plan = await resolveLoginBinding(opts.bindOnLogin!, req, {
+          storage: opts.storage,
+          expectSessionId: binding.expectSessionId!,
+          deriveSessionId: () => Promise.reject(new Error("unreachable: expectSessionId is required")),
+          currentSessionId: getDbscSession(req)?.sessionId ?? null,
+          ...(opts.boundRegistrationWindowMs !== undefined && { windowMs: opts.boundRegistrationWindowMs }),
+        });
+        if (plan) await bind(res, plan.sessionId, { userId: plan.userId });
+        return false;
+      }
+    : handler;
+
   return {
-    handler: () => handler,
+    handler: () => withLoginBinding,
     getSession: getDbscSession,
     bind,
     requireProof: (o?: RequireProofOptions<IncomingMessage>) =>
       requireProof(withKitBinding(binding, o)),
     requireDpop,
-    clientScript: (o?: ClientScriptOptions) => clientScriptTag("/dbsc-client", o),
+    protect(patterns: string[], o: ProtectOptions<IncomingMessage> = {}): NodeProofGuard {
+      validatePathPatterns(patterns);
+      protectedPatterns.push(...patterns);
+      const { guard, filter } = splitProtectOptions(o);
+      const check = requireProof(withKitBinding(binding, guard));
+      return async (req, res) => {
+        const pathname = new URL(req.url ?? "/", "http://x").pathname;
+        if (!isProtected(pathname, req.method ?? "GET", patterns, filter)) return true;
+        return check(req, res);
+      };
+    },
+    clientScript: (o?: ClientScriptOptions) => {
+      const sign = signPrefixes(protectedPatterns);
+      return clientScriptTag("/dbsc-client", {
+        ...(protectedPatterns.length > 0 && sign !== undefined && { sign }),
+        ...o,
+      });
+    },
   };
 }

@@ -46,7 +46,7 @@ export type { RequireProofSession, RequireProofResult } from "./require-proof.js
 export { requireDpop } from "./require-dpop.js";
 export type { RequireDpopResult } from "./require-dpop.js";
 export { createDbsc } from "./create-dbsc.js";
-export type { CreateDbscOptions, DbscKit, BindOptions } from "./create-dbsc.js";
+export type { CreateDbscOptions, DbscKit, BindOptions, NextProtectConfig } from "./create-dbsc.js";
 
 interface ScopeArgs {
   secure: boolean;

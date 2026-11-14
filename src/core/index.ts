@@ -77,6 +77,17 @@ export {
 } from "./kit.js";
 export type { KitSessionBinding, ClientScriptOptions } from "./kit.js";
 
+export { shouldBindLogin, resolveLoginBinding, loginTime } from "./login-binding.js";
+export type { BindOnLoginOptions, LoginBindingInput, ResolveLoginBindingInput } from "./login-binding.js";
+export {
+  matchesPathPattern,
+  validatePathPatterns,
+  isProtected,
+  signPrefixes,
+  splitProtectOptions,
+} from "./protect-paths.js";
+export type { ProtectOptions } from "./protect-paths.js";
+
 export { parseCookieHeader } from "./protocol/cookies.js";
 export { readJsonObject, MAX_PROTOCOL_BODY_BYTES } from "./protocol/body.js";
 

@@ -9,6 +9,12 @@ import {
   withKitBinding,
   checkKitSetup,
   clientScriptTag,
+  resolveLoginBinding,
+  validatePathPatterns,
+  splitProtectOptions,
+  isProtected,
+  signPrefixes,
+  type ProtectOptions,
   type CookieScope,
   type KitSessionBinding,
   type ClientScriptOptions,
@@ -31,7 +37,18 @@ import {
 } from "./index.js";
 import { requireProof, type RequireProofSession, type RequireProofResult } from "./require-proof.js";
 
+/** Path protection applied by the kit's middleware. */
+export interface NextProtectConfig extends ProtectOptions<NextRequest> {
+  paths: string[];
+}
+
 export interface CreateDbscOptions extends DbscNextOptions, KitSessionBinding<NextRequest> {
+  /**
+   * Guard every request under these paths in `middleware()`, so route
+   * handlers need no guard call: `protect: ["/api/*"]`, or
+   * `{ paths, except, methods }`. Your `config.matcher` must include them.
+   */
+  protect?: string[] | NextProtectConfig;
   /** Default session TTL (ms) for `bind()`. */
   sessionTtl?: number;
 }
@@ -102,6 +119,10 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     ...(opts.expectUserId !== undefined && { expectUserId: opts.expectUserId }),
   };
   checkKitSetup({ storage: opts.storage, ...binding });
+  const protectConfig: NextProtectConfig | null = Array.isArray(opts.protect)
+    ? { paths: opts.protect }
+    : (opts.protect ?? null);
+  if (protectConfig) validatePathPatterns(protectConfig.paths);
 
   function resolveDeviceHint(req: NextRequest, res: NextResponse): string {
     const name = deviceCookieName(scope);
@@ -171,8 +192,34 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
       ...withKitBinding(binding, o),
     });
 
+  async function middleware(req: NextRequest): Promise<NextResponse> {
+    const res = await mw(req);
+    // Protocol routes answer directly; only pass-through responses go on.
+    if (res.headers.get("x-middleware-next") !== "1") return res;
+    if (protectConfig) {
+      const { paths, ...rest } = protectConfig;
+      const { guard, filter } = splitProtectOptions(rest);
+      if (isProtected(req.nextUrl.pathname, req.method, paths, filter)) {
+        const result = await guardWith(req, await getSession(req), guard);
+        if (!result.ok) return result.response;
+      }
+    }
+    if (opts.bindOnLogin) {
+      const plan = await resolveLoginBinding(opts.bindOnLogin, req, {
+        storage: opts.storage,
+        ...(binding.expectSessionId !== undefined && { expectSessionId: binding.expectSessionId }),
+        deriveSessionId: (userId) =>
+          deriveSessionId({ userId, deviceHint: resolveDeviceHint(req, res) }),
+        currentSessionId: (await getSession(req)).sessionId,
+        ...(opts.boundRegistrationWindowMs !== undefined && { windowMs: opts.boundRegistrationWindowMs }),
+      });
+      if (plan) await bind(res, plan.sessionId, { userId: plan.userId });
+    }
+    return res;
+  }
+
   return {
-    middleware: () => mw,
+    middleware: () => middleware,
     bind,
     getSession,
     requireProof: guardWith,
@@ -180,6 +227,9 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
       const result = await guardWith(req, await getSession(req), o);
       return result.ok ? null : result.response;
     },
-    clientScript: (o?: ClientScriptOptions) => clientScriptTag("/dbsc-client", o),
+    clientScript: (o?: ClientScriptOptions) => {
+      const sign = protectConfig ? signPrefixes(protectConfig.paths) : undefined;
+      return clientScriptTag("/dbsc-client", { ...(sign !== undefined && { sign }), ...o });
+    },
   };
 }

@@ -9,6 +9,12 @@ import {
   resolveCookieScope,
   withKitBinding,
   clientScriptTag,
+  resolveLoginBinding,
+  validatePathPatterns,
+  splitProtectOptions,
+  isProtected,
+  signPrefixes,
+  type ProtectOptions,
   checkKitSetup,
   type RequireProofOptions,
   type CookieScope,
@@ -91,6 +97,12 @@ export interface DbscKit {
   install(app: Express): Express;
   /** The raw `dbsc()` middleware, for manual mounting. */
   middleware(): RequestHandler;
+  /**
+   * The `bindOnLogin` step on its own, for apps that call `install()` before
+   * their session middleware: mount it after the session middleware.
+   * `install()` already mounts it otherwise. A no-op without `bindOnLogin`.
+   */
+  loginMiddleware(): RequestHandler;
   /** Start a binding. Pass a sessionId, or omit it to derive one from `userId` (JWT apps). */
   bind(res: Response, sessionId: string, opts: BindOptions): Promise<string>;
   bind(res: Response, opts: BindOptions): Promise<string>;
@@ -106,6 +118,13 @@ export interface DbscKit {
   clientScript(opts?: ClientScriptOptions): string;
   /** DPoP (RFC 9449) route guard for token-bound API calls. Optional layer. */
   requireDpop(opts?: RequireDpopOptions<Request>): RequestHandler;
+  /**
+   * `requireProof()` for every request under the given paths, in one
+   * middleware: `app.use(dbsc.protect(["/api/*"]))`. Patterns: `"/api/*"`
+   * (everything under `/api/`), `"/account"` (the path and its children),
+   * `"*"` (everything). `clientScript()` signs these paths by default.
+   */
+  protect(patterns: string[], opts?: ProtectOptions<Request>): RequestHandler;
 }
 
 /**
@@ -132,6 +151,7 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     ...(opts.expectUserId !== undefined && { expectUserId: opts.expectUserId }),
   };
   checkKitSetup({ storage: opts.storage, ...binding });
+  const protectedPatterns: string[] = [];
 
   async function bind(res: Response, a: string | BindOptions, b?: BindOptions): Promise<string> {
     const bindOpts = typeof a === "string" ? (b as BindOptions) : a;
@@ -162,8 +182,27 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     return sessionId;
   }
 
+  // bindOnLogin: start the binding on the first request after a login.
+  const loginBinder: RequestHandler | null = opts.bindOnLogin
+    ? async (req, res, next) => {
+        const plan = await resolveLoginBinding(opts.bindOnLogin!, req, {
+          storage: opts.storage,
+          ...(binding.expectSessionId !== undefined && { expectSessionId: binding.expectSessionId }),
+          deriveSessionId: (userId) =>
+            deriveSessionId({ userId, deviceHint: resolveDeviceHint(res, scope) }),
+          currentSessionId: res.locals.dbsc?.sessionId ?? null,
+          ...(opts.boundRegistrationWindowMs !== undefined && {
+            windowMs: opts.boundRegistrationWindowMs,
+          }),
+        });
+        if (plan) await bind(res, plan.sessionId, { userId: plan.userId });
+        next();
+      }
+    : null;
+
   return {
     middleware: () => middleware,
+    loginMiddleware: () => loginBinder ?? ((_req, _res, next) => next()),
     install(app: Express): Express {
       if (opts.trustProxy !== false) app.set("trust proxy", true);
       app.use(
@@ -175,6 +214,7 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
       app.use(boundRegistrationPath, json);
       app.use(boundRefreshPath, json);
       app.use(middleware);
+      if (loginBinder) app.use(loginBinder);
       if (clientPath !== false) {
         const clientDir = fileURLToPath(new URL("../client/", import.meta.url));
         app.use(clientPath, express.static(clientDir));
@@ -184,7 +224,23 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     bind,
     requireProof: (o?: RequireProofOptions<Request>) => requireProof(withKitBinding(binding, o)),
     requireDpop,
-    clientScript: (o?: ClientScriptOptions) =>
-      clientScriptTag(clientPath === false ? "/dbsc-client" : clientPath, o),
+    protect(patterns: string[], o: ProtectOptions<Request> = {}): RequestHandler {
+      validatePathPatterns(patterns);
+      protectedPatterns.push(...patterns);
+      const { guard, filter } = splitProtectOptions(o);
+      const handler = requireProof(withKitBinding(binding, guard));
+      return (req, res, next) => {
+        const pathname = new URL(req.originalUrl, "http://x").pathname;
+        if (!isProtected(pathname, req.method, patterns, filter)) return next();
+        return handler(req, res, next);
+      };
+    },
+    clientScript: (o?: ClientScriptOptions) => {
+      const sign = signPrefixes(protectedPatterns);
+      return clientScriptTag(clientPath === false ? "/dbsc-client" : clientPath, {
+        ...(protectedPatterns.length > 0 && sign !== undefined && { sign }),
+        ...o,
+      });
+    },
   };
 }

@@ -95,7 +95,10 @@ export class DbscModule implements NestModule {
       (res.locals as Record<PropertyKey, unknown>)[NEST_BINDING] = binding;
       next();
     };
-    consumer.apply(carry, dbsc(this.opts)).forRoutes("*");
+    // bindOnLogin runs after dbsc(); Nest middleware already follows the
+    // session middleware the app mounted in main.ts.
+    const kit = createDbsc(this.opts);
+    consumer.apply(carry, kit.middleware(), kit.loginMiddleware()).forRoutes("*");
   }
 }
 

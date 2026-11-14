@@ -12,6 +12,11 @@ export type DbscHandle = (input: {
   resolve: (event: RequestEvent) => Response | Promise<Response>;
 }) => Promise<Response>;
 import {
+  resolveLoginBinding,
+  validatePathPatterns,
+  splitProtectOptions,
+  isProtected,
+  type ProtectOptions,
   handleRegistration,
   handleRefresh,
   handleBoundRegistration,
@@ -45,6 +50,8 @@ import {
 } from "../core/index.js";
 import { MemoryReplayCache } from "../storage/memory/replay-cache.js";
 
+import { requireProof } from "./require-proof.js";
+
 export { requireProof } from "./require-proof.js";
 export { requireDpop } from "./require-dpop.js";
 
@@ -71,7 +78,18 @@ const DEFAULT_BOUND_TTL = 10 * 60 * 1000;
 const DEFAULT_REG_TTL = 24 * 60 * 60 * 1000;
 const DEFAULT_SESSION_TTL = 24 * 60 * 60 * 1000;
 
+/** Path protection applied by `dbscHandle`. */
+export interface SvelteKitProtectConfig extends ProtectOptions<RequestEvent> {
+  paths: string[];
+}
+
 export interface DbscSvelteKitOptions extends DbscOptions, KitSessionBinding<RequestEvent> {
+  /**
+   * Guard every request under these paths before it reaches the route:
+   * `protect: ["/api/*"]`, or `{ paths, except, methods }`. A failed proof
+   * becomes a 403 error.
+   */
+  protect?: string[] | SvelteKitProtectConfig;
   secure?: boolean;
   boundStatePath?: string;
   boundChallengePath?: string;
@@ -197,7 +215,16 @@ export function dbscHandle(opts: DbscSvelteKitOptions): DbscHandle {
     cookieDomain,
     expectSessionId,
     expectUserId,
+    bindOnLogin,
+    protect,
   } = opts;
+  if (bindOnLogin && !expectSessionId) {
+    throw new Error("dbscHandle: bindOnLogin needs expectSessionId (the id to bind)");
+  }
+  const protectConfig: SvelteKitProtectConfig | null = Array.isArray(protect)
+    ? { paths: protect }
+    : (protect ?? null);
+  if (protectConfig) validatePathPatterns(protectConfig.paths, "dbscHandle protect");
   const binding: KitSessionBinding<RequestEvent> = {
     ...(expectSessionId !== undefined && { expectSessionId }),
     ...(expectUserId !== undefined && { expectUserId }),
@@ -440,6 +467,34 @@ export function dbscHandle(opts: DbscSvelteKitOptions): DbscHandle {
       binding,
     } satisfies DbscInternal;
     (event.locals as Record<PropertyKey, unknown>).dbsc = dbscSession;
+
+    if (bindOnLogin) {
+      const plan = await resolveLoginBinding(bindOnLogin, event, {
+        storage,
+        expectSessionId: expectSessionId!,
+        deriveSessionId: () => Promise.reject(new Error("unreachable: expectSessionId is required")),
+        currentSessionId: sessionId,
+        ...(boundRegistrationWindowMs !== undefined && { windowMs: boundRegistrationWindowMs }),
+      });
+      if (plan) {
+        await bindSession(event, plan.sessionId, storage, {
+          userId: plan.userId,
+          secure,
+          ...(cookieScope !== undefined && { cookieScope }),
+          ...(cookieDomain !== undefined && { cookieDomain }),
+          registrationPath,
+          ...(registrationCookieTtl !== undefined && { registrationCookieTtl }),
+        });
+      }
+    }
+
+    if (protectConfig) {
+      const { paths, ...rest } = protectConfig;
+      const { guard, filter } = splitProtectOptions(rest);
+      if (isProtected(event.url.pathname, event.request.method, paths, filter)) {
+        await requireProof(guard)(event);
+      }
+    }
 
     return resolve(event);
   };

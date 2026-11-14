@@ -1,5 +1,6 @@
 import type { StorageAdapter } from "./types.js";
 import type { RequireProofOptions, SessionBindingHook } from "./protect-policy.js";
+import type { BindOnLoginOptions } from "./login-binding.js";
 
 function nodeEnv(): string | undefined {
   return typeof process !== "undefined" ? process.env?.NODE_ENV : undefined;
@@ -29,6 +30,13 @@ export interface KitSessionBinding<Req> {
   expectSessionId?: SessionBindingHook<Req>;
   /** Same as `expectSessionId`, compared against the `userId` passed to `bind()`. For JWT apps. */
   expectUserId?: SessionBindingHook<Req>;
+  /**
+   * Bind on the first request after a login instead of calling `bind()` in
+   * the login route. The bound id is `expectSessionId(req)`, or one derived
+   * from the user id and a device cookie when `expectSessionId` is unset.
+   * Mount the kit after the middleware that identifies the user.
+   */
+  bindOnLogin?: BindOnLoginOptions<Req>;
 }
 
 /** Merges the kit-level binding hooks under a guard's own options. The guard's options win. */
@@ -37,6 +45,7 @@ export function withKitBinding<Req>(
   opts: RequireProofOptions<Req> = {},
 ): RequireProofOptions<Req> {
   const hasOwn = opts.expectSessionId !== undefined || opts.expectUserId !== undefined;
+  // bindOnLogin is not a guard option; only the two hooks carry over.
   if (hasOwn) return opts;
   return {
     ...opts,

@@ -9,6 +9,12 @@ import {
   withKitBinding,
   checkKitSetup,
   clientScriptTag,
+  resolveLoginBinding,
+  validatePathPatterns,
+  splitProtectOptions,
+  isProtected,
+  signPrefixes,
+  type ProtectOptions,
   type KitSessionBinding,
   type ClientScriptOptions,
   type RequireProofOptions,
@@ -81,6 +87,12 @@ export interface DbscKit {
   clientScript(opts?: ClientScriptOptions): string;
   /** DPoP (RFC 9449) route guard for token-bound API calls. Optional layer. */
   requireDpop(opts?: RequireDpopOptions<Context>): MiddlewareHandler;
+  /**
+   * `requireProof()` for every request under the given paths. Patterns:
+   * `"/api/*"` (everything under `/api/`), `"/account"` (the path and its
+   * children), `"*"` (everything). `clientScript()` signs these by default.
+   */
+  protect(patterns: string[], opts?: ProtectOptions<Context>): MiddlewareHandler;
 }
 
 /**
@@ -103,6 +115,7 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     ...(opts.expectUserId !== undefined && { expectUserId: opts.expectUserId }),
   };
   checkKitSetup({ storage: opts.storage, ...binding });
+  const protectedPatterns: string[] = [];
 
   async function bind(c: Context, a: string | BindOptions, b?: BindOptions): Promise<string> {
     const bindOpts = typeof a === "string" ? (b as BindOptions) : a;
@@ -131,15 +144,45 @@ export function createDbsc(opts: CreateDbscOptions): DbscKit {
     return sessionId;
   }
 
+  const loginBinder: MiddlewareHandler = async (c, next) => {
+    const plan = await resolveLoginBinding(opts.bindOnLogin!, c, {
+      storage: opts.storage,
+      ...(binding.expectSessionId !== undefined && { expectSessionId: binding.expectSessionId }),
+      deriveSessionId: (userId) => deriveSessionId({ userId, deviceHint: resolveDeviceHint(c, scope) }),
+      currentSessionId: c.get("dbsc")?.sessionId ?? null,
+      ...(opts.boundRegistrationWindowMs !== undefined && { windowMs: opts.boundRegistrationWindowMs }),
+    });
+    if (plan) await bind(c, plan.sessionId, { userId: plan.userId });
+    await next();
+  };
+
   return {
     middleware: () => middleware,
     install(app: Hono): Hono {
       app.use(middleware);
+      // Mount install() after the middleware that identifies the user.
+      if (opts.bindOnLogin) app.use(loginBinder);
       return app;
     },
     bind,
     requireProof: (o?: RequireProofOptions<Context>) => requireProof(withKitBinding(binding, o)),
     requireDpop,
-    clientScript: (o?: ClientScriptOptions) => clientScriptTag("/dbsc-client", o),
+    protect(patterns: string[], o: ProtectOptions<Context> = {}): MiddlewareHandler {
+      validatePathPatterns(patterns);
+      protectedPatterns.push(...patterns);
+      const { guard, filter } = splitProtectOptions(o);
+      const handler = requireProof(withKitBinding(binding, guard));
+      return async (c, next) => {
+        if (!isProtected(c.req.path, c.req.method, patterns, filter)) return next();
+        return handler(c, next);
+      };
+    },
+    clientScript: (o?: ClientScriptOptions) => {
+      const sign = signPrefixes(protectedPatterns);
+      return clientScriptTag("/dbsc-client", {
+        ...(protectedPatterns.length > 0 && sign !== undefined && { sign }),
+        ...o,
+      });
+    },
   };
 }
