@@ -259,6 +259,8 @@ export interface DbscOptions {
    * It only starts a binding for a sessionId that has no DBSC session row
    * yet; an existing binding is never restarted from here. Rows expire after
    * the session TTL, so keep that at least as long as your app session.
+   *
+   * @deprecated Use `bindOnLogin` on `createDbsc()`.
    */
   autoBind?: (req: any) => Promise<AutoBindResult | null> | AutoBindResult | null;
 }

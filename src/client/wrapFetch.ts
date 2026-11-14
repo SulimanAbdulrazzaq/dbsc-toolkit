@@ -21,6 +21,10 @@ export interface WrapFetchOptions {
   signQuery?: boolean;
 }
 
+/**
+ * Lower level: a fetch that signs every call it makes. `startDbsc()`
+ * installs the same signing for all same-origin `fetch` calls.
+ */
 export function wrapFetch(opts: WrapFetchOptions = {}): typeof fetch {
   const base = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const headerName = opts.headerName ?? "X-Dbsc-Bound-Proof";

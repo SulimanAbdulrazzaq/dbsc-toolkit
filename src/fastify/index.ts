@@ -90,6 +90,10 @@ export interface BindSessionOptions {
   sessionTtl?: number;
 }
 
+/**
+ * Lower-level building block: starts a binding with explicit storage and
+ * cookie options. `createDbsc().bind()` wraps it with the kit's config.
+ */
 export async function bindSession(
   reply: FastifyReply,
   sessionId: string,
@@ -546,6 +550,11 @@ const dbscPlugin: FastifyPluginAsync<DbscFastifyOptions> = async (fastify, opts)
   }
 };
 
+/**
+ * Lower-level building block: the protocol middleware alone. `createDbsc()`
+ * builds it from the same options and adds body capture, the client SDK,
+ * session binding and `protect()`.
+ */
 export const dbsc = fp(dbscPlugin, { name: "@dbsc-toolkit/server-fastify" });
 
 export { requireBoundProof } from "./proof.js";

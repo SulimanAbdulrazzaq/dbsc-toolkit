@@ -32,9 +32,9 @@ export interface InstallFetchInterceptorOptions {
  * else through the original fetch. Returns an `uninstall` function that
  * restores the original.
  *
- * **When to use this:** apps with many guarded routes where calling
- * `wrapFetch` at every call site is a footgun. For small apps, the per-call
- * `wrapFetch(...)` shape stays the recommended default.
+ * **When to use this:** rarely. `startDbsc()` installs the same interceptor
+ * and also runs registration and refresh; reach for this only when you run
+ * `initBoundDbsc()` yourself and want signing limited to explicit prefixes.
  *
  * **Safety:** the interceptor only touches requests whose URL is same-origin
  * and whose pathname matches one of `pathPrefixes`. Third-party hosts are

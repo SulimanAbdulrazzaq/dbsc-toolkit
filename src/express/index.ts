@@ -133,6 +133,10 @@ export interface BindSessionOptions {
   sessionTtl?: number;
 }
 
+/**
+ * Lower-level building block: starts a binding with explicit storage and
+ * cookie options. `createDbsc().bind()` wraps it with the kit's config.
+ */
 export async function bindSession(
   res: Response,
   sessionId: string,
@@ -175,6 +179,11 @@ export async function bindSession(
   ]);
 }
 
+/**
+ * Lower-level building block: the protocol middleware alone. `createDbsc()`
+ * builds it from the same options and adds body capture, the client SDK,
+ * session binding and `protect()`.
+ */
 export function dbsc(opts: DbscExpressOptions): RequestHandler {
   const {
     storage,

@@ -124,6 +124,10 @@ const MIN_POLL_INTERVAL_MS = 250;
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
+/**
+ * Lower level: runs one registration pass and schedules refresh, without
+ * signing any requests. `startDbsc()` calls this and also signs `fetch`.
+ */
 export async function initBoundDbsc(options: InitBoundDbscOptions = {}): Promise<BoundDbscOutcome> {
   if (typeof window === "undefined" || typeof indexedDB === "undefined") {
     return { phase: "error", error: "window or indexedDB unavailable" };
