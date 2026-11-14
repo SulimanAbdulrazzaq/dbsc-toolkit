@@ -55,6 +55,10 @@
       "import": "./dist/client/index.js",
       "types": "./dist/client/index.d.ts"
     },
+    "./client/auto": {
+      "import": "./dist/client/auto.js",
+      "types": "./dist/client/auto.d.ts"
+    },
     "./storage/memory": {
       "import": "./dist/storage/memory/index.js",
       "types": "./dist/storage/memory/index.d.ts"

@@ -66,6 +66,31 @@ export function installFetchInterceptor(opts: InstallFetchInterceptorOptions): (
     }
   }
 
+  return interceptFetch({
+    shouldSign: (url) => matchesAnyPrefix(url.pathname, opts.pathPrefixes),
+    ...(opts.signBody !== undefined && { signBody: opts.signBody }),
+    ...(opts.signQuery !== undefined && { signQuery: opts.signQuery }),
+    ...(opts.headerName !== undefined && { headerName: opts.headerName }),
+    ...(opts.fetch !== undefined && { fetch: opts.fetch }),
+  });
+}
+
+/** @internal Options for the shared interceptor behind `installFetchInterceptor` and `startDbsc`. */
+export interface InterceptOptions {
+  /** Same-origin URLs only reach this; return true to sign the request. */
+  shouldSign: (url: URL) => boolean;
+  /** Called with every same-origin response, signed or not. */
+  onResponse?: (res: Response) => void;
+  /** Send ReadableStream bodies unsigned instead of throwing. */
+  passThroughStreams?: boolean;
+  signBody?: boolean;
+  signQuery?: boolean;
+  headerName?: string;
+  fetch?: typeof fetch;
+}
+
+/** @internal Replaces `globalThis.fetch`; returns the uninstall function. */
+export function interceptFetch(opts: InterceptOptions): () => void {
   // Two distinct concepts: the upstream fetch the interceptor delegates to
   // (test-friendly override via opts.fetch), and the fetch that was on
   // globalThis at install time (what we restore on uninstall).
@@ -80,10 +105,16 @@ export function installFetchInterceptor(opts: InstallFetchInterceptorOptions): (
 
   const interceptor: typeof fetch = async (input, init) => {
     const url = resolveUrl(input);
-    if (url && isSameOrigin(url) && matchesAnyPrefix(url.pathname, opts.pathPrefixes)) {
-      return signed(input, init);
-    }
-    return upstreamFetch(input, init);
+    if (!url || !isSameOrigin(url)) return upstreamFetch(input, init);
+    const streamed =
+      opts.passThroughStreams === true &&
+      typeof ReadableStream !== "undefined" &&
+      init?.body instanceof ReadableStream;
+    const res = await (opts.shouldSign(url) && !streamed
+      ? signed(input, init)
+      : upstreamFetch(input, init));
+    opts.onResponse?.(res);
+    return res;
   };
 
   globalThis.fetch = interceptor;
