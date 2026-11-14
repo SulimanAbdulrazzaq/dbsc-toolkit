@@ -448,7 +448,7 @@ $("pay-btn").onclick = async () => {
 $("theft-btn").onclick = async () => {
   const r = await plainFetch("GET", "/api/profile");
   show(r);
-  if (r.status === 403) explain("ok", "<strong>Defended.</strong> The cookie reached the server but no proof header was sent. <code>requireProof()</code> returned 403 <code>PROOF_MISSING</code>. This is what a stolen cookie pasted into a different browser sees.");
+  if (r.status === 403) explain("ok", "<strong>Defended.</strong> The cookie reached the server but no proof header was sent. <code>requireProof()</code> returned 403 <code>MISSING_PROOF</code>. This is what a stolen cookie pasted into a different browser sees.");
   else if (r.status === 401) explain("info", "Sign in first, then click this button.");
   else explain("bad", "Unexpected status. Check the body.");
 };

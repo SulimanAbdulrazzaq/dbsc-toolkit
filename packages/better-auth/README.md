@@ -22,7 +22,7 @@ DBSC ties the session to a private key the browser generates inside the device a
 
 `plugins: [dbsc()]` is the whole server integration. The plugin mounts its protocol routes through Better Auth's own router, so it works on **every runtime** (Express, Fastify, Hono, Next.js, SvelteKit, Node) with no framework-specific setup. Chromium binds to a key in the TPM (Windows, Chrome 145+) or Secure Enclave (macOS, Chrome 147+); Firefox, Safari, and older Chromium fall back to a Web Crypto polyfill key in IndexedDB (`extractable: false`). Same guard either way.
 
-**[Live demo](https://dbsc-better-auth-demo.onrender.com)** — sign in, then hit the "simulate stolen cookie" button. It fires a bare request with the bound cookie and no proof, and comes back 403 `PROOF_MISSING`. The whole plugin in one button.
+**[Live demo](https://dbsc-better-auth-demo.onrender.com)** — sign in, then hit the "simulate stolen cookie" button. It fires a bare request with the bound cookie and no proof, and comes back 403 `MISSING_PROOF`. The whole plugin in one button.
 
 ## Install
 

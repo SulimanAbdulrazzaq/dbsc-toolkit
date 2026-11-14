@@ -52,7 +52,7 @@ The cookie copies fine. The key doesn't — it never left the user's device. So 
 
 ## Live demo
 
-**<https://dbsc-toolkit.onrender.com/>** — sign in, then hit the **"simulate stolen cookie"** button. It fires a bare request with the bound cookie and no proof, and comes back `403 PROOF_MISSING`. That's the whole library in one button.
+**<https://dbsc-toolkit.onrender.com/>** — sign in, then hit the **"simulate stolen cookie"** button. It fires a bare request with the bound cookie and no proof, and comes back `403 MISSING_PROOF`. That's the whole library in one button.
 
 Chromium 145+ lands on `tier: "dbsc"` (TPM-backed); Firefox/Safari land on `tier: "bound"` (Web Crypto polyfill). Same guard either way.
 

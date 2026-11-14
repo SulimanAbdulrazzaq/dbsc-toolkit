@@ -11,7 +11,7 @@ Sign up with Chrome 145+ and the browser binds your session to the TPM. Firefox 
 - Better Auth sign-up triggers `Secure-Session-Registration` via the plugin's after-hook
 - Chrome auto-issues `POST /api/auth/dbsc/registration` — the demo verifies the TPM signature and flips `tier` to `"dbsc"`
 - The init shim co-registers a polyfill key so `requireProof()` works on every request
-- Stolen cookies fail with 403 `PROOF_MISSING` / `PROOF_INVALID`
+- Stolen cookies fail with 403 `MISSING_PROOF` / `SIGNATURE_INVALID`
 
 ## Run locally
 
