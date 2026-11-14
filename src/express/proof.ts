@@ -8,6 +8,7 @@ import {
   type ProofReplayCache,
   proofTarget,
 } from "../core/index.js";
+import { capturedProofBody } from "./capture-body.js";
 
 export interface RequireBoundProofOptions {
   storage: StorageAdapter;
@@ -24,7 +25,11 @@ export interface RequireBoundProofOptions {
   allowDbscWithoutProof?: boolean;
   /** Accepted timestamp window, ms. Default 5 min. */
   timestampWindowMs?: number;
-  /** Verify SHA-256 body hash. Route must deliver raw bytes (e.g. express.raw({type:"*\/*"})). */
+  /**
+   * Verify SHA-256 body hash. Uses the bytes `captureProofBody()` copied
+   * (mounted by `createDbsc().install()`); without it, the route must deliver
+   * raw bytes (e.g. `express.raw({ type: "*\/*" })`).
+   */
   signBody?: boolean;
   /**
    * v2.8+: optional replay cache. If provided, a second arrival of the same
@@ -52,7 +57,7 @@ export function requireBoundProof(opts: RequireBoundProofOptions): RequestHandle
     try {
       let bodyBytes: Uint8Array | undefined;
       if (signBody) {
-        const raw = proofBodyBytes(req.body);
+        const raw = capturedProofBody(req) ?? proofBodyBytes(req.body);
         if (!raw) {
           throw new DbscVerificationError(ErrorCodes.MALFORMED_PROOF, "signBody needs the raw request body; parse this route with a raw body parser");
         }
