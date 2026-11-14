@@ -12,7 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { toNodeHandler } from "better-auth/node";
 import { createRequire } from "node:module";
-import { dbsc as dbscMiddleware, requireProof } from "dbsc-toolkit/express";
+import { dbsc as dbscMiddleware, requireProof, captureProofBody } from "dbsc-toolkit/express";
 import { expectBetterAuthSession } from "@dbsc-toolkit/better-auth";
 import { createBetterAuthStorageAdapter } from "@dbsc-toolkit/better-auth/internal";
 import { auth } from "./auth.js";
@@ -42,6 +42,9 @@ app.use("/dbsc-client", express.static(clientDir));
 // Better Auth handler — the dbsc() plugin's protocol routes (/api/auth/dbsc/*,
 // /api/auth/dbsc-bound/*, /api/auth/dbsc-client/init.js) are served through it.
 app.all("/api/auth/*splat", toNodeHandler(auth));
+// Copies the raw body of signed requests before express.json() parses it, so
+// requireProof() can check the body hash on JSON routes.
+app.use(captureProofBody());
 app.use(express.json());
 
 // dbsc-toolkit/express middleware — reads the bound cookie and sets the
@@ -88,17 +91,14 @@ app.get("/api/profile", requireProof({ expectSessionId: sameSession }), async (r
 // /api/payment — gated + body hash verified (30s freshness window).
 app.post(
   "/api/payment",
-  express.raw({ type: "*/*" }),
   requireProof({ expectSessionId: sameSession, timestampWindowMs: 30_000 }),
   async (req, res) => {
     const session = await auth.api.getSession({ headers: new Headers(req.headers) });
     if (!session) return res.status(401).json({ error: "no session" });
-    let payload = {};
-    try { payload = JSON.parse(req.body.toString("utf8")); } catch { /* */ }
     res.json({
       ok: true,
       user: session.user.email,
-      received: payload,
+      received: req.body ?? {},
       note: "Body hash verified by the proof — an MITM cannot change the amount after signing.",
     });
   },

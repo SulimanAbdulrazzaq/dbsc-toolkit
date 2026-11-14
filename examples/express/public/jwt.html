@@ -94,10 +94,14 @@
 <pre id="out">Sign in to see the output here.</pre>
 
 <script type="module">
-  import { initBoundDbsc, wrapFetch, clearBoundKey } from "/dbsc-client/index.js";
+  // The whole browser side: register the device key, keep it refreshed, and
+  // sign every fetch() to the guarded paths. The login below is a fetch, so the
+  // client notices the binding it starts and registers on its own.
+  // 8s probe window: Render cold starts can push native registration past the
+  // 5s default, which would let the polyfill win on a TPM-capable browser.
+  import { startDbsc, clearBoundKey } from "/dbsc-client/index.js";
+  window.dbscClient = startDbsc({ sign: ["/profile", "/payment"], nativeProbeWindowMs: 8000 });
   window.clearBoundKey = clearBoundKey;
-  window.boundFetch = wrapFetch({ signBody: true });
-  window.initBoundDbsc = (opts = {}) => initBoundDbsc({ nativeProbeWindowMs: 8000, ...opts });
 </script>
 
 <script>
@@ -139,17 +143,16 @@ $("login-btn").onclick = async () => {
     password: $("password").value,
   });
   show(r);
-  if (r.status === 200 && typeof window.initBoundDbsc === "function") {
-    const outcome = await window.initBoundDbsc();
-    console.log("[bound-sdk outcome]", outcome);
+  if (r.status === 200 && window.dbscClient) {
+    console.log("[dbsc outcome]", await window.dbscClient.ready);
   }
 };
 
 $("me-btn").onclick = async () => show(await plainFetch("GET", "/me"));
 
 $("profile-btn").onclick = async () => {
-  if (typeof window.boundFetch !== "function") return show({ error: "SDK not loaded yet" });
-  const r = await window.boundFetch("/profile", { method: "GET", credentials: "include" });
+  // A plain fetch: startDbsc() signs it because /profile is in its sign list.
+  const r = await fetch("/profile", { method: "GET", credentials: "include" });
   const text = await r.text(); let b; try { b = JSON.parse(text); } catch { b = text; }
   show({ method: "GET", path: "/profile", status: r.status, body: b });
 };

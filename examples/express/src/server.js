@@ -10,7 +10,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Redis from "ioredis";
 
-import { createDbsc, requireProof, requireDpop, bindSession } from "dbsc-toolkit/express";
+import { createDbsc, requireDpop, bindSession } from "dbsc-toolkit/express";
 import { MemoryStorage, MemoryReplayCache } from "dbsc-toolkit/storage/memory";
 import { RedisStorage } from "dbsc-toolkit/storage/redis";
 
@@ -36,8 +36,6 @@ function rateLimit({ windowMs, max }) {
   };
 }
 const authLimiter = rateLimit({ windowMs: 60_000, max: 30 });
-
-app.use(express.json());
 
 app.use(
   session({
@@ -70,7 +68,7 @@ function verifyToken(token) {
   try { return JSON.parse(Buffer.from(body, "base64url").toString("utf8")); } catch { return null; }
 }
 
-app.post("/signup", authLimiter, async (req, res) => {
+app.post("/signup", authLimiter, express.json(), async (req, res) => {
   const { username, password } = req.body ?? {};
   if (!username || !password) return res.status(400).json({ error: "username and password required" });
   if (users.has(username)) return res.status(409).json({ error: "username already taken" });
@@ -124,6 +122,14 @@ const dbscStorage = process.env.REDIS_URL
 const DEFAULT_BOUND = process.env.DBSC_BOUND !== "false";
 
 const KIT_OPTIONS = {
+  // Ties every guard to this request's login. Both login modes bind with the
+  // user's id (cookie mode passes the session id too, JWT mode derives one), so
+  // compare that. Without it, a stolen app cookie (demo.sid or demo-jwt) sent
+  // next to the attacker's own bound DBSC session would pass.
+  expectUserId: (req) => {
+    const u = currentUser(req);
+    return u ? String(u.id) : null;
+  },
   boundCookieTtl: 60 * 1000,
   refreshGraceMs: 30 * 1000,
   secure: true,
@@ -193,6 +199,10 @@ dbscKitNative.install(nativeApp);
 app.use((req, res, next) => {
   (modeOf(req) === "native" ? nativeApp : boundApp)(req, res, next);
 });
+
+// After install(): the kit copies the raw body of signed requests first, so
+// JSON parsing here doesn't stop requireProof() from checking the body hash.
+app.use(express.json());
 
 // Flip the live mode. Clears any existing binding so the next login starts clean
 // in the new mode (the two modes use different cookies / client flow).
@@ -286,16 +296,10 @@ app.get("/demo/mode", (req, res) => {
   res.json({ mode: modeOf(req), boundEnabled: modeOf(req) === "bound" });
 });
 
-// requireProof()-guarded routes — one guard, every browser. expectUserId ties
-// the device binding to this request's login: without it, a stolen app cookie
-// (demo.sid or demo-jwt) paired with the attacker's own bound DBSC session
-// would pass. Both login modes bind with the user's id, so compare that.
-const guard = requireProof({
-  expectUserId: (req) => {
-    const u = currentUser(req);
-    return u ? String(u.id) : null;
-  },
-});
+// requireProof()-guarded routes — one guard, every browser. The kit for the
+// current mode applies its expectUserId.
+const guards = { bound: dbscKit.requireProof(), native: dbscKitNative.requireProof() };
+const guard = (req, res, next) => guards[modeOf(req)](req, res, next);
 
 app.get("/profile", authLimiter, requireLogin, guard, (req, res) => {
   const native = modeOf(req) === "native";
@@ -309,12 +313,10 @@ app.get("/profile", authLimiter, requireLogin, guard, (req, res) => {
   });
 });
 
-app.post("/payment", authLimiter, requireLogin, express.raw({ type: "*/*" }), guard, (req, res) => {
-  let payload = {};
-  try { payload = JSON.parse(req.body.toString("utf8")); } catch { /* */ }
+app.post("/payment", authLimiter, requireLogin, guard, (req, res) => {
   res.json({
     ok: true,
-    received: payload,
+    received: req.body ?? {},
     tier: res.locals.dbsc.tier,
     note: "Body hash verified — an MITM cannot change the amount after signing.",
   });

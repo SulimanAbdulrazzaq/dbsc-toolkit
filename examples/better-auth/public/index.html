@@ -436,7 +436,7 @@ $("pay-btn").onclick = async () => {
   if (typeof window.boundFetch !== "function") return show({ error: "SDK not loaded yet" });
   const r = await window.boundFetch("/api/payment", {
     method: "POST",
-    headers: { "Content-Type": "application/octet-stream" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ amount: 1, to: "merchant" }),
     credentials: "include",
   });
@@ -463,13 +463,13 @@ $("tamper-btn").onclick = async () => {
   };
   await wrapFetch({ fetch: capture, signBody: true })("/api/payment", {
     method: "POST",
-    headers: { "Content-Type": "application/octet-stream" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ amount: 1, to: "merchant" }),
   });
   if (!capturedProof) return show({ error: "no proof captured, sign in first" });
   const r = await plainFetch("POST", "/api/payment",
     JSON.stringify({ amount: 1000, to: "attacker" }),
-    { "Content-Type": "application/octet-stream", "X-Dbsc-Bound-Proof": capturedProof },
+    { "Content-Type": "application/json", "X-Dbsc-Bound-Proof": capturedProof },
   );
   show({ ...r, path: "/api/payment (tampered body)" });
   if (r.status === 403) explain("ok", "<strong>Defended.</strong> The proof was signed for <code>{amount:1}</code>. The body sent was <code>{amount:1000}</code>. Server hashed the received body, compared against the hash in the proof, mismatch → 403.");

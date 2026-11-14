@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
-    "dbsc-toolkit": "^2.15.0",
+    "dbsc-toolkit": "^2.16.0",
     "express": "^5.3.0",
     "express-session": "^1.19.0",
     "ioredis": "^6.0.0"
