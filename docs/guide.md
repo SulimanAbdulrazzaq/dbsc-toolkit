@@ -211,7 +211,7 @@ const dbsc = createDbsc({
 dbsc.install(app);
 ```
 
-Now every logged-in user gets bound on their next page load — zero change to `/login`, zero new endpoints. `autoBind` only fires while there is no bound cookie and no registration in flight, so you don't pay the storage hit on every request.
+Now every logged-in user gets bound on their next page load — zero change to `/login`, zero new endpoints. `autoBind` only fires while there is no bound cookie and no registration in flight, and it only binds a session id that has no DBSC session yet: once a session is bound, `autoBind` never starts it over. A DBSC session expires after `sessionTtl` (24 h by default), so set that at least as long as your app sessions live.
 
 ---
 

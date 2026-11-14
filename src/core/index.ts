@@ -47,7 +47,7 @@ export {
 export type { SkippedEntry, SkippedReason } from "./protocol/headers.js";
 export { handleRegistration } from "./protocol/registration.js";
 export { handleRefresh } from "./protocol/refresh.js";
-export { startBinding } from "./protocol/start-binding.js";
+export { startBinding, autoBindAllowed } from "./protocol/start-binding.js";
 export type { StartBindingInput } from "./protocol/start-binding.js";
 
 export { handleBoundRegistration } from "./bound/registration.js";

@@ -4,6 +4,7 @@ import {
   handleRefresh,
   handleBoundRegistration,
   startBinding,
+  autoBindAllowed,
   handleBoundRefresh,
   issueChallenge,
   buildRegistrationHeader,
@@ -718,7 +719,7 @@ export function dbsc(opts: DbscExpressOptions): RequestHandler {
       }
     } else if (autoBind && !(req.cookies?.[COOKIES.reg])) {
       const result = await autoBind(req);
-      if (result) {
+      if (result && (await autoBindAllowed(storage, result.sessionId))) {
         await bindSession(res, result.sessionId, storage, {
           userId: result.userId,
           secure,

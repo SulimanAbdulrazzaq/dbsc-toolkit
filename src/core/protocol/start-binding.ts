@@ -26,3 +26,13 @@ export async function startBinding(storage: StorageAdapter, input: StartBindingI
     lastRefreshAt: 0,
   });
 }
+
+/**
+ * Whether an `autoBind` result may start a binding. Only a session id with no
+ * row yet qualifies. A row means a binding already exists for it (or is being
+ * registered), and starting again would drop its keys, so a request that
+ * merely carries the app's session cookie must not be able to do that.
+ */
+export async function autoBindAllowed(storage: StorageAdapter, sessionId: string): Promise<boolean> {
+  return (await storage.getSession(sessionId)) === null;
+}

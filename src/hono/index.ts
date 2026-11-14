@@ -6,6 +6,7 @@ import {
   handleBoundRegistration,
   readJsonObject,
   startBinding,
+  autoBindAllowed,
   handleBoundRefresh,
   issueChallenge,
   buildRegistrationHeader,
@@ -545,7 +546,7 @@ export function dbsc(opts: DbscHonoOptions): MiddlewareHandler {
       }
     } else if (autoBind && !getCookie(c, COOKIES.reg)) {
       const result = await autoBind(c);
-      if (result) {
+      if (result && (await autoBindAllowed(storage, result.sessionId))) {
         await bindSession(c, result.sessionId, storage, {
           userId: result.userId,
           secure,

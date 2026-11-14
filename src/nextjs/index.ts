@@ -6,6 +6,7 @@ import {
   handleBoundRegistration,
   readJsonObject,
   startBinding,
+  autoBindAllowed,
   handleBoundRefresh,
   issueChallenge,
   buildRegistrationHeader,
@@ -564,7 +565,7 @@ export function createDbscMiddleware(opts: DbscNextOptions) {
 
     if (autoBind && !req.cookies.get(COOKIES.bound)?.value && !req.cookies.get(COOKIES.reg)?.value) {
       const result = await autoBind(req);
-      if (result) {
+      if (result && (await autoBindAllowed(storage, result.sessionId))) {
         const res = NextResponse.next();
         await bindSession(res, result.sessionId, storage, {
           userId: result.userId,

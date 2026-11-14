@@ -248,6 +248,10 @@ export interface DbscOptions {
    * triggers /dbsc/registration on its own. Return null to skip.
    * The sessionId used is whatever your existing auth says — supply both via
    * the result type below.
+   *
+   * It only starts a binding for a sessionId that has no DBSC session row
+   * yet; an existing binding is never restarted from here. Rows expire after
+   * the session TTL, so keep that at least as long as your app session.
    */
   autoBind?: (req: any) => Promise<AutoBindResult | null> | AutoBindResult | null;
 }

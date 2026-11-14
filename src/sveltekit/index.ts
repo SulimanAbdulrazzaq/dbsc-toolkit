@@ -16,6 +16,7 @@ import {
   handleBoundRegistration,
   readJsonObject,
   startBinding,
+  autoBindAllowed,
   handleBoundRefresh,
   issueChallenge,
   buildRegistrationHeader,
@@ -399,7 +400,7 @@ export function dbscHandle(opts: DbscSvelteKitOptions): DbscHandle {
       }
     } else if (autoBind && !event.cookies.get(COOKIES.reg)) {
       const result = await autoBind(event);
-      if (result) {
+      if (result && (await autoBindAllowed(storage, result.sessionId))) {
         await bindSession(event, result.sessionId, storage, {
           userId: result.userId,
           secure,
