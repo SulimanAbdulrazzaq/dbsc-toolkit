@@ -286,8 +286,18 @@ app.get("/demo/mode", (req, res) => {
   res.json({ mode: modeOf(req), boundEnabled: modeOf(req) === "bound" });
 });
 
-// requireProof()-guarded routes — one guard, every browser.
-app.get("/profile", authLimiter, requireLogin, requireProof(), (req, res) => {
+// requireProof()-guarded routes — one guard, every browser. expectUserId ties
+// the device binding to this request's login: without it, a stolen app cookie
+// (demo.sid or demo-jwt) paired with the attacker's own bound DBSC session
+// would pass. Both login modes bind with the user's id, so compare that.
+const guard = requireProof({
+  expectUserId: (req) => {
+    const u = currentUser(req);
+    return u ? String(u.id) : null;
+  },
+});
+
+app.get("/profile", authLimiter, requireLogin, guard, (req, res) => {
   const native = modeOf(req) === "native";
   res.json({
     username: req.demoUser.username,
@@ -299,7 +309,7 @@ app.get("/profile", authLimiter, requireLogin, requireProof(), (req, res) => {
   });
 });
 
-app.post("/payment", authLimiter, requireLogin, express.raw({ type: "*/*" }), requireProof(), (req, res) => {
+app.post("/payment", authLimiter, requireLogin, express.raw({ type: "*/*" }), guard, (req, res) => {
   let payload = {};
   try { payload = JSON.parse(req.body.toString("utf8")); } catch { /* */ }
   res.json({

@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { toNodeHandler } from "better-auth/node";
 import { createRequire } from "node:module";
 import { dbsc as dbscMiddleware, requireProof } from "dbsc-toolkit/express";
+import { expectBetterAuthSession } from "@dbsc-toolkit/better-auth";
 import { createBetterAuthStorageAdapter } from "@dbsc-toolkit/better-auth/internal";
 import { auth } from "./auth.js";
 
@@ -50,6 +51,11 @@ app.use(express.json());
 // line up.
 app.use(dbscMiddleware({ storage, secure: true }));
 
+// Ties the device binding to the Better Auth session on the request. Without
+// it, a stolen Better Auth cookie paired with the attacker's own bound DBSC
+// session would pass the guard.
+const sameSession = expectBetterAuthSession(auth);
+
 // /api/me — session view, no DBSC proof required.
 app.get("/api/me", async (req, res) => {
   const session = await auth.api.getSession({ headers: new Headers(req.headers) });
@@ -68,7 +74,7 @@ app.get("/api/me", async (req, res) => {
 });
 
 // /api/profile — gated. No valid proof → 403 before the handler runs.
-app.get("/api/profile", requireProof(), async (req, res) => {
+app.get("/api/profile", requireProof({ expectSessionId: sameSession }), async (req, res) => {
   const session = await auth.api.getSession({ headers: new Headers(req.headers) });
   if (!session) return res.status(401).json({ error: "no session" });
   res.json({
@@ -83,7 +89,7 @@ app.get("/api/profile", requireProof(), async (req, res) => {
 app.post(
   "/api/payment",
   express.raw({ type: "*/*" }),
-  requireProof({ timestampWindowMs: 30_000 }),
+  requireProof({ expectSessionId: sameSession, timestampWindowMs: 30_000 }),
   async (req, res) => {
     const session = await auth.api.getSession({ headers: new Headers(req.headers) });
     if (!session) return res.status(401).json({ error: "no session" });
