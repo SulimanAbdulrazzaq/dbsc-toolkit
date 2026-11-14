@@ -42,6 +42,8 @@ export { requireDpop } from "./require-dpop.js";
 export type { NodeDpopGuard } from "./require-dpop.js";
 export { createDbsc } from "./create-dbsc.js";
 export type { CreateDbscOptions, DbscKit, BindOptions } from "./create-dbsc.js";
+export { readClientAsset } from "./client-assets.js";
+export type { ClientAsset } from "./client-assets.js";
 
 /** Internal carrier so `requireProof()` can reach storage without re-passing it. */
 export interface DbscInternal {
