@@ -1100,7 +1100,7 @@ Client: `wrapFetch({ signQuery })`, `installFetchInterceptor({ signQuery })`. `i
 
 Electron: `protocolRoute(request)` results carry `guard(kit.requireProof())`, which resolves `null` when the request may proceed or the error `Response` to return.
 
-## Added in the next release
+## Added in 2.16.0
 
 - Kits: `expectSessionId`, `expectUserId`, `bindOnLogin`, `maxProofBodyBytes`, `clientPath` (Fastify, Koa, node); methods `protect()`, `clientScript()`, `loginMiddleware()` (Express), `guard()` (Next.js); `protect` option on Next.js and SvelteKit. See [the kit](#the-kit-createdbsc).
 - `secure` defaults to `false` when `NODE_ENV === "development"`.

@@ -2,7 +2,7 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.16.0] — 2026-11-14
 
 This release is about setup. A full integration used to take seven pieces, two of them documented nowhere obvious; it now takes four calls on the server and one script tag, and the safe configuration is the default one. Everything is backwards compatible.
 

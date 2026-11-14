@@ -200,7 +200,7 @@ In v2.8.0:
 - `KEY_NOT_FOUND_NATIVE` / `KEY_NOT_FOUND_BOUND` error codes
 - `PolyfillMissingEvent` telemetry
 
-In the next release:
+In v2.16.0:
 - `startDbsc()` and `/dbsc-client/auto.js`: one call signs every guarded `fetch`
 - Body capture in the Express and Fastify kits; no raw parser on guarded routes
 - `protect()` for path-based guarding; `clientScript()` signs those paths
