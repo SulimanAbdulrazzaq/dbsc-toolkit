@@ -2,6 +2,12 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.16.1] — 2026-11-14
+
+### Fixed
+
+- The DPoP `Authorization` header was parsed with a regular expression that backtracked in quadratic time on long runs of whitespace (flagged by CodeQL as a ReDoS). It is now parsed by hand, with the same results. Node rejects header values containing line breaks, which made the slow case hard to reach, but only apps using the optional `dbsc-toolkit/dpop` guards ever ran this code.
+
 ## [2.16.0] — 2026-11-14
 
 This release is about setup. A full integration used to take seven pieces, two of them documented nowhere obvious; it now takes four calls on the server and one script tag, and the safe configuration is the default one. Everything is backwards compatible.
