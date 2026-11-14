@@ -420,8 +420,8 @@ tier: <span class="tok-s">"none"</span>  <span class="tok-c">// replay rejected,
       <div class="step">
         <span class="num">3</span>
         <div class="lab">Guard</div>
-        <h3>One call per route</h3>
-        <p><code translate="no">requireProof()</code> demands a per-request signature on sensitive routes, closing the gap between refreshes. Same guard on every browser.</p>
+        <h3>One line per path</h3>
+        <p><code translate="no">protect(["/api/*"])</code> demands a per-request signature on sensitive routes, closing the gap between refreshes. One script tag signs the browser's requests. Same guard on every browser.</p>
       </div>
     </div>
   </div>
@@ -476,51 +476,55 @@ tier: <span class="tok-s">"none"</span>  <span class="tok-c">// replay rejected,
         <div class="pane on" id="fp-express" role="tabpanel" aria-labelledby="ft-express">
           <div class="ph"><h3>DBSC for Express</h3><span class="imp" translate="no">dbsc-toolkit/express</span></div>
           <p>The reference adapter. <code translate="no">install()</code> mounts the protocol routes; <code translate="no">bind()</code> starts a session.</p>
-<pre><code translate="no">const dbsc = createDbsc({ storage });
+<pre><code translate="no">const dbsc = createDbsc({ storage, expectSessionId: (req) =&gt; req.sessionID });
 dbsc.install(app);
-await dbsc.bind(res, sessionId, { userId });</code></pre>
+await dbsc.bind(res, req.sessionID, { userId });   // or ...passportSession()
+app.use(dbsc.protect(["/api/*"]));</code></pre>
         </div>
         <div class="pane" id="fp-fastify" role="tabpanel" aria-labelledby="ft-fastify">
           <div class="ph"><h3>DBSC for Fastify</h3><span class="imp" translate="no">dbsc-toolkit/fastify</span></div>
           <p>A plugin that registers <code translate="no">@fastify/cookie</code> and the protocol routes for you.</p>
-<pre><code translate="no">const dbsc = createDbsc({ storage });
+<pre><code translate="no">const dbsc = createDbsc({ storage, expectSessionId });
 await dbsc.install(app);
-await dbsc.bind(reply, sessionId, { userId });</code></pre>
+await dbsc.bind(reply, sessionId, { userId });
+app.addHook("preHandler", dbsc.protect(["/api/*"]));</code></pre>
         </div>
         <div class="pane" id="fp-hono" role="tabpanel" aria-labelledby="ft-hono">
           <div class="ph"><h3>DBSC for Hono</h3><span class="imp" translate="no">dbsc-toolkit/hono</span></div>
           <p>Web-standard middleware. Runs on Node, Bun, Deno and Cloudflare Workers.</p>
-<pre><code translate="no">const dbsc = createDbsc({ storage });
+<pre><code translate="no">const dbsc = createDbsc({ storage, expectSessionId });
 dbsc.install(app);
-await dbsc.bind(c, sessionId, { userId });</code></pre>
+await dbsc.bind(c, sessionId, { userId });
+app.use(dbsc.protect(["/api/*"]));</code></pre>
         </div>
         <div class="pane" id="fp-nextjs" role="tabpanel" aria-labelledby="ft-nextjs">
           <div class="ph"><h3>DBSC for Next.js</h3><span class="imp" translate="no">dbsc-toolkit/nextjs</span></div>
           <p>App Router. Export the middleware, read the session inside route handlers.</p>
-<pre><code translate="no">// middleware.ts
-export default dbsc.middleware();
-// route: const s = await dbsc.getSession(req);</code></pre>
+<pre><code translate="no">// lib/dbsc.ts: createDbsc({ storage, expectSessionId, protect: ["/api/*"] })
+// middleware.ts
+export const middleware = dbsc.middleware();
+// route: const denied = await dbsc.guard(req);</code></pre>
         </div>
         <div class="pane" id="fp-nestjs" role="tabpanel" aria-labelledby="ft-nestjs">
           <div class="ph"><h3>DBSC for NestJS</h3><span class="imp" translate="no">dbsc-toolkit/nestjs</span></div>
           <p>A module mounts the protocol; <code translate="no">DbscGuard</code> protects routes; <code translate="no">DbscService</code> binds.</p>
-<pre><code translate="no">imports: [DbscModule.forRoot({ storage })]
+<pre><code translate="no">imports: [DbscModule.forRoot({ storage, expectSessionId })]
 // @UseGuards(DbscGuard) on a route
 // this.dbsc.bind(res, sessionId, { userId })</code></pre>
         </div>
         <div class="pane" id="fp-koa" role="tabpanel" aria-labelledby="ft-koa">
           <div class="ph"><h3>DBSC for Koa</h3><span class="imp" translate="no">dbsc-toolkit/koa</span></div>
           <p>Middleware over Koa's raw request and response objects.</p>
-<pre><code translate="no">const dbsc = createDbsc({ storage });
+<pre><code translate="no">const dbsc = createDbsc({ storage, expectSessionId });
 dbsc.install(app);
-await dbsc.bind(ctx, sessionId, { userId });</code></pre>
+await dbsc.bind(ctx, sessionId, { userId });
+app.use(dbsc.protect(["/api/*"]));</code></pre>
         </div>
         <div class="pane" id="fp-sveltekit" role="tabpanel" aria-labelledby="ft-sveltekit">
           <div class="ph"><h3>DBSC for SvelteKit</h3><span class="imp" translate="no">dbsc-toolkit/sveltekit</span></div>
           <p>A <code translate="no">handle</code> hook answers the routes; bind and guard inside actions.</p>
 <pre><code translate="no">// hooks.server.ts
-export const handle = dbscHandle({ storage });
-// await requireProof()(event) in a +server</code></pre>
+export const handle = dbscHandle({ storage, expectSessionId, protect: ["/api/*"] });</code></pre>
         </div>
         <div class="pane" id="fp-electron" role="tabpanel" aria-labelledby="ft-electron">
           <div class="ph"><h3>DBSC for Electron</h3><span class="imp" translate="no">dbsc-toolkit/electron</span></div>

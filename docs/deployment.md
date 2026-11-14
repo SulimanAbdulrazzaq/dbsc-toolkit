@@ -49,8 +49,10 @@ The bound-polyfill SDK has a probe window — it waits a few seconds for native 
 Fix on the client init:
 
 ```ts
-initBoundDbsc({ nativeProbeWindowMs: 8000 });
+startDbsc({ nativeProbeWindowMs: 8000 });
 ```
+
+(`initBoundDbsc()` takes the same option if you call it directly.)
 
 8 seconds is enough for the free-tier cold-start case. Lower the value when you move off cold-start hosts; the SDK clamps a minimum so a very small value still gets one poll cycle.
 

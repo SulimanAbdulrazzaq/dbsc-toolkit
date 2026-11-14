@@ -30,9 +30,9 @@ Three responsibilities. That's it.
 
 **(3) Expose a `tier` field your route handlers gate on.** Every request that goes through the middleware exposes the session — `res.locals.dbsc.tier` (Express / Koa), `req.dbsc.tier` (Fastify), `c.get("dbsc").tier` (Hono), or `getDbscSession()` (Next.js); the same value reaches the NestJS, SvelteKit, Electron, and raw `node:http` adapters too. It reads `"dbsc"` when a native hardware binding is fresh, `"bound"` when the Web Crypto polyfill is fresh, and `"none"` when nothing's bound or the binding has gone stale. **Your code decides what each tier is allowed to do** — the library exposes the value, you write the gate.
 
-**(4) Cover browsers without native DBSC via a Web Crypto polyfill.** Firefox, Safari, and older Chromium ignore the DBSC registration headers. For those, the library ships a small client SDK (`initBoundDbsc()`) that activates ~3 seconds after login when it sees no native binding, generates a non-extractable ECDSA P-256 keypair via Web Crypto, registers the public key with the server, and signs refresh challenges automatically. Same wire-level protection against cookie theft, no biometric prompt, no user interaction. The key lives in IndexedDB rather than a TPM, so this is software-bound; see "Tier semantics" below for the exact threat boundary.
+**(4) Cover browsers without native DBSC via a Web Crypto polyfill.** Firefox, Safari, and older Chromium ignore the DBSC registration headers. For those, the library ships a small client SDK (`startDbsc()`, or one `<script>` tag) that activates ~3 seconds after login when it sees no native binding, generates a non-extractable ECDSA P-256 keypair via Web Crypto, registers the public key with the server, and signs refresh challenges automatically. Same wire-level protection against cookie theft, no biometric prompt, no user interaction. The key lives in IndexedDB rather than a TPM, so this is software-bound; see "Tier semantics" below for the exact threat boundary.
 
-The polyfill is on by default. Pass `bound: false` to run native DBSC only — the bound routes don't mount and non-Chromium browsers stay at `tier: "none"`. In this mode (v2.14+, every adapter) `requireProof()` no longer trusts the cookie: it demands a fresh hardware proof per request via the native 403-challenge handshake (Chrome re-signs with the TPM key and retries), so a stolen cookie is rejected per request, not just on the next refresh. Use native-only when you can mandate a Chromium build with a hardware key store; for a general audience, the polyfill is what covers everyone else.
+The polyfill is on by default. Pass `bound: false` to run native DBSC only — the bound routes don't mount and non-Chromium browsers stay at `tier: "none"`. In this mode there is no polyfill key to sign individual requests, so `requireProof()` relaxes a native `dbsc` session and lets it through on its hardware binding. Native DBSC protects that session by cookie rotation: Chrome proves the TPM key at `/dbsc/refresh` every `~boundCookieTtl`, so a stolen cookie stops working within one rotation. There is no protocol way to make Chrome sign an ordinary request (v2.14.0 tried a 403-challenge on resource routes; Chrome doesn't retry those, and it was removed in v2.14.1). Use native-only when you can mandate a Chromium build with a hardware key store; for a general audience, the polyfill is what covers everyone else.
 
 Explicit non-goals: this is not an authentication system (you bring your own login), not MFA (it complements MFA, doesn't replace), not a CSRF defense (SameSite cookies still do that), not a captcha. It binds an existing session to hardware. Your existing auth stack does everything else.
 
@@ -111,7 +111,7 @@ T+10min..T+20min   Normal browsing again. Same cycle repeats every 10 minutes
                    until the user logs out or the session expires.
 ```
 
-One gotcha that catches almost every first-time integrator: **registration is asynchronous**. The login response returns instantly, but the browser's `POST /dbsc/registration` runs in the background — TPM key generation plus a network round-trip — and lands anywhere from 300 ms to a couple of seconds later. If your page immediately calls a guarded route, the check may run *before* the bound cookie is set and report `tier: "none"` on a fully supported browser. Two clean fixes: a status indicator that `await`s the bound-SDK's `initBoundDbsc()` outcome promise before enabling high-value buttons, or a one-shot auto-retry on the first guarded request after login. The live demo wires the outcome-promise approach in `examples/express/src/server.js`. Anything past the first second is unaffected.
+One gotcha that catches almost every first-time integrator: **registration is asynchronous**. The login response returns instantly, but the browser's `POST /dbsc/registration` runs in the background — TPM key generation plus a network round-trip — and lands anywhere from 300 ms to a couple of seconds later. If your page immediately calls a guarded route, the check may run *before* the bound cookie is set and report `tier: "none"` on a fully supported browser. Two clean fixes: `await startDbsc().ready` (or `useDbsc()` in React) before enabling high-value buttons, or a one-shot auto-retry on the first guarded request after login. The live demo wires the outcome-promise approach in `examples/express/src/server.js`. Anything past the first second is unaffected.
 
 A couple more subtleties worth burning into memory:
 
@@ -187,18 +187,18 @@ How to gate routes:
 
 **The one exception — infostealer malware.** The `bound` tier's key blob sits on disk in the browser profile, so it does not defeat on-device infostealer malware; only native `dbsc` (TPM-resident key) does. If a route's threat model specifically includes that, it can *additionally* require `tier === "dbsc"` — accepting that this excludes non-Chromium browsers. That is a deliberate exception for hardware-isolation-critical routes, not a routing default.
 
-**The misconception to kill.** Mounting `createDbsc().install(app)` by itself does *not* protect anything. The library negotiates the binding and tells you the tier. **You** add `requireProof()` to the routes that matter. An adopter who installs the middleware and forgets the per-route guard gets exactly the same security as before — none from DBSC, whatever they had from their existing auth.
+**The misconception to kill.** Mounting `createDbsc().install(app)` by itself does *not* protect anything. The library negotiates the binding and tells you the tier. **You** add `dbsc.protect([...])` or `requireProof()` to the routes that matter. An adopter who installs the middleware and forgets the per-route guard gets exactly the same security as before — none from DBSC, whatever they had from their existing auth.
 
 ```ts
 // This is what enforcement actually looks like — one guard per route:
 import express from "express";
 import { requireProof } from "dbsc-toolkit/express";
 
-app.post("/payment", express.raw({ type: "*/*" }), requireProof(), paymentHandler);
-app.post("/settings/email", express.raw({ type: "*/*" }), requireProof(), emailHandler);
+app.use(dbsc.protect(["/payment", "/settings"]));   // by path
+app.post("/account/delete", dbsc.requireProof(), deleteHandler);   // or per route
 ```
 
-`requireProof()` requires the request to come from a bound device and prove it per-request. It works the same on every browser, and as of v2.7 the per-request signature is **enforced on every tier**, including Chromium's `dbsc`. It is available both as a standalone import and as `kit.requireProof` on a `createDbsc()` kit. The hand-written `if (tier === "none") return 403` is still valid for the simplest cases — `requireProof()` is the secure default.
+`requireProof()` requires the request to come from a bound device and prove it per-request. It works the same on every browser, and as of v2.7 the per-request signature is **enforced on every tier**, including Chromium's `dbsc`. Use it from the kit (`dbsc.requireProof()`, `dbsc.protect()`), which also checks that the binding belongs to the login on the request (`expectSessionId`); the standalone import doesn't know about the kit's hooks. The hand-written `if (tier === "none") return 403` is still valid for the simplest cases — `requireProof()` is the secure default.
 
 ### How v2.7 closed the cookie-replay window
 
@@ -224,7 +224,7 @@ createDbsc({ storage, replayCache: new RedisReplayCache(redis) })
 
 The cache is opt-in because for many apps the ±5-minute window is acceptable — passive cookie theft, the dominant threat, is already shut down by the polyfill-key requirement. Apps with a stricter threat model (active MITM, log-spillage exposure, regulatory replay rejection) turn it on.
 
-`installFetchInterceptor({ pathPrefixes })` (v2.8+) is the other v2.8 affordance — apps with many guarded routes can swap `globalThis.fetch` once at boot instead of calling `wrapFetch` at every call site. The interceptor only touches same-origin requests whose pathname matches one of the supplied prefixes; absolute URLs, bare `"/"`, and missing prefixes throw at install time. For small apps the per-call `wrapFetch(...)` shape stays recommended.
+On the client, `startDbsc()` (or the `/dbsc-client/auto.js` tag) puts all of this together: it registers the key, refreshes it, and wraps `fetch` so every same-origin request under the protected paths is signed, body included. `wrapFetch()` and `installFetchInterceptor()` remain as the lower-level pieces.
 
 A note on the binding flow itself (v2.2.0+): `initBoundDbsc()` resolves with a structured `BoundDbscOutcome` describing exactly what happened — `native-dbsc` when Chromium registered (v2.7+: the polyfill key is co-registered as part of this outcome, and `skipReason: "polyfill-co-registration-failed"` surfaces a degraded mode where native succeeded but the per-request gate is missing), `polyfill-bound` (with an optional `skipReason` like `"quota_exceeded"`) when the Web Crypto fallback took over, `unbound` when there is no session, or `error` when something threw. The SDK actively polls `/dbsc-bound/state` during its probe window instead of blocking-sleeping, so a quota-exhausted Chrome falls back to the polyfill in ~1.5s instead of after the full 5–8s wait. Consumers that previously polled `/me` to find out the tier should `await` the outcome promise directly — no more "no binding for 8s" race UX. See [docs/polyfill.md](./docs/polyfill.md#outcome-promise-220).
 

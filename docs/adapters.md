@@ -1,32 +1,49 @@
 # Adapters
 
-Each framework adapter is a thin wrapper that translates the framework's request/response shape into the core protocol functions, mounts `/dbsc/registration` and `/dbsc/refresh` routes automatically, and exposes the session tier on a per-request object.
+Every framework gets the same four steps: build a kit with `createDbsc()`, mount it, bind at login (or let `bindOnLogin` do it), guard by path or by route. The adapters are thin shells over one core, so behavior is identical everywhere; only the request and response types change. The full option and method list is in [the API reference](./api-reference.md#the-kit-createdbsc).
+
+`npx dbsc-toolkit init` prints the setup below for whichever framework your `package.json` uses.
+
+| | `install` | Body capture for proofs | Serves `/dbsc-client` | `protect()` | `bindOnLogin` |
+|---|---|---|---|---|---|
+| Express | `dbsc.install(app)` | yes | yes | middleware | yes, plus `passportSession()` |
+| Fastify | `await dbsc.install(app)` | yes | yes | `preHandler` | yes |
+| Hono | `dbsc.install(app)` | not needed | no (edge runtimes) | middleware | yes |
+| Koa | `dbsc.install(app)` | from the socket | yes | middleware | yes |
+| node:http | `dbsc.handler()` | from the socket | yes | guard function | yes |
+| Next.js | `dbsc.middleware()` | not needed | no | `protect` option | yes |
+| SvelteKit | `dbscHandle({...})` | not needed | no | `protect` option | yes (needs `expectSessionId`) |
+| NestJS | `DbscModule.forRoot({...})` | `rawBody: true` | yes | `DbscGuard` | yes |
+| Electron | `createElectronDbsc()` | from the socket | via `handler()` | guard function | yes |
 
 ## Express
 
 ```ts
 import express from "express";
-import { randomUUID } from "node:crypto";
-import { createDbsc, requireProof } from "dbsc-toolkit/express";
+import session from "express-session";
+import { createDbsc } from "dbsc-toolkit/express";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
 const app = express();
-app.use(express.json());          // for your own routes' bodies
+app.use(session({ secret: process.env.SESSION_SECRET!, resave: false, saveUninitialized: false }));
 
-const dbsc = createDbsc({ storage: new MemoryStorage() });
-dbsc.install(app);                // protocol routes + bound-route JSON + SDK + trust proxy
+const dbsc = createDbsc({ storage: new MemoryStorage(), expectSessionId: (req) => req.sessionID });
+dbsc.install(app);          // body capture, protocol routes, SDK, trust proxy
+app.use(express.json());    // your parsers come after install()
 
 app.post("/login", async (req, res) => {
-  await dbsc.bind(res, randomUUID(), { userId: req.body.username });
+  const user = await checkPassword(req.body);
+  await dbsc.bind(res, req.sessionID, { userId: user.id });
   res.json({ ok: true });
 });
 
-app.get("/protected", requireProof(), (_req, res) => {
-  res.json({ ok: true });
-});
+app.use(dbsc.protect(["/api/*"]));
+app.post("/api/payment", (req, res) => res.json({ ok: true, amount: req.body.amount }));
 ```
 
-`install()` mounts the `/dbsc/*` and `/dbsc-bound/*` routes, scoped JSON parsing for the bound routes, the `/dbsc-client` SDK, and `trust proxy`. The middleware parses the `Cookie` header itself — no `cookie-parser`. The native protocol routes read the JWS from the `Secure-Session-Response` header, not the body, so no text body parser is needed.
+`install()` copies the raw body of every request that carries a proof header and hands the stream back untouched, so `express.json()`, `express.raw()` and multer all keep working on guarded routes. It also mounts the `/dbsc/*` and `/dbsc-bound/*` routes, serves the SDK at `/dbsc-client`, and sets `trust proxy` (pass `trustProxy: false` when the app is not behind a proxy). The middleware parses the `Cookie` header itself; no `cookie-parser`.
+
+On express-session + Passport, drop the `bind()` line: `createDbsc({ storage, ...passportSession() })`, mounted after `passport.session()`. If `install()` has to come before your session middleware, mount `dbsc.loginMiddleware()` after it.
 
 `res.locals.dbsc` exposes:
 
@@ -39,25 +56,17 @@ app.get("/protected", requireProof(), (_req, res) => {
 }
 ```
 
-To gate a route, use `requireProof()` — one call, no arguments, works on every browser:
-
-```ts
-app.post("/comment", requireProof(), commentHandler);
-app.post("/payment", express.raw({ type: "*/*" }), requireProof(), paymentHandler);
-```
-
-`requireProof` is also `dbsc.requireProof()` on the kit. It signs the request body, so a POST guarded route mounts `express.raw()` in front. A plain `if (res.locals.dbsc.tier === "none") return res.status(403)…` still works if you prefer it.
+Per-route guards still work: `app.post("/settings/email", dbsc.requireProof(), handler)`. Use the kit's `requireProof` rather than the bare import so `expectSessionId` applies.
 
 ### DPoP guard (optional)
 
-The same adapters export `requireDpop` for token-bound API routes (the DPoP layer, RFC 9449 — for bearer/access tokens rather than cookies). Same uniform shape on every adapter; on failure it answers **401** with `WWW-Authenticate: DPoP`.
+Every adapter also exports `requireDpop` for token-bound API routes (DPoP, RFC 9449, for bearer tokens rather than cookies). On failure it answers **401** with `WWW-Authenticate: DPoP`.
 
 ```ts
-import { requireDpop } from "dbsc-toolkit/express";        // and /fastify, /hono, /koa, /node, /sveltekit, /nextjs
-app.get("/api/resource", requireDpop({ getBoundJkt }), handler);
+app.get("/api/resource", dbsc.requireDpop({ getBoundJkt, origin: "https://api.example.com" }), handler);
 ```
 
-NestJS uses `createDbscDpopGuard({ getBoundJkt })` with `@UseGuards`; SvelteKit's `requireDpop()(event)` returns a 401 `Response` (or `undefined` when valid); Next.js returns `{ ok, response }`; the `node:http` guard returns a boolean like `requireProof`. Always pass `getBoundJkt` so the presented token is bound to its key — see [dpop.md](./dpop.md).
+NestJS uses `createDbscDpopGuard({ getBoundJkt })` with `@UseGuards`; SvelteKit's `requireDpop()(event)` returns a 401 `Response` (or `undefined` when valid); Next.js returns `{ ok, response }`; the `node:http` guard returns a boolean. Always pass `getBoundJkt`; see [dpop.md](./dpop.md).
 
 ## Fastify
 
@@ -67,23 +76,22 @@ import { createDbsc } from "dbsc-toolkit/fastify";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
 const app = Fastify();
-const dbsc = createDbsc({ storage: new MemoryStorage() });
-await dbsc.install(app);   // registers @fastify/cookie (if missing) + the plugin
+const dbsc = createDbsc({
+  storage: new MemoryStorage(),
+  expectSessionId: (req) => req.session?.sessionId ?? null,
+});
+await dbsc.install(app);
+app.addHook("preHandler", dbsc.protect(["/api/*"]));
 
-app.get(
-  "/protected",
-  { preHandler: dbsc.requireProof() },
-  async () => ({ ok: true }),
-);
-
+app.post("/api/payment", async (req) => ({ ok: true, body: req.body }));
 await app.listen({ port: 3000 });
 ```
 
-Fastify decorates `req.dbsc` automatically through the plugin's `onRequest` hook. `createDbsc().install()` is async — it `await`s the `@fastify/cookie` registration. `requireProof()` returns a `preHandler`.
+`install()` is async: it registers `@fastify/cookie` if missing, a `preParsing` hook that copies signed bodies (Fastify's JSON parser keeps working), the plugin, a `GET /dbsc-client/*` route for the SDK, and the `bindOnLogin` `preHandler` when configured. `req.dbsc` is set in `onRequest`. Per route: `{ preHandler: dbsc.requireProof() }`.
 
 ## Hono
 
-Works on Node.js, Bun, Deno, and Cloudflare Workers.
+Works on Node.js, Bun, Deno and Cloudflare Workers.
 
 ```ts
 import { Hono } from "hono";
@@ -91,89 +99,87 @@ import { createDbsc } from "dbsc-toolkit/hono";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
 const app = new Hono();
-const dbsc = createDbsc({ storage: new MemoryStorage() });
+const dbsc = createDbsc({ storage: new MemoryStorage(), expectSessionId: (c) => c.get("sessionId") ?? null });
 dbsc.install(app);
+app.use(dbsc.protect(["/api/*"]));
 
-app.get("/protected", dbsc.requireProof(), (c) => c.json({ ok: true }));
-
+app.post("/api/payment", (c) => c.json({ ok: true }));
 export default app;
 ```
 
-`c.get("dbsc")` returns `{ sessionId, tier, skipped, revoke }` — the same shape as `res.locals.dbsc` on Express and `req.dbsc` on Fastify.
+Hono caches the body, so guards read it without any setup. The kit doesn't serve the SDK because Hono may run without a filesystem: bundle `startDbsc()` from `dbsc-toolkit/client` into your frontend, or serve `node_modules/dbsc-toolkit/dist/client` with your runtime's static handler at `/dbsc-client`.
 
-The 1.3.x split keys (`c.get("dbscSessionId")`, `c.get("dbscTier")`, `c.get("dbscSkipped")`) were removed in 2.0.0. Use the unified object only.
+`c.get("dbsc")` returns `{ sessionId, tier, skipped, revoke }`, the same shape as Express.
 
 ## Next.js (App Router)
 
-Two pieces. The middleware mounts protocol routes globally; `getDbscSession` reads tier inside individual handlers.
-
-With `basePath` (or i18n routing), configure the protocol paths with the prefix included, e.g. `registrationPath: "/app/dbsc/registration"`. Routes are matched, and proofs verified, against the full request path.
-
-`lib/dbsc.ts` — build the kit once and share it:
+Build the kit once, export its middleware, and guard by path:
 
 ```ts
+// lib/dbsc.ts
 import { createDbsc } from "dbsc-toolkit/nextjs";
-import { MemoryStorage } from "dbsc-toolkit/storage/memory";
+import { RedisStorage } from "dbsc-toolkit/storage/redis";
+import Redis from "ioredis";
 
-export const dbsc = createDbsc({ storage: new MemoryStorage() });
+export const dbsc = createDbsc({
+  storage: new RedisStorage(new Redis(process.env.REDIS_URL!)),
+  expectSessionId: (req) => req.cookies.get("session")?.value ?? null,
+  protect: ["/api/account/*", "/api/payments/*"],
+});
 ```
 
-`middleware.ts`:
-
 ```ts
+// middleware.ts
 import { dbsc } from "@/lib/dbsc";
 
-export default dbsc.middleware();
-
-export const config = {
-  matcher: ["/dbsc/:path*", "/dbsc-bound/:path*"],
-};
+export const middleware = dbsc.middleware();
+export const config = { matcher: ["/dbsc/:path*", "/dbsc-bound/:path*", "/api/:path*"] };
 ```
 
-`app/api/protected/route.ts`:
+The middleware answers the protocol routes, then runs `protect` and `bindOnLogin` on everything else the matcher lets through. To guard inside one route handler instead:
 
 ```ts
-import { dbsc } from "@/lib/dbsc";
-import { NextRequest } from "next/server";
-
-export async function GET(req: NextRequest) {
-  const session = await dbsc.getSession(req);
-  const gate = await dbsc.requireProof(req, session);
-  if (!gate.ok) return gate.response;
-  return Response.json({ sessionId: session.sessionId, tier: session.tier });
+export async function POST(req: NextRequest) {
+  const denied = await dbsc.guard(req);
+  if (denied) return denied;
+  return Response.json({ ok: true });
 }
 ```
 
-The kit's `getSession` / `requireProof` carry storage from the config — nothing re-passed. Next.js has no shared request context, so `requireProof` takes the session object explicitly. Memory storage will not survive serverless cold starts; use Redis or Postgres.
+Bind in the login route handler with `await dbsc.bind(res, sessionId, { userId })` on the `NextResponse` you return; JWT apps pass `{ userId, req }` so the kit can keep a per-device cookie. For Auth.js, `bindOnLogin` binds without touching its routes ([recipe](./recipes.md#nextauth-in-jwt-mode)).
+
+In the browser, call `startDbsc()` from a client component (or use `useDbsc()` from `dbsc-toolkit/react` in the root layout). With `basePath` or i18n routing, configure the protocol paths with the prefix included, e.g. `registrationPath: "/app/dbsc/registration"`. Memory storage won't survive serverless cold starts; use Redis or Postgres.
 
 ## NestJS
-
-`DbscModule.forRoot()` mounts the protocol middleware for every route (Express platform) and provides `DbscService` for binding. `DbscGuard` is the route guard.
 
 ```ts
 import { Module } from "@nestjs/common";
 import { DbscModule } from "dbsc-toolkit/nestjs";
-import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
-@Module({ imports: [DbscModule.forRoot({ storage: new MemoryStorage() })] })
+@Module({
+  imports: [
+    DbscModule.forRoot({
+      storage,
+      expectSessionId: (req) => req.sessionID,
+    }),
+  ],
+})
 export class AppModule {}
 ```
 
-Bind in a login controller, guard a sensitive route:
+`forRoot` takes the Express kit's options and mounts the protocol middleware, the `bindOnLogin` step and the SDK for every route. `expectSessionId` / `expectUserId` set here apply to every guard.
 
 ```ts
-import { Controller, Post, Res, UseGuards } from "@nestjs/common";
-import type { Response } from "express";
+import { Controller, Post, Res, Req, UseGuards } from "@nestjs/common";
 import { DbscService, DbscGuard } from "dbsc-toolkit/nestjs";
-import { randomUUID } from "node:crypto";
 
 @Controller()
 export class AppController {
   constructor(private readonly dbsc: DbscService) {}
 
   @Post("login")
-  async login(@Res({ passthrough: true }) res: Response) {
-    await this.dbsc.bind(res, randomUUID(), { userId: "u1" });
+  async login(@Req() req, @Res({ passthrough: true }) res) {
+    await this.dbsc.bind(res, req.sessionID, { userId: req.user.id });
     return { ok: true };
   }
 
@@ -185,7 +191,7 @@ export class AppController {
 }
 ```
 
-A guarded POST body-hashes the request, so it must deliver raw bytes (`rawBody: true` in `NestFactory.create`, with the JSON parser disabled on that route). GET routes need no parser. `createDbscGuard(opts)` returns a guard with options baked in (e.g. a storage override).
+Nest parses bodies before module middleware runs, so create the app with `NestFactory.create(AppModule, { rawBody: true })`; the guard prefers `req.rawBody`. `createDbscGuard(opts)` returns a guard with options baked in.
 
 ## Koa
 
@@ -193,92 +199,73 @@ Koa's `ctx.req` / `ctx.res` are raw `node:http` objects, so the adapter delegate
 
 ```ts
 import Koa from "koa";
-import { createDbsc, requireProof } from "dbsc-toolkit/koa";
+import { createDbsc } from "dbsc-toolkit/koa";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
 const app = new Koa();
-const dbsc = createDbsc({ storage: new MemoryStorage() });
-dbsc.install(app);
+const dbsc = createDbsc({ storage: new MemoryStorage(), expectSessionId: (ctx) => ctx.session?.id ?? null });
+dbsc.install(app);                       // SDK + protocol routes; before any body parser
+app.use(dbsc.protect(["/api/*"]));
 
-app.use(async (ctx, next) => {
+app.use(async (ctx) => {
   if (ctx.path === "/login") {
-    await dbsc.bind(ctx, crypto.randomUUID(), { userId: "u1" });
+    await dbsc.bind(ctx, ctx.session.id, { userId: "u1" });   // or bind(ctx, { userId }) for JWT apps
     ctx.body = { ok: true };
-    return;
   }
-  await next();
 });
-
-// guard a route
-app.use(requireProof()); // place before the protected handler
 ```
 
-The guard reads the raw body from `ctx.request.rawBody` when a body parser populated it, else from the socket.
-
-**Mount `dbsc` before any body parser.** The bound protocol routes read the JSON body from the raw request stream. A parser that runs first (`koa-bodyparser`, `@koa/bodyparser`) consumes the stream, and `/dbsc-bound/registration` and `/dbsc-bound/refresh` then answer 400 forever. The same applies to the raw `node:http` adapter: call the handler before anything reads `req`. Express is the opposite: `install()` mounts its own JSON parser on the two bound routes.
+**Mount the kit before any body parser.** The bound protocol routes and the guard read the raw request stream. A parser that runs first (`koa-bodyparser`, `@koa/bodyparser`) consumes it; the guard then falls back to `ctx.request.rawBody` when the parser kept one.
 
 ## SvelteKit
 
-A `handle` hook answers the protocol routes; `bindSession` and `requireProof` work inside actions and `+server` handlers.
-
-`src/hooks.server.ts`:
-
 ```ts
+// src/hooks.server.ts
 import { dbscHandle } from "dbsc-toolkit/sveltekit";
-import { MemoryStorage } from "dbsc-toolkit/storage/memory";
+import { storage } from "$lib/dbsc";
 
-export const handle = dbscHandle({ storage: new MemoryStorage() });
+export const handle = dbscHandle({
+  storage,
+  expectSessionId: (event) => event.cookies.get("session") ?? null,
+  protect: ["/api/*"],
+});
 ```
 
-`src/routes/login/+server.ts`:
+The handle answers the protocol routes, resolves `event.locals.dbsc`, runs `bindOnLogin` when set (it needs `expectSessionId`), and guards the `protect` paths before the route runs. A failed guard is `error(403, { message, code, hint })`. In a single handler: `await requireProof()(event)`, which picks up the handle's `expectSessionId`.
+
+Bind in an action or `+server` handler:
 
 ```ts
 import { bindSession } from "dbsc-toolkit/sveltekit";
-import { storage } from "$lib/dbsc";
 
 export async function POST(event) {
-  await bindSession(event, crypto.randomUUID(), storage, { userId: "u1" });
-  return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+  await bindSession(event, sessionId, storage, { userId: user.id });
+  return Response.json({ ok: true });
 }
 ```
 
-`src/routes/payment/+server.ts`:
-
-```ts
-import { requireProof } from "dbsc-toolkit/sveltekit";
-
-export async function POST(event) {
-  await requireProof()(event); // throws error(403) if not from the bound device
-  return new Response(JSON.stringify({ ok: true }));
-}
-```
-
-`event.locals.dbsc` carries `{ sessionId, tier }` for every request after the hook runs.
+In the browser, call `startDbsc()` from `dbsc-toolkit/client` in the root `+layout.svelte`.
 
 ## Raw `node:http` (generic)
 
-The foundation the Koa adapter builds on, usable with any server that exposes Node's request/response objects. There is no `install()` — wire `handler()` at the top of your listener and branch on its boolean return (`true` = it answered a protocol route).
+The foundation Koa and Electron build on. There is no `install()`; run `handler()` first in your listener. It serves the SDK, answers the protocol routes and runs `bindOnLogin`, and returns `true` when it answered the request.
 
 ```ts
 import { createServer } from "node:http";
 import { createDbsc } from "dbsc-toolkit/node";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
-const dbsc = createDbsc({ storage: new MemoryStorage() });
+const dbsc = createDbsc({ storage: new MemoryStorage(), expectSessionId: sessionIdFromCookie });
 const handle = dbsc.handler();
-const guard = dbsc.requireProof();
+const guard = dbsc.protect(["/api/*"]);
 
 createServer(async (req, res) => {
-  if (await handle(req, res)) return; // protocol route answered
+  if (await handle(req, res)) return;     // SDK or protocol route answered
+  if (!(await guard(req, res))) return;   // 403 already written
 
   const url = new URL(req.url ?? "/", "http://x");
   if (url.pathname === "/login") {
-    await dbsc.bind(res, crypto.randomUUID(), { userId: "u1" });
-    res.end(JSON.stringify({ ok: true }));
-    return;
-  }
-  if (url.pathname === "/payment") {
-    if (!(await guard(req, res))) return; // 403 already written
+    await dbsc.bind(res, newSessionId, { userId: "u1" });   // or bind(res, { userId, req })
     res.end(JSON.stringify({ ok: true }));
     return;
   }
@@ -287,7 +274,7 @@ createServer(async (req, res) => {
 }).listen(3000);
 ```
 
-`getDbscSession(req)` reads the resolved `{ sessionId, tier }` after `handle()` returns `false`.
+`getDbscSession(req)` reads the resolved `{ sessionId, tier }` after `handle()` returns `false`. The guard caches the verified body; `readJsonBody(req)` reads it back.
 
 ---
 
@@ -295,7 +282,7 @@ createServer(async (req, res) => {
 
 An Electron app's **main process** is Node, so it plays the DBSC server for the web app running in your `BrowserWindow`. Two ways to wire it.
 
-The idiomatic one mounts the protocol on an Electron custom scheme with `protocol.handle`, which hands you a Web `Request` and wants a `Response`. `dbsc-toolkit/electron` bridges that onto the same core, so no protocol code is duplicated:
+The idiomatic one mounts the protocol on an Electron custom scheme with `protocol.handle`, which hands you a Web `Request` and wants a `Response`. `dbsc-toolkit/electron` bridges that onto the same core:
 
 ```ts
 import { app, protocol, net } from "electron";
@@ -309,7 +296,7 @@ app.whenReady().then(() => {
   protocol.handle("app", async (request) => {
     const url = new URL(request.url);
 
-    // DBSC protocol routes (/dbsc/*, /dbsc-bound/*) — the adapter answers these.
+    // DBSC protocol routes and the SDK — the adapter answers these.
     if (url.pathname.startsWith("/dbsc")) {
       const res = await handleDbsc(request);
       if (res.status !== 404) return res;
@@ -321,11 +308,11 @@ app.whenReady().then(() => {
 });
 ```
 
-If you'd rather run an ordinary localhost server in the main process, everything from the [raw `node:http`](#raw-nodehttp-generic) adapter is re-exported here unchanged — `dbsc`, `bindSession`, `getDbscSession`, `requireProof`, `requireDpop`, `createDbsc` — so wire `handler()` at the top of your listener exactly as above.
+If you'd rather run an ordinary localhost server in the main process, the whole [raw `node:http`](#raw-nodehttp-generic) kit is re-exported here unchanged.
 
-`requireProof()` / `requireDpop()` are the same guards as everywhere else; on the `protocol.handle` path use `dbsc.protocolRoute(request)` to get `{ handled, response, session }` and branch on the resolved session.
+On the `protocol.handle` path, use `dbsc.protocolRoute(request)` to get `{ handled, response, session, guard }`; `guard(dbsc.requireProof())` resolves `null` when the request may proceed or the error `Response` to return.
 
-**Tier note, honestly.** Native DBSC is on by default in desktop Chrome, but the Electron renderer usually can't reach it — not because the feature is off, but because the *conditions* aren't met. Native DBSC needs a secure `https://` website origin (Electron apps typically load from `file://` or a custom `app://` scheme) and the OS hardware key store wired through Electron's Chromium. So the expected tier here is `bound` (the Web Crypto polyfill, driven by the client SDK in the renderer), not `dbsc`. The protection is the same shape — a key the renderer holds and signs with per request — but the key lives in the renderer's IndexedDB, not a TPM. The library doesn't force a tier: `initBoundDbsc()` probes for native first and uses `dbsc` if the build does provide it, falling back to `bound` otherwise. Load `dbsc-toolkit/client` in the renderer either way.
+**Tier note, honestly.** Native DBSC is on by default in desktop Chrome, but the Electron renderer usually can't reach it, because the *conditions* aren't met: native DBSC needs a secure `https://` origin (Electron apps typically load from `file://` or `app://`) and the OS key store wired through Electron's Chromium. So the expected tier is `bound`, the Web Crypto polyfill in the renderer, not `dbsc`. The client probes for native first and uses it if the build provides it. Call `startDbsc()` in the renderer either way.
 
 ---
 
@@ -350,7 +337,7 @@ There are two protocol surfaces. Most adapters wire both.
 6. Mount `GET /dbsc-bound/state` so the SDK can detect whether registration is needed.
 7. Mount `GET /dbsc-bound/challenge` to issue fresh JTIs for the refresh signing loop.
 8. Mount `POST /dbsc-bound/registration` and `POST /dbsc-bound/refresh` that call `handleBoundRegistration` and `handleBoundRefresh`. Both expect JSON request bodies (not headers). The client SDK posts `{ publicKey, signature, challenge }` and `{ challenge, signature, timestamp }`.
-9. Serve `node_modules/dbsc-toolkit/dist/client/` as a static directory so the browser can `import { initBoundDbsc } from "/dbsc-client/index.js"`.
+9. Serve `node_modules/dbsc-toolkit/dist/client/` at `/dbsc-client` so pages can load `/dbsc-client/auto.js` (or bundle `startDbsc()` from `dbsc-toolkit/client`). `readClientAsset()` in the node adapter is the safe file reader the shipped kits use.
 
 **Per-request:**
 
@@ -524,16 +511,13 @@ export function dbscHandler(storage: StorageAdapter, boundTtlMs = 600_000) {
 }
 ```
 
-On a non-Chromium browser, the page needs to load the client SDK so the bound flow actually fires:
+Every page users reach after signing in needs the client SDK, on every browser:
 
 ```html
-<script type="module">
-  import { initBoundDbsc } from "/dbsc-client/index.js";
-  initBoundDbsc();
-</script>
+<script type="module" src="/dbsc-client/auto.js"></script>
 ```
 
-Serve `node_modules/dbsc-toolkit/dist/client/` as a static directory at `/dbsc-client`. In raw `http` that's another route handler that streams files from disk; in any real framework it's one line (Express: `app.use("/dbsc-client", express.static(...))`).
+Serve `node_modules/dbsc-toolkit/dist/client/` at `/dbsc-client`. In raw `http`, `readClientAsset(pathname, "/dbsc-client")` from `dbsc-toolkit/node` returns the file and its Content-Type (or `null`), and refuses anything that isn't a plain `.js` name. Bundled frontends import `startDbsc` from `dbsc-toolkit/client` instead.
 
 ### Critical details to get right
 

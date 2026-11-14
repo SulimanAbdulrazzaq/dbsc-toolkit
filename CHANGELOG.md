@@ -2,6 +2,31 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+This release is about setup. A full integration used to take seven pieces, two of them documented nowhere obvious; it now takes four calls on the server and one script tag, and the safe configuration is the default one. Everything is backwards compatible.
+
+### Added
+
+- **Configure the login link once.** `createDbsc()` (and `dbscHandle()`, `DbscModule.forRoot()`) take `expectSessionId` / `expectUserId` and apply them to every `requireProof()` and `protect()` the kit builds. Under `NODE_ENV=production`, `createDbsc()` warns when neither is set, and when the storage is `MemoryStorage`.
+- **`protect(patterns, { except, methods })`** guards routes by path in one line: `app.use(dbsc.protect(["/api/*"]))`. Next.js and SvelteKit take the same patterns as a `protect` option. The Next.js kit also gains `guard(req)`, a one-call check for route handlers.
+- **`bindOnLogin`** starts the binding on the first request after a login, so the login route needs no `bind()` call. It binds only within the registration window of the recorded login time, and never resets a binding already started for that login. `passportSession()` fills everything in for express-session + Passport.
+- **One-tag client.** `startDbsc()` from `dbsc-toolkit/client`, or `<script type="module" src="/dbsc-client/auto.js">`, registers the key, refreshes it and signs same-origin `fetch()` calls; a kit's `clientScript()` prints the tag with the protected paths. A login done with `fetch()` triggers registration straight away, so single-page apps need nothing extra.
+- **`dbsc-toolkit/react`** with `useDbsc()`, which starts the client and returns its status and tier.
+- **`npx dbsc-toolkit doctor <url>`** checks a live site, and with a signed-in cookie replays it without a proof to confirm guarded routes refuse it. **`npx dbsc-toolkit init`** prints the setup for the project's framework and storage.
+- **Every 403 explains itself.** Guard rejections carry a stable `code` and a plain-language `hint`; a request with no binding gets `code: "NO_BINDING"`. With `DBSC_DEBUG=1` or `NODE_ENV=development`, the hint is also sent as `X-Dbsc-Debug` and the client logs it to the console.
+- The Fastify, Koa and node kits serve the client SDK at `/dbsc-client` like the Express kit. Koa and node `bind()` derive a per-device id for JWT apps, like the other kits.
+
+### Changed
+
+- The Express and Fastify kits copy the body of signed requests before your parsers run, so guarded routes no longer need `express.raw()` or a buffer content-type parser, and `express.json()` keeps working on them. `maxProofBodyBytes` (default 1 MiB) sets the limit.
+- `secure` defaults to `false` when `NODE_ENV=development`, so plain-http localhost works without configuration. Every other environment keeps `__Host-` cookies.
+- `autoBind` is deprecated in favor of `bindOnLogin`.
+
+### Fixed
+
+- `wrapFetch` signed `FormData` bodies as the text `[object FormData]` and sent that instead of the upload. Bodies are now encoded the way `fetch` would send them, with the matching Content-Type (multipart boundary included), and the hashed bytes are the bytes sent. A `Request` passed as input is signed with its own method, headers and body.
+
 ## [2.15.2] — 2026-11-14
 
 A security release for apps that use the `autoBind` option. Apps that bind only with `bind()` / `bindSession()` in their login route are not affected.

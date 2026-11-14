@@ -8,8 +8,10 @@ The one concept every recipe shares: **DBSC binds to a `sessionId` string.** Wit
 
 | Your session system | Recipe | Stable id source |
 |---|---|---|
+| `express-session` + Passport | [Passport](#passport) | `req.sessionID`, all automatic |
 | `express-session`, `cookie-session` | [express-session](#express-session) | `req.session.id` |
-| NextAuth / Auth.js in **JWT mode** | [NextAuth JWT](#nextauth-in-jwt-mode) | `deriveSessionId({ userId: token.sub })` |
+| NextAuth / Auth.js in **JWT mode** | [NextAuth JWT](#nextauth-in-jwt-mode) | derived per device by the kit |
+| Better Auth | the [plugin](../packages/better-auth/) | handled by the plugin |
 | `iron-session` | [iron-session](#iron-session) | `deriveSessionId({ userId: session.userId })` |
 | Lucia | [Lucia](#lucia) | `session.id` (DB mode) or `deriveSessionId` (stateless) |
 | Raw JWT cookie, hand-rolled | [NextAuth JWT](#nextauth-in-jwt-mode) | `deriveSessionId({ userId: claims.sub })` |
@@ -17,22 +19,44 @@ The one concept every recipe shares: **DBSC binds to a `sessionId` string.** Wit
 
 ---
 
-## express-session
+## Passport
 
-You already have a stable id. Bind to it at the end of `/login`.
+express-session plus Passport needs no login-route code at all. `passportSession()` tells the kit the session id (`req.sessionID`), the user (`req.user.id`), and when the login happened, and the kit binds on the first request after each sign-in.
 
 ```ts
-import { createDbsc, requireProof } from "dbsc-toolkit/express";
+import { createDbsc, passportSession } from "dbsc-toolkit/express";
+
+const dbsc = createDbsc({ storage, ...passportSession() });
+
+app.use(session({ secret, resave: false, saveUninitialized: false }));
+app.use(passport.initialize());
+app.use(passport.session());
+dbsc.install(app);                     // after passport.session()
+app.use(express.json());
+app.use(dbsc.protect(["/api/*", "/settings"]));
+```
+
+Users whose id isn't `user.id`: `passportSession({ userId: (user) => user._id.toString() })`. Passport regenerates the session on login, so every sign-in gets a fresh `req.sessionID` and its own binding.
+
+---
+
+## express-session
+
+You already have a stable id. Tell the kit about it once, and bind at the end of `/login`.
+
+```ts
+import { createDbsc } from "dbsc-toolkit/express";
 import { RedisStorage } from "dbsc-toolkit/storage/redis";
 import Redis from "ioredis";
 
-app.use(express.json());               // for your own routes' bodies
 app.use(yourExistingSession());        // unchanged
 
-// Configure once, install once. install() handles trust proxy + cookie
-// parsing + the protocol routes + the /dbsc-client SDK.
-const dbsc = createDbsc({ storage: new RedisStorage(new Redis(process.env.REDIS_URL)) });
+const dbsc = createDbsc({
+  storage: new RedisStorage(new Redis(process.env.REDIS_URL)),
+  expectSessionId: (req) => req.session.id,
+});
 dbsc.install(app);
+app.use(express.json());
 
 app.post("/login", async (req, res) => {
   const user = await yourPasswordCheck(req.body);   // unchanged
@@ -41,11 +65,24 @@ app.post("/login", async (req, res) => {
   res.json({ ok: true });
 });
 
-// Guard sensitive routes with requireProof() — one call each, every browser.
-app.post("/settings/email", express.raw({ type: "*/*" }), requireProof(), emailHandler);
+app.use(dbsc.protect(["/settings/*", "/api/*"]));
 ```
 
-`req.session.id` is stable for the life of the session — `express-session` does not rotate it, even with `rolling: true` (rolling resets the cookie's `Max-Age`, not the id). Bind to it directly.
+`req.session.id` is stable for the life of the session; `express-session` doesn't rotate it, even with `rolling: true` (rolling resets the cookie's `Max-Age`, not the id).
+
+To skip the `bind()` line, record the login time and let the kit bind:
+
+```ts
+// at login: req.session.loginAt = Date.now();
+const dbsc = createDbsc({
+  storage,
+  expectSessionId: (req) => req.session.id,
+  bindOnLogin: {
+    userId: (req) => req.session.userId ?? null,
+    loginAt: (req) => req.session.loginAt ?? null,
+  },
+});
+```
 
 Deep dive: [guide.md](./guide.md).
 
@@ -53,56 +90,63 @@ Deep dive: [guide.md](./guide.md).
 
 ## NextAuth in JWT mode
 
-NextAuth (Auth.js) in the default JWT strategy has no server-side session row — the session is a signed JWT in a cookie. There is no `sessionId` to take. Derive a stable one from the `sub` claim with `deriveSessionId()`, and bind via the middleware's `autoBind` so you never touch the NextAuth login flow.
+Auth.js in the JWT strategy has no server-side session row, so there's no id to bind to. Two pieces fix that: `expectUserId` ties guards to the signed-in user, and `bindOnLogin` lets the kit derive a per-device id and bind on the first request after sign-in. The Auth.js login flow stays untouched.
+
+Record the login time in the token once, at sign-in:
 
 ```ts
-// middleware.ts
+// auth.ts
+export const { auth, handlers } = NextAuth({
+  callbacks: {
+    jwt({ token, user }) {
+      if (user) token.loginAt = Date.now();   // only set on sign-in
+      return token;
+    },
+  },
+});
+```
+
+Then the kit:
+
+```ts
+// lib/dbsc.ts
 import { getToken } from "next-auth/jwt";
 import { createDbsc } from "dbsc-toolkit/nextjs";
-import { deriveSessionId } from "dbsc-toolkit";
 import { RedisStorage } from "dbsc-toolkit/storage/redis";
 import Redis from "ioredis";
 
-const storage = new RedisStorage(new Redis(process.env.REDIS_URL!));
+const token = (req) => getToken({ req, secret: process.env.AUTH_SECRET });
 
-const dbsc = createDbsc({
-  storage,
-  // autoBind runs on every request that has no bound cookie yet. Return the
-  // id+userId to bind; return null to skip. NextAuth login flow untouched.
-  autoBind: async (req) => {
-    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-    if (!token?.sub) return null;
-    const sessionId = await deriveSessionId({ userId: token.sub });
-    return { sessionId, userId: token.sub };
+export const dbsc = createDbsc({
+  storage: new RedisStorage(new Redis(process.env.REDIS_URL!)),
+  expectUserId: async (req) => (await token(req))?.sub ?? null,
+  bindOnLogin: {
+    userId: async (req) => (await token(req))?.sub ?? null,
+    loginAt: async (req) => (await token(req))?.loginAt ?? null,
   },
+  protect: ["/api/account/*", "/api/payments/*"],
 });
 
-export function middleware(req) {
-  return dbsc.middleware()(req);
-}
+// middleware.ts
+export const middleware = dbsc.middleware();
+export const config = { matcher: ["/dbsc/:path*", "/dbsc-bound/:path*", "/api/:path*", "/((?!_next).*)"] };
 ```
 
-`deriveSessionId` is deterministic — calling it with the same `userId` always returns the same id, so the binding created on the first request is the one looked up on every refresh. No state to manage.
+Without `expectSessionId`, the kit derives the session id from the user id plus a per-device cookie it manages, so the same user on two browsers gets two bindings.
 
-> **Multi-device caveat for `autoBind`.** `deriveSessionId({ userId })` with no `deviceHint` returns the *same* id for that user on every browser — so a user logged in on two browsers collides on one binding and the second browser can't register. The `createDbsc().bind()` path (used in the other recipes below) manages a `__Host-dbsc-device` cookie for you and avoids this. `autoBind` does not — it only returns an id. For multi-device correctness in the `autoBind` recipe, read a stable per-device cookie off `req` and pass it as `deviceHint`:
-> ```ts
-> const deviceId = req.cookies.get("app-device")?.value;   // a cookie your app sets
-> const sessionId = await deriveSessionId({ userId: token.sub, deviceHint: deviceId });
-> ```
-
-Reading the tier inside a route handler:
+The `protect` option guards those paths inside the middleware. To guard a single route handler instead:
 
 ```ts
-// Inside a route handler — the kit's getSession + requireProof:
 export async function POST(req: NextRequest) {
-  const session = await dbsc.getSession(req);
-  const gate = await dbsc.requireProof(req, session);
-  if (!gate.ok) return gate.response;
-  // …
+  const denied = await dbsc.guard(req);
+  if (denied) return denied;
+  // ...
 }
 ```
 
-Deep dive: [adapters.md](./adapters.md) (Next.js section), [api-reference.md](./api-reference.md) (`deriveSessionId`).
+The `loginAt` window is what makes this safe: the kit only starts a binding within five minutes of the sign-in recorded in the token. A token stolen later can't be used to bind a device of the thief's.
+
+Deep dive: [adapters.md](./adapters.md), [api-reference.md](./api-reference.md).
 
 ---
 
@@ -125,6 +169,17 @@ app.post("/api/login", async (req, res) => {
   res.json({ ok: true });
 });
 ```
+
+Build the kit with `expectUserId` so guards check the signed-in user:
+
+```ts
+const dbsc = createDbsc({
+  storage,
+  expectUserId: async (req) => (await getIronSession(req, req.res, ironOptions)).userId ?? null,
+});
+```
+
+Or skip the `bind()` line: save `session.loginAt = Date.now()` at login and pass `bindOnLogin: { userId, loginAt }` reading the same session.
 
 `dbsc.bind(res, { userId })` derives the id internally and **auto-manages a `__Host-dbsc-device` cookie** as the per-device input — so a user logging in from two browsers gets a separate binding on each, with no extra code. (On Next.js, also pass `req`: `dbsc.bind(res, { userId, req })`.)
 
@@ -168,6 +223,27 @@ app.get("/auth/google/callback", async (req, res) => {
 ```
 
 With MFA: bind only after **every** factor has passed. Binding ties the device to a fully-authenticated session — binding before TOTP would bind a half-authenticated one.
+
+---
+
+## Bind on login without touching the login route
+
+Every recipe above can drop its `bind()` call. The kit needs two answers per request: who is signed in (`userId`), and when that login happened (`loginAt`). It then binds on the first request after the login, within `windowMs` (five minutes by default) of `loginAt`, and never resets a binding that already started for that login.
+
+```ts
+const dbsc = createDbsc({
+  storage,
+  expectSessionId: (req) => req.session.id,   // omit for JWT apps; the kit derives an id per device
+  bindOnLogin: {
+    userId: (req) => req.session.userId ?? null,
+    loginAt: (req) => req.session.loginAt ?? null,
+  },
+});
+```
+
+`loginAt` has to be the time of the sign-in, not of the last request or token refresh. Stamp it once in your login code (or the auth library's sign-in callback) and read it back. A value that moves forward with every request would keep the window open for good.
+
+Mount order: the step has to run after whatever identifies the user. Express apps that call `install()` before their session middleware mount `dbsc.loginMiddleware()` after it instead. Fastify runs the step as a `preHandler`, after session and auth plugins. Hono and Koa run it where `install()` sits in the middleware order. SvelteKit needs `expectSessionId`; every other adapter derives a per-device id when you leave it out.
 
 ---
 
@@ -286,18 +362,21 @@ Every event type, alert recipes, and OpenTelemetry mapping: [telemetry.md](./tel
 
 ## The post-login race
 
-`/login` returns 200, the SPA redirects, the user clicks a guarded route — and `tier` is still `"none"` because binding hasn't completed. On Chromium it's ~300 ms–2 s; on Firefox / Safari the polyfill probes for native DBSC first, so it's **3–8 s**.
+`/login` returns 200, the app redirects, the user clicks a guarded button, and the binding isn't done yet. Native Chromium takes up to about two seconds; the polyfill takes three to eight, since it first gives native DBSC a chance.
 
-**Do not poll `/me` to wait it out** — the delay is variable (especially on the bound tier and on cold-start hosts), so any fixed poll window is a guess. `await` the SDK's outcome promise instead — it resolves exactly when binding finishes, whichever tier won:
+Don't poll `/me`; the delay varies. Wait on the client instead:
 
 ```ts
-import { initBoundDbsc } from "dbsc-toolkit/client";
+import { startDbsc } from "dbsc-toolkit/client";
 
-const outcome = await initBoundDbsc();
-if (outcome.phase === "native-dbsc" || outcome.phase === "polyfill-bound") {
+const client = startDbsc();
+await client.ready;   // resolves when registration finishes, whichever tier won
+if (client.outcome?.phase === "native-dbsc" || client.outcome?.phase === "polyfill-bound") {
   enableHighValueButtons();
 }
 ```
+
+Single-page apps that sign in with `fetch()` need nothing extra: the client sees the binding start on the login response and registers immediately. `client.subscribe(fn)` (or the `dbsc:change` window event, or `useDbsc()` in React) tells you when it's done.
 
 ---
 
@@ -312,4 +391,4 @@ if (outcome.phase === "native-dbsc" || outcome.phase === "polyfill-bound") {
 
 ## Rollout
 
-Don't switch everything on in one deploy. The staged rollout — observe tier in logs first, then gate settings routes, then payment, then enable alerts — is in [guide.md](./guide.md#migration-timeline).
+Don't switch everything on in one deploy. The staged rollout — observe tier in logs first, then gate settings routes, then payment, then enable alerts — is in [guide.md](./guide.md#rolling-out-on-an-app-with-existing-users).

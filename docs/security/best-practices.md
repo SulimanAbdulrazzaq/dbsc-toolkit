@@ -103,19 +103,30 @@ createDbsc({ storage, boundCookieTtl: 5 * 60 * 1000 }).install(app);
 
 This one is easy to miss, and before 2.15 nothing in the docs said it. `requireProof()` checks that the request came from a device bound to *some* DBSC session. It does not know which user your app authenticated from its own session cookie or token. So an attacker with an account of their own can steal a victim's app cookie, send it next to their **own** DBSC cookie, sign with their **own** key, and pass.
 
-Close it on every guarded route:
+Close it once, on the kit:
 
 ```ts
 // The session id you passed to bind() for this login.
-app.post("/payment", express.raw({ type: "*/*" }),
-  dbsc.requireProof({ expectSessionId: (req) => req.session?.id }),
-  payHandler);
+const dbsc = createDbsc({ storage, expectSessionId: (req) => req.session?.id });
 
 // JWT apps without a session id: compare the user instead.
-dbsc.requireProof({ expectUserId: (req) => req.user?.sub });
+const dbsc = createDbsc({ storage, expectUserId: (req) => req.user?.sub });
 ```
 
+Every `dbsc.requireProof()` and `dbsc.protect()` from that kit then checks it. SvelteKit takes the same option on `dbscHandle()`, NestJS on `DbscModule.forRoot()`. A guard can still pass its own hooks for a route that identifies the user differently. Under `NODE_ENV=production`, `createDbsc()` warns when neither is set.
+
+Use the kit's `dbsc.requireProof()`, not the bare `requireProof` import: the bare one doesn't know about the kit's hooks.
+
 With Better Auth, use `expectBetterAuthSession(auth)` from `@dbsc-toolkit/better-auth`.
+
+### Binding without a login-route call
+
+`bindOnLogin` starts a binding from the request itself instead of from your login route. Two rules keep that as strong as an explicit `bind()`:
+
+- It only binds within `windowMs` (five minutes by default) of `loginAt`. `loginAt` must be the time of the sign-in, recorded once. If you return a value that moves forward on every request or token refresh, the window never closes and anyone holding the app cookie can bind a device of their own at any time.
+- Once a binding has started for a login, it is never reset by a later request carrying the same app cookie.
+
+In JWT mode (no `expectSessionId`) the kit derives one session per device. A JWT stolen inside those five minutes can bind the thief's device as a second device of the same user, just as a stolen password could. Keep that window short if your tokens are exposed to scripts.
 
 ## Enforcing the tier — the part that actually defends
 
@@ -146,13 +157,10 @@ So the cost of cookie theft under DBSC depends on the route: guarded routes refu
 Per-route gate — `requireProof()` requires a bound device + a per-request proof, and refuses anything else with a 403. It works on every browser:
 
 ```ts
-import express from "express";
-import { requireProof } from "dbsc-toolkit/express";
+app.use(dbsc.protect(["/payment", "/account"]));
 
-// POST guarded routes need raw body bytes — requireProof signs the body.
-app.post("/payment", express.raw({ type: "*/*" }), requireProof(), handlePayment);
-app.post("/account/email", express.raw({ type: "*/*" }), requireProof(), handleEmailChange);
-app.delete("/account", requireProof(), handleAccountDelete);
+// or per route
+app.post("/account/email", dbsc.requireProof(), handleEmailChange);
 ```
 
 Read access at any tier, write access at DBSC only:
@@ -164,7 +172,7 @@ app.get("/messages", (req, res) => {
   res.json(getMessages(req.user));
 });
 
-app.post("/messages", express.raw({ type: "*/*" }), requireProof(), sendMessage);
+app.post("/messages", dbsc.requireProof(), sendMessage);
 ```
 
 Tier-aware response (different defaults per tier):
@@ -302,10 +310,13 @@ Important to communicate to your team and users:
 - [ ] Redis or Postgres storage (not memory)
 - [ ] Bound cookie TTL appropriate for sensitivity (default 10 min may be too long for payments)
 - [ ] Storage backups configured
-- [ ] If using the bound polyfill: `initBoundDbsc()` script tag included on every authenticated page
+- [ ] `expectSessionId` (or `expectUserId`) set on `createDbsc()`, and guards come from the kit (`dbsc.requireProof()`, `dbsc.protect()`)
+- [ ] If using `bindOnLogin`: `loginAt` is the sign-in time, recorded once, not a rolling value
+- [ ] The client SDK (`clientScript()`, `/dbsc-client/auto.js`, or `startDbsc()`) loads on every page users reach after sign-in
+- [ ] `npx dbsc-toolkit doctor <url> --cookie ... --guard <path>` passes against production
 - [ ] Sensitive routes use `requireProof()` — it requires a per-request proof so a stolen cookie cannot ride along during the freshness window, and it works on Firefox / Safari (no route gets locked to Chromium-only). See [request-signing.md](../request-signing.md) for the threat boundary
-- [ ] For payment / fund-transfer routes, `requireProof()` on a POST signs the request body (mount `express.raw()` in front) and the client calls `wrapFetch()` (signBody:true is the default since v2.8). Without body signing, an MITM can capture a valid signature and change the amount or recipient within the timestamp window; with it, the proof carries `bh=sha256(body)` and the server rejects any substitution
-- [ ] For routes where captured-proof replay matters (active MITM threat, log-spillage exposure, regulatory replay rejection), wire `replayCache: new RedisReplayCache(redis)` on `createDbsc`. The default `NoopReplayCache` leaves the ±5-minute timestamp window open to identical-bytes replay — fine for most apps, not fine for payments under audit. See [request-signing.md](../request-signing.md#closing-the-replay-window-v2-8)
+- [ ] Guarded POST bodies reach the guard as raw bytes: automatic behind `createDbsc().install()` on Express and Fastify (raise `maxProofBodyBytes` above 1 MiB if needed), `{ rawBody: true }` on NestJS. The proof carries `bh=sha256(body)`, so an amount or recipient changed in transit is rejected
+- [ ] More than one instance: `replayCache: new RedisReplayCache(redis)` on `createDbsc`. The default `MemoryReplayCache` only sees proofs that reach the same process. See [request-signing.md](../request-signing.md#closing-the-replay-window-v2-8)
 - [ ] Call `clearBoundKey()` from `dbsc-toolkit/client` after the logout request completes — drops the IndexedDB record explicitly instead of waiting for the SDK to detect the mismatch on next login
 - [ ] User notification flow for `session_stolen`
 - [ ] Route policy documented: public routes (no guard) vs guarded routes (`requireProof()`). Only routes whose threat model specifically includes on-device infostealer malware additionally require `tier === "dbsc"` — and that knowingly excludes Firefox / Safari

@@ -8,13 +8,9 @@ As of v2.7, **Chromium sessions register the polyfill key alongside the TPM key*
 
 ## When to use this — and when not to
 
-**Use it on sensitive routes only.** Payments, admin actions, password change, email change, two-factor enrolment. Any route where a stolen-cookie ride-along during the freshness window would matter.
+**Guard the routes where a stolen cookie would hurt.** Payments, admin actions, password and email change, two-factor enrolment, anything that writes. `dbsc.protect(["/api/*"])` covers a whole prefix at once.
 
-**Do not assign `wrapFetch()` to `globalThis.fetch` by hand.** Every signed request costs ~1 ms on the client and a similar amount on the server. On a feed page that fetches 30 items, that's 60 ms of avoidable signing per render. Worse, third-party SDKs (analytics, React Query, SWR, error reporters) would start signing too — for routes that don't care, on origins that don't know what to do with the header.
-
-For apps with many guarded routes, v2.8 ships `installFetchInterceptor({ pathPrefixes })` — it swaps `globalThis.fetch` once at boot, but only routes matching same-origin requests with one of the supplied prefixes through `wrapFetch`. Cross-origin requests and static-asset paths bypass it. See "Bulk install with installFetchInterceptor" below.
-
-For small apps, the per-call `wrapFetch(...)` shape stays the recommended default.
+**Signing happens in the client, automatically.** `startDbsc()` (or the `/dbsc-client/auto.js` tag, or a kit's `clientScript()`) wraps `fetch` so same-origin requests carry a proof. By default `clientScript()` signs exactly the paths you passed to `protect()`; `startDbsc()` without `sign` signs every same-origin request. Cross-origin requests are never signed, so analytics and third-party SDKs never see the header or touch the key. Each signature costs about a millisecond on each side; narrow `sign` if a page makes hundreds of calls to unguarded paths.
 
 ## How it works
 
@@ -57,86 +53,55 @@ What this does *not* defeat:
 
 ## Integration
 
-### Server, Express
+### Server
 
 ```ts
-import { dbsc, bindSession, requireBoundProof } from "dbsc-toolkit/express";
+import { createDbsc } from "dbsc-toolkit/express";
 
-app.use(dbsc({ storage }));
+const dbsc = createDbsc({ storage, expectSessionId: (req) => req.sessionID });
+dbsc.install(app);
+app.use(express.json());
 
-// Strict route — every tier must send a signed proof header. v2.7+ default.
-app.post("/payment", requireBoundProof({ storage }), paymentHandler);
-app.post("/settings/email", requireBoundProof({ storage }), emailHandler);
+app.use(dbsc.protect(["/api/*"]));                         // by path
+app.post("/settings/email", dbsc.requireProof(), handler); // or per route
 ```
 
-As of v2.7 the default for `allowDbscWithoutProof` is `false`: Chromium sessions must carry the proof header on guarded routes, exactly like every other browser. The v2.7 client SDK co-registers a polyfill ECDSA key on Chromium alongside the TPM key, and `wrapFetch` signs every guarded request with the polyfill key — the TPM key continues to drive `/dbsc/refresh` in the background. The legacy v2.6 default of `true` left a refresh-cycle replay window open on Chromium (a stolen cookie passed `requireProof()` until the next refresh failed signature verification); pass `allowDbscWithoutProof: true` to reinstate that behavior if your Chromium clients cannot ship the v2.7 SDK.
+The other kits are the same shape: Fastify `app.addHook("preHandler", dbsc.protect([...]))` or `{ preHandler: dbsc.requireProof() }`; Hono and Koa `app.use(dbsc.protect([...]))`; Next.js `protect` on `createDbsc()` or `await dbsc.guard(req)` in a handler; SvelteKit `protect` on `dbscHandle()`; node `const guard = dbsc.protect([...])`.
 
-Running with `bound: false` (native-only mode): there's no bound key to verify a per-request polyfill proof against, so `requireProof()` relaxes a `dbsc` session — the request passes on its hardware binding. Native DBSC has no per-request proof on ordinary routes; it protects the session by cookie rotation (Chrome re-proves the TPM/Secure Enclave key at `/dbsc/refresh` each `~boundCookieTtl`, so a stolen cookie stops working within one rotation). There is no protocol-supported way to force a hardware proof on a request like `GET /profile` — the proof-of-possession step fires only on cookie expiry at the refresh endpoint. For per-request rejection of a stolen cookie, run with the polyfill on (the bound key signs every guarded request) or use DPoP for token-bound APIs. See [polyfill.md](./polyfill.md#disabling-the-polyfill-bound-false).
+Every tier must carry a proof header (the `allowDbscWithoutProof: false` default since v2.7): Chromium sessions register a polyfill key alongside the TPM key, the client signs guarded requests with it, and the TPM key keeps driving `/dbsc/refresh` in the background. `allowDbscWithoutProof: true` restores the v2.6 behavior and its refresh-cycle replay window; only use it if your Chromium clients can't load the client SDK.
 
-### Server, Fastify / Hono / Next.js
+Running with `bound: false` (native-only mode): there's no polyfill key to verify a per-request proof against, so `requireProof()` relaxes a `dbsc` session; it passes on its hardware binding. Native DBSC has no per-request proof on ordinary routes. It protects the session by cookie rotation (Chrome re-proves the TPM or Secure Enclave key at `/dbsc/refresh` every `~boundCookieTtl`, so a stolen cookie stops working within one rotation), and there is no protocol-supported way to force a hardware proof on a request like `GET /profile`. For per-request rejection, keep the polyfill on, or use DPoP for token-bound APIs. See [polyfill.md](./polyfill.md#disabling-the-polyfill-bound-false).
 
-Same shape. `requireBoundProof` is exported from each adapter subpath.
-
-```ts
-// Fastify
-import { requireBoundProof } from "dbsc-toolkit/fastify";
-fastify.get("/payment", { preHandler: requireBoundProof({ storage }) }, paymentHandler);
-
-// Hono
-import { requireBoundProof } from "dbsc-toolkit/hono";
-app.post("/payment", requireBoundProof({ storage }), paymentHandler);
-
-// Next.js (App Router — invoked inside the route handler)
-import { requireBoundProof } from "dbsc-toolkit/nextjs";
-export async function POST(req: NextRequest) {
-  const session = await getDbscSession(req, storage);
-  const gate = await requireBoundProof(req, session, { storage });
-  if (!gate.ok) return gate.response;
-  // … your handler
-}
-```
+`requireBoundProof(opts)` is the lower-level primitive under `requireProof()`: it takes `storage` explicitly and lets you turn body signing off for a route. Each adapter exports it.
 
 ### Client
 
 ```ts
+import { startDbsc } from "dbsc-toolkit/client";
+
+startDbsc({ sign: ["/api/", "/payment"] });
+
+// Ordinary fetch calls under those prefixes now carry the proof.
+await fetch("/payment", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ amount }),
+});
+```
+
+React Query, SWR and every other library that calls `fetch` get the same treatment with no changes: the interceptor sits under them.
+
+The signed body is the exact byte sequence sent. `FormData` is encoded once to multipart (and the Content-Type with its boundary is set to match), `URLSearchParams` and strings keep the Content-Type fetch would have set, and a `Request` object is signed with its own method, headers and body. `ReadableStream` bodies can't be hashed ahead of time; they go out unsigned and a guarded route rejects them.
+
+**Lower level.** `wrapFetch()` returns a signing `fetch` without touching the global, for code that wants to sign a few calls by hand:
+
+```ts
 import { wrapFetch } from "dbsc-toolkit/client";
-
-// Build the wrapper once at startup. Keep it per-call.
 const boundFetch = wrapFetch();
-
-// Use it for the specific calls that hit gated routes.
-async function pay(amount: number) {
-  const r = await boundFetch("/payment", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ amount }),
-  });
-  return r.json();
-}
+await boundFetch("/payment", { method: "POST", body });
 ```
 
-**Anti-pattern.** Do not do this:
-
-```ts
-// ❌ never do this — breaks third-party SDKs that don't expect the header
-globalThis.fetch = wrapFetch();
-```
-
-`wrapFetch()` returns a new function. The native `globalThis.fetch` stays as-is. Analytics, React Query, SWR, your error reporter, and every other library that issues `fetch` calls continue to use the unsigned native version. You opt in per call.
-
-### React Query / SWR
-
-Pass the wrapped fetch as the fetcher for queries that hit gated routes only:
-
-```ts
-const boundFetch = wrapFetch();
-
-// Sensitive query — use the wrapper.
-useQuery({ queryKey: ["payment-history"], queryFn: () => boundFetch("/payment/history").then(r => r.json()) });
-
-// Everything else — use the default fetcher (native fetch).
-useQuery({ queryKey: ["feed"], queryFn: () => fetch("/feed").then(r => r.json()) });
-```
+Don't assign `wrapFetch()` to `globalThis.fetch` yourself: it signs cross-origin requests too. `startDbsc()` is the safe way to sign globally.
 
 ## Clock-skew handling
 
@@ -151,42 +116,26 @@ Two windows live in the library:
 
 Proof failures emit `verification_failure` events with `reason` set to one of:
 
-- `MISSING_PROOF` — header absent. Either the client didn't use `wrapFetch`, or a tampered request was made.
+- `MISSING_PROOF` — header absent. Either the page never loaded the client, the path isn't in its `sign` list, or the request didn't come from your page.
 - `MALFORMED_PROOF` — header present but unparseable.
 - `SIGNATURE_INVALID` — header parsed but the signature did not verify, or the timestamp was outside the window.
 - `KEY_NOT_FOUND` — no `BoundKey` stored for the session id. Usually means the storage row was wiped between registration and this call (Memory storage on a restarted server).
 
+The `403` itself carries the same `code` plus a `hint` explaining the usual cause, and an `X-Dbsc-Debug` header in development; see [troubleshooting](./troubleshooting.md#reading-a-403).
+
 A sustained spike of `MISSING_PROOF` or `SIGNATURE_INVALID` on a single session id is a credible cookie-theft signal. The plain bound-tier `session_stolen` event already fires on refresh-signature mismatch; this gives you a second, earlier signal at request time. For wiring `onEvent` and alert recipes in general, see [telemetry.md](./telemetry.md).
 
-## Body signing setup (v2.3.0+)
+## Body signing setup
 
-As of v2.8 `signBody: true` is the default in `wrapFetch` — `requireProof()` always wants a body hash, so the safe shape is the default shape. Apps that already called `wrapFetch({ signBody: true })` explicitly are unchanged. Apps that called bare `wrapFetch()` on a guarded route were getting `MALFORMED_PROOF` 403s anyway; they now succeed.
+`requireProof()` always checks a body hash, and the client always sends one. The server needs the raw bytes the client hashed, which a JSON parser throws away. The kits handle that:
 
-Server-side, the v2.7 default flipped `allowDbscWithoutProof` to `false` — every tier must carry a proof header, and `requireProof()` always wraps `requireBoundProof` with `signBody: true`. So a Chrome guarded route needs the same setup as a Firefox / Safari one: raw body bytes server-side, `wrapFetch` client-side (or `installFetchInterceptor` once at boot).
-
-Enable on both sides:
-
-```ts
-// Server (Express)
-import express from "express";
-app.post(
-  "/payment",
-  express.raw({ type: "*/*" }),                              // raw body bytes
-  requireProof(),                                            // signBody:true, allowDbscWithoutProof:false
-  paymentHandler,
-);
-
-// Client
-const boundFetch = wrapFetch();         // signBody: true is the default in v2.8
-await boundFetch("/payment", { method: "POST", body: JSON.stringify(payload) });
-```
-
-Per-framework raw-body recipe:
-
-- **Express**: `express.raw({ type: "*/*" })` on the route, BEFORE `requireBoundProof`. If you have `express.json()` mounted globally, also send the request with a non-JSON `Content-Type` (e.g. `application/octet-stream`) so the global parser skips it.
-- **Fastify**: register a buffer parser — `fastify.addContentTypeParser("application/octet-stream", { parseAs: "buffer" }, (_req, body, done) => done(null, body))` — then use that content type on the wire.
-- **Hono**: the middleware consumes the body via `c.req.arrayBuffer()`. Hono v4+ caches the body on first read, so downstream handlers can usually call `c.req.json()` afterwards — but if you target older Hono versions, parse the body inside the handler from `c.req.raw` directly to be safe.
-- **Next.js**: the helper calls `req.clone().arrayBuffer()`. Your handler can then call `await req.json()` on the original request as usual.
+- **Express**: `createDbsc().install()` mounts `captureProofBody()` first. For every request that carries a proof header and a `Content-Length` (up to `maxProofBodyBytes`, 1 MiB by default), it copies the bytes and puts them back on the stream, so `express.json()`, `express.raw()` and multer behave exactly as before. Without the kit, mount `captureProofBody()` yourself before your parsers, or put `express.raw({ type: "*/*" })` on the route.
+- **Fastify**: `createDbsc().install()` adds a `preParsing` hook that does the same. Without the kit, register a buffer content-type parser for the guarded route.
+- **Hono**: the guard reads `c.req.arrayBuffer()`. Hono v4+ caches the body, so `c.req.json()` still works in the handler.
+- **Next.js**: the guard reads `req.clone().arrayBuffer()`; your handler calls `await req.json()` as usual.
+- **SvelteKit**: same, on `event.request.clone()`.
+- **Koa, node:http**: the guard reads the socket (or `ctx.request.rawBody` when a parser kept one). Mount the kit before any body parser.
+- **NestJS**: create the app with `{ rawBody: true }`; Nest parses bodies before module middleware.
 
 What body signing does and doesn't defeat:
 
@@ -194,35 +143,9 @@ What body signing does and doesn't defeat:
 - Does NOT defeat MITM that can capture AND replay the entire request unchanged (same body, same signature) within the window — for that, turn on the v2.8 replay cache, see below.
 - Does NOT defeat malware running as the victim — same threat boundary as the rest of the bound tier.
 
-## Bulk install with installFetchInterceptor (v2.8+)
+## Signing by prefix without `startDbsc`
 
-For apps with many guarded routes, calling `wrapFetch` at every call site is a footgun — one missed call site is a silent regression to bare `fetch`, which 403s. `installFetchInterceptor` swaps `globalThis.fetch` once at boot:
-
-```js
-import { installFetchInterceptor } from "dbsc-toolkit/client";
-
-installFetchInterceptor({
-  pathPrefixes: ["/api/secure/", "/dbsc-guarded/"],
-});
-
-// From now on, every fetch matching one of those prefixes is signed:
-await fetch("/api/secure/payment", { method: "POST", body });   // proof header added
-await fetch("/public/news");                                    // not matched, not signed
-await fetch("https://stripe.example.com/anything");             // cross-origin, not signed
-```
-
-Constructor throws at install time on the obvious footguns:
-
-- Empty `pathPrefixes` — must specify something.
-- Bare `"/"` — would match every same-origin fetch including static assets and health checks.
-- Absolute URL prefixes (`https://...`) — would route cross-origin requests through `wrapFetch` and leak the session key.
-- Prefixes missing the leading `/`.
-
-The interceptor only signs **same-origin** requests whose pathname matches one of the prefixes. Cross-origin fetches go through the original `fetch` untouched, so third-party SDKs (analytics, error reporters) keep working without accidentally getting your session key.
-
-Returns an `uninstall()` function that restores `globalThis.fetch` — useful in tests, useful on logout.
-
-For small apps, the per-call `wrapFetch(...)` shape stays the recommended default. The interceptor is for the case where you have ~10+ guarded routes scattered across the app.
+`installFetchInterceptor({ pathPrefixes })` is the interceptor `startDbsc()` uses, exposed on its own for apps that run `initBoundDbsc()` themselves. It signs same-origin requests under the given prefixes and passes everything else through, and refuses obvious mistakes at install time: an empty list, a bare `"/"`, absolute URLs, prefixes without a leading `/`. It returns an `uninstall()` function. Most apps should call `startDbsc({ sign: [...] })` instead, which also runs registration and refresh.
 
 ## Closing the replay window (v2.8+)
 
@@ -250,8 +173,8 @@ Notes:
 - The replay key is only recorded **after** the signature verifies. An attacker replaying garbage cannot poison the cache and lock out the legitimate client.
 - The cache TTL is `2 * timestampWindowMs` (default 10 min) — a proof at the future edge of the window must remain rejected until the past edge closes.
 - `RedisReplayCache` uses `SET NX EX` so check-and-record is a single atomic round-trip. Safe across replicas.
-- Opt-in because for many apps the ±5-minute window is acceptable — passive cookie theft (the dominant threat) is already shut down by the polyfill-key requirement, and body signing covers body substitution. Turn the cache on when you have a stricter threat model (active MITM, log-spillage exposure, regulatory replay rejection).
-- For Postgres deployments, pair with Redis for the replay cache, or accept the default `NoopReplayCache`. There's no Postgres replay-cache adapter yet.
+- On by default since 2.15 with an in-process `MemoryReplayCache`. With more than one instance behind a load balancer, pass `new RedisReplayCache(redis)` so every instance sees the same set.
+- For Postgres deployments, pair with Redis for the replay cache, or keep the in-process default and accept that a proof replayed to a different instance isn't caught. There's no Postgres replay-cache adapter yet.
 
 ## What's in v1, and what's coming later
 
@@ -276,3 +199,10 @@ In v2.8.0:
 - `signBody: true` is the default in `wrapFetch`
 - `KEY_NOT_FOUND_NATIVE` / `KEY_NOT_FOUND_BOUND` error codes
 - `PolyfillMissingEvent` telemetry
+
+In the next release:
+- `startDbsc()` and `/dbsc-client/auto.js`: one call signs every guarded `fetch`
+- Body capture in the Express and Fastify kits; no raw parser on guarded routes
+- `protect()` for path-based guarding; `clientScript()` signs those paths
+- `wrapFetch` encodes `FormData`, `URLSearchParams` and `Request` bodies correctly
+- `code` + `hint` on every 403, `X-Dbsc-Debug` in development

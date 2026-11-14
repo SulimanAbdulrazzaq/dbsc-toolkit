@@ -135,11 +135,11 @@ The middleware emits this **at most once per session per server-process restart*
 
 Common causes when this fires for a real user:
 
-- Client SDK not loaded (the page does not import or call `initBoundDbsc()`).
+- Client SDK not loaded (the page doesn't load `/dbsc-client/auto.js` or call `startDbsc()`). `npx dbsc-toolkit doctor` checks that the SDK is served.
 - The polyfill co-registration failed silently — the client's outcome is `{ phase: "native-dbsc", tier: "dbsc", skipReason: "polyfill-co-registration-failed" }`.
 - Chromium quota / sandbox issue blocking the IndexedDB write.
 
-Wire it to a dashboard counter and a low-volume alert. A spike in `polyfill_missing` typically means a frontend regression that stripped or shadowed `initBoundDbsc()`.
+Wire it to a dashboard counter and a low-volume alert. A spike in `polyfill_missing` typically means a frontend regression that dropped the client script.
 
 ## OpenTelemetry mapping
 

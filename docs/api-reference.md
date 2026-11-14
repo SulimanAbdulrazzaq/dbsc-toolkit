@@ -17,10 +17,99 @@ Every public export across all subpaths.
 | `dbsc-toolkit/node` | Generic raw `node:http` handler |
 | `dbsc-toolkit/electron` | Electron main-process adapter (`protocol.handle` bridge + node re-exports) |
 | `dbsc-toolkit/dpop` | Optional DPoP (RFC 9449): `verifyDpopProof`, `dpopConfirmation`, `jwkThumbprint` |
-| `dbsc-toolkit/client` | Browser SDK |
+| `dbsc-toolkit/client` | Browser SDK: `startDbsc()` and the lower-level pieces |
+| `dbsc-toolkit/client/auto` | Side-effect import: calls `startDbsc()` (also served as `/dbsc-client/auto.js`) |
+| `dbsc-toolkit/react` | `useDbsc()` hook |
 | `dbsc-toolkit/storage/memory` | `MemoryStorage` |
 | `dbsc-toolkit/storage/redis` | `RedisStorage` |
 | `dbsc-toolkit/storage/postgres` | `PostgresStorage` |
+| `npx dbsc-toolkit` | CLI: `doctor` and `init` |
+
+---
+
+## The kit (`createDbsc`)
+
+Every adapter has a `createDbsc(options)` that returns a configured kit. It is the recommended way in; `dbsc()`, `bindSession()` and the bare `requireProof` import are the lower-level pieces it is built from. SvelteKit takes the same options on `dbscHandle()`, and NestJS on `DbscModule.forRoot()`.
+
+### Options shared by every kit
+
+On top of the adapter's middleware options (`storage`, `boundCookieTtl`, `rateLimiter`, `replayCache`, `onEvent`, `cookieScope`, ... see `DbscOptions` below):
+
+```ts
+interface KitSessionBinding<Req> {
+  // The id passed to bind() for the login on this request. Every
+  // requireProof()/protect() from the kit rejects a DBSC session from
+  // another login with 403 SESSION_MISMATCH.
+  expectSessionId?: (req: Req) => string | null | undefined | Promise<...>;
+  // Same, compared with the userId passed to bind(). For JWT apps.
+  expectUserId?: (req: Req) => string | null | undefined | Promise<...>;
+  // Bind on the first request after a login instead of calling bind().
+  bindOnLogin?: BindOnLoginOptions<Req>;
+}
+
+interface BindOnLoginOptions<Req> {
+  userId: (req: Req) => string | null | undefined | Promise<...>;            // who is signed in
+  loginAt: (req: Req) => number | Date | null | undefined | Promise<...>;    // when that login happened
+  windowMs?: number;   // default: boundRegistrationWindowMs, 5 minutes
+}
+```
+
+| Option | Kits | Default | Meaning |
+|---|---|---|---|
+| `expectSessionId` / `expectUserId` | all | none | Ties guards to your login. `createDbsc()` warns once under `NODE_ENV=production` when neither is set. |
+| `bindOnLogin` | all | none | The binding starts on the first request whose `loginAt` is within `windowMs`, when no binding has started for this session since that login. The id bound is `expectSessionId(req)`, or one derived from the user id plus a per-device cookie when `expectSessionId` is unset (SvelteKit requires `expectSessionId`). |
+| `secure` | all | `defaultSecure()` | `__Host-` cookies and the Secure flag. `defaultSecure()` is `false` only when `NODE_ENV === "development"`. |
+| `sessionTtl` | all | 24 h | Lifetime of the DBSC session row created by `bind()`. |
+| `clientPath` | Express, Fastify, Koa, node | `"/dbsc-client"` | Where the browser SDK is served. `false` to skip. |
+| `maxProofBodyBytes` | Express, Fastify | 1 MiB | Largest request body copied for the proof's body hash. |
+| `trustProxy` | Express | `true` | `install()` sets `trust proxy`. Pass `false` when not behind a proxy. |
+| `protect` | Next.js, SvelteKit | none | `string[]` or `{ paths, except?, methods?, ...RequireProofOptions }`, guarded in the middleware / handle. |
+
+`createDbsc()` also warns once under `NODE_ENV=production` when the storage is ephemeral (`MemoryStorage`).
+
+### Methods
+
+| Method | Express | Fastify | Hono | Koa | node | Next.js |
+|---|---|---|---|---|---|---|
+| `install(app)` | yes | async | yes | yes | `handler()` | `middleware()` |
+| `bind(res, sessionId, { userId })` | yes | yes | yes | yes | yes | yes |
+| `bind(res, { userId })` (derived per device) | yes | yes | yes | yes | pass `req` | pass `req` |
+| `requireProof(opts?)` | yes | yes | yes | yes | yes | `(req, session, opts?)` |
+| `protect(patterns, opts?)` | yes | yes | yes | yes | yes | `protect` option |
+| `clientScript(opts?)` | yes | yes | yes | yes | yes | yes |
+| `requireDpop(opts?)` | yes | yes | yes | yes | yes | separate import |
+| `guard(req, opts?)` | | | | | | yes |
+| `loginMiddleware()` | yes | | | | | |
+
+**`install(app)`** mounts, in order: proof-body capture (Express, Fastify), the browser SDK (Express, Fastify, Koa), the protocol middleware, and the `bindOnLogin` step. Call it after the middleware that identifies the user when you use `bindOnLogin`, and before your body parsers.
+
+**`protect(patterns, opts?)`** returns middleware (Express, Hono, Koa), a `preHandler` (Fastify) or a guard function (node) that runs `requireProof()` for matching requests:
+
+```ts
+interface ProtectOptions<Req> extends RequireProofOptions<Req> {
+  except?: string[];    // paths inside the protected set that stay open
+  methods?: string[];   // only these methods are guarded
+}
+```
+
+Patterns: `"/api/*"` or `"/api/"` (everything under `/api/`), `"/account"` (the path and its children, not `/accounts`), `"*"` (everything). Patterns must start with `/`; an empty list throws.
+
+**`clientScript(opts?)`** returns `<script type="module" src="/dbsc-client/auto.js?...">`. By default it signs the paths passed to `protect()`; `{ sign: string[], signQuery?: boolean }` overrides.
+
+**`requireProof(opts?)`** uses the kit's `expectSessionId` / `expectUserId` unless `opts` sets either one.
+
+**`loginMiddleware()`** (Express) is the `bindOnLogin` step alone, for apps that call `install()` before their session middleware. NestJS mounts it for you.
+
+**`guard(req, opts?)`** (Next.js) reads the session and runs the guard: `const denied = await dbsc.guard(req); if (denied) return denied;`.
+
+### Presets
+
+```ts
+import { passportSession } from "dbsc-toolkit/express";
+createDbsc({ storage, ...passportSession({ userId?: (user) => string }) });
+```
+
+Fills in `expectSessionId` (`req.sessionID`) and `bindOnLogin` for express-session + Passport. The login time is stored in the session as `dbscLoginAt` the first time the kit sees the login.
 
 ---
 
@@ -213,6 +302,50 @@ token-bound APIs.
 
 `RequireProofOptions` is the (entirely optional) option shape of every adapter's `requireProof()`. `noBindingReason` produces the quota-aware human reason used in a `tier: "none"` rejection — exported for custom adapters.
 
+Set the hooks once on the kit (`createDbsc({ expectSessionId })`) rather than on every guard; a guard's own hooks win when it has any.
+
+### Path matching (for adapter authors)
+
+```ts
+function matchesPathPattern(pathname: string, pattern: string): boolean;
+function isProtected(pathname: string, method: string, patterns: readonly string[], opts?: { except?: string[]; methods?: string[] }): boolean;
+function validatePathPatterns(patterns: readonly string[], label?: string): void;   // throws on bad input
+function signPrefixes(patterns: readonly string[]): string[] | undefined;           // client sign list; undefined = sign everything
+```
+
+### Login binding (for adapter authors)
+
+```ts
+function shouldBindLogin(storage: StorageAdapter, input: {
+  userId: string; loginAt: number; sessionId: string; currentSessionId: string | null; windowMs?: number; now?: number;
+}): Promise<boolean>;
+function resolveLoginBinding<Req>(cfg: BindOnLoginOptions<Req>, req: Req, input: ResolveLoginBindingInput<Req>):
+  Promise<{ sessionId: string; userId: string } | null>;
+```
+
+`shouldBindLogin` is the rule every adapter's `bindOnLogin` uses: inside the window, and no binding created at or after `loginAt` for this id.
+
+### Kit helpers
+
+```ts
+function defaultSecure(): boolean;                     // false only when NODE_ENV === "development"
+function withKitBinding<Req>(kit: KitSessionBinding<Req>, opts?: RequireProofOptions<Req>): RequireProofOptions<Req>;
+function checkKitSetup(setup: { storage; expectSessionId?; expectUserId? }): void;   // production warnings
+function clientScriptTag(clientPath: string, opts?: { sign?: string[]; signQuery?: boolean }): string;
+```
+
+### Diagnostics
+
+```ts
+const NO_BINDING = "NO_BINDING";        // guarded request with no active binding
+const DEBUG_HEADER = "X-Dbsc-Debug";
+function rejectionHint(code: string | undefined, message?: string): string | undefined;
+function describeRejection(code: string, message?: string): { hint?: string; debugHeader?: string };
+function debugEnabled(): boolean;       // DBSC_DEBUG=1|true, else NODE_ENV === "development"
+```
+
+Every guard's 403 body is `{ error, code, hint?, ...extra }`. `code` is stable; `hint` is a plain-language explanation of the likely cause, safe to send to clients (it describes setup, never the session). When `debugEnabled()`, the response also carries `X-Dbsc-Debug: CODE: hint`, and the client SDK logs it with `console.warn`. A `tier: "none"` rejection keeps its `currentTier`, `reason` and `skipped` fields and now has `code: "NO_BINDING"`.
+
 ### Cookie parsing
 
 ```ts
@@ -270,6 +403,8 @@ const ErrorCodes: {
   MISSING_PROOF: string;                 // requireProof + no X-Dbsc-Bound-Proof header
   MALFORMED_PROOF: string;
   PROOF_REPLAY: string;                  // v2.8+: replay cache rejected a second arrival
+  SESSION_MISMATCH: string;              // 2.15+: binding belongs to another login
+  REGISTRATION_WINDOW_CLOSED: string;    // 2.15+: polyfill key arrived too late
 };
 ```
 
@@ -503,17 +638,22 @@ After mount, every request has `res.locals.dbsc` populated. Call `bindSession` o
 function requireProof(opts?: RequireProofOptions): RequestHandler;
 ```
 
-The route guard. One call, no arguments — `requireProof()` requires the request to come from a bound device and prove it per-request. **Works on every browser**: Chromium's hardware-backed `dbsc` tier passes through, the software `bound` tier (Firefox / Safari / older Chromium) must carry a signed, body-hashed proof. There is no "tier level" argument — a `dbsc`-only gate would lock out non-Chromium browsers, and a `bound`-only check (no proof) is not actually secure.
+The route guard: the request must come from a bound device and carry a fresh per-request proof. **Works on every browser.** Prefer the kit's `dbsc.requireProof()` (it applies `expectSessionId`) or `dbsc.protect()`.
 
-Internally it reuses `requireBoundProof` with `signBody: true` and reads storage from the request context the `dbsc()` middleware populates (pass `{ storage }` only to override). A failed check returns 403 with `{ error, currentTier, reason, skipped }`. Because the `bound` tier signs the body, a **POST** guarded route needs `express.raw({ type: "*/*" })` in front (`requireProof` is a pure guard, it does not inject body parsers) and the client must use `wrapFetch({ signBody: true })`. GET routes have no body and need no parser.
+It verifies a body hash, so it needs the raw request bytes. Behind `createDbsc().install()` those come from `captureProofBody()`, which copies the body of every signed request (with a `Content-Length`, up to `maxProofBodyBytes`) and hands the stream back to your parsers. Without the kit, put `captureProofBody()` first in the app, or `express.raw({ type: "*/*" })` on the route. A failed check returns 403 with `{ error, code, hint }` (see [Diagnostics](#diagnostics)).
+
+```ts
+function captureProofBody(opts?: { limit?: number }): RequestHandler;   // limit default 1 MiB
+```
 
 ### `createDbsc` (Express)
 
 ```ts
-interface CreateDbscOptions extends DbscExpressOptions {
+interface CreateDbscOptions extends DbscExpressOptions, KitSessionBinding<Request> {
   clientPath?: string | false;   // static SDK mount; default "/dbsc-client", false to skip
   sessionTtl?: number;           // default session TTL (ms) for bind()
   trustProxy?: boolean;          // default true — install() sets `trust proxy`
+  maxProofBodyBytes?: number;    // default 1 MiB
 }
 
 interface BindOptions { userId: string; deviceHint?: string; namespace?: string }
@@ -521,15 +661,20 @@ interface BindOptions { userId: string; deviceHint?: string; namespace?: string 
 interface DbscKit {
   install(app: Express): Express;
   middleware(): RequestHandler;
+  loginMiddleware(): RequestHandler;
   bind(res: Response, sessionId: string, opts: BindOptions): Promise<string>;
   bind(res: Response, opts: BindOptions): Promise<string>;   // derives the id
-  requireProof(opts?: RequireProofOptions): RequestHandler;
+  requireProof(opts?: RequireProofOptions<Request>): RequestHandler;
+  requireDpop(opts?: RequireDpopOptions<Request>): RequestHandler;
+  protect(patterns: string[], opts?: ProtectOptions<Request>): RequestHandler;
+  clientScript(opts?: ClientScriptOptions): string;
 }
 
 function createDbsc(opts: CreateDbscOptions): DbscKit;
+function passportSession(opts?: { userId?: (user: unknown) => string | null | undefined }): KitSessionBinding<Request>;
 ```
 
-A single configured kit. Storage, `secure`, TTLs, the rate limiter and telemetry are set once in `createDbsc`; `install()`, `bind()` and `requireProof()` read that config. `install(app)` mounts the protocol middleware, scoped JSON parsing for the bound routes, the `/dbsc-client` static SDK, and `trust proxy` — one line. Returns the `sessionId` used.
+A single configured kit; see [the kit](#the-kit-createdbsc) for what each option and method does. `install(app)` mounts proof-body capture, scoped JSON parsing for the bound routes, the protocol middleware, the `bindOnLogin` step, the `/dbsc-client` SDK and `trust proxy`. `bind()` returns the `sessionId` used.
 
 `bind()` without a `sessionId` (the JWT path) derives one via `deriveSessionId` **and auto-manages a `__Host-dbsc-device` cookie** as the `deviceHint`, so each browser of the same user binds independently. Pass `deviceHint` in `BindOptions` only to control device identity yourself.
 
@@ -567,19 +712,9 @@ function bindSession(
 
 Register with `await fastify.register(dbsc, { storage })`. `registrationCookieTtl` is honored as of 1.4.0.
 
-`requireProof(opts?)` returns a `preHandler` — `app.post("/p", { preHandler: requireProof() }, handler)`. `createDbsc(opts)` returns a kit whose `install(fastify)` is **async** (it registers `@fastify/cookie` if missing, then the plugin); `bind(reply, …)` and `requireProof` match the core shapes. Fastify's kit does not mount a static client SDK — serve `dist/client/` yourself.
+`requireProof(opts?)` returns a `preHandler` — `app.post("/p", { preHandler: dbsc.requireProof() }, handler)`. `createDbsc(opts)` returns a kit whose `install(fastify)` is **async**: it registers `@fastify/cookie` if missing, a `preParsing` hook that copies the body of signed requests (so Fastify's own JSON parser keeps working on guarded routes), the plugin, the `bindOnLogin` `preHandler`, and a `GET /dbsc-client/*` route for the browser SDK. `protect(patterns)` returns a `preHandler`: `fastify.addHook("preHandler", dbsc.protect(["/api/*"]))`.
 
-**Fastify POST routes:** `requireProof()` signs the request body, and Fastify's default JSON parser yields a parsed object, not the raw bytes the proof needs. A guarded **POST** route must register a buffer content-type parser so `req.body` arrives as a `Buffer`:
-
-```ts
-app.addContentTypeParser("application/octet-stream", { parseAs: "buffer" }, (_req, body, done) =>
-  done(null, body),
-);
-app.post("/payment", { preHandler: requireProof() }, paymentHandler);
-// the client posts with Content-Type: application/octet-stream + wrapFetch({ signBody: true })
-```
-
-GET routes have no body and need no parser.
+Without the kit, register a buffer content-type parser on guarded POST routes so `req.body` arrives as a `Buffer`, as before.
 
 ---
 
@@ -621,7 +756,7 @@ function bindSession(
 
 Read everything as `c.get("dbsc")` — a single object matching the Express/Fastify shape. The legacy keys (`dbscSessionId`, `dbscTier`, `dbscSkipped`) that existed in 1.x were removed in 2.0.0; use the unified object only.
 
-`requireProof(opts?)` returns a `MiddlewareHandler` — `app.post("/p", requireProof(), handler)`. `createDbsc(opts)` returns a kit whose `install(app)` mounts the dbsc middleware; `bind(c, …)` and `requireProof` match the core shapes. No static client SDK is mounted — serve `dist/client/` with your runtime's static handler.
+`requireProof(opts?)` returns a `MiddlewareHandler` — `app.post("/p", dbsc.requireProof(), handler)`. Hono reads the body with `c.req.arrayBuffer()`, which it caches, so no body setup is needed. `createDbsc(opts)` returns a kit whose `install(app)` mounts the dbsc middleware and the `bindOnLogin` step; `protect(patterns)` returns a `MiddlewareHandler`. No static client SDK is mounted, since Hono runs on runtimes without a filesystem: serve `dist/client/` with your runtime's static handler, or bundle `startDbsc()` from `dbsc-toolkit/client`.
 
 ---
 
@@ -667,14 +802,23 @@ function requireProof(
   opts?: RequireProofOptions,
 ): Promise<RequireProofResult>;
 
-function createDbsc(opts: DbscNextOptions & { sessionTtl?: number }): {
+interface CreateDbscOptions extends DbscNextOptions, KitSessionBinding<NextRequest> {
+  sessionTtl?: number;
+  protect?: string[] | { paths: string[]; except?: string[]; methods?: string[] } & RequireProofOptions<NextRequest>;
+}
+
+function createDbsc(opts: CreateDbscOptions): {
   middleware(): (req: NextRequest) => Promise<NextResponse>;
   bind(res: NextResponse, sessionId: string, opts: BindOptions): Promise<string>;
   bind(res: NextResponse, opts: BindOptions): Promise<string>;
   getSession(req: NextRequest, res?: NextResponse): Promise<DbscSessionInfo>;
-  requireProof(req: NextRequest, session: RequireProofSession): Promise<RequireProofResult>;
+  requireProof(req: NextRequest, session: RequireProofSession, opts?: RequireProofOptions<NextRequest>): Promise<RequireProofResult>;
+  guard(req: NextRequest, opts?: RequireProofOptions<NextRequest>): Promise<NextResponse | null>;
+  clientScript(opts?: ClientScriptOptions): string;
 };
 ```
+
+The kit's `middleware()` answers the protocol routes, then for pass-through requests runs `protect` (returning the 403 itself) and `bindOnLogin` (adding the registration header and cookies to the pass-through response). Your `config.matcher` must include the protected paths and, for `bindOnLogin`, the pages users land on after signing in.
 
 Next.js has no shared request context, so `requireProof` takes the session (from `getDbscSession`) and storage explicitly, and returns `{ ok }` / `{ ok: false, response }` like `requireBoundProof`. The `createDbsc` kit has no `install()` — export `kit.middleware()` from `middleware.ts`, call `kit.getSession` / `kit.requireProof` inside route handlers (storage is baked in).
 
@@ -685,14 +829,14 @@ On the no-sessionId JWT path, pass the request in `BindOptions` so the kit can m
 ## `dbsc-toolkit/nestjs`
 
 ```ts
-DbscModule.forRoot(opts: DbscNestOptions): DynamicModule  // mounts the protocol middleware globally
+DbscModule.forRoot(opts: DbscNestOptions): DynamicModule  // the Express kit's options, incl. expectSessionId and bindOnLogin
 class DbscService { bind(res, sessionId, opts): Promise<string> }   // injectable
 class DbscGuard implements CanActivate                              // @UseGuards(DbscGuard)
 createDbscGuard(opts: RequireProofOptions): new () => CanActivate   // guard with options baked in
 bindSession(res, sessionId, storage, opts): Promise<void>          // re-exported from the Express adapter
 ```
 
-Express platform. The guard reads `res.locals.dbsc` set by the middleware. A guarded POST is body-hashed, so it must deliver raw bytes (`rawBody: true`). `DbscNestOptions` is the Express adapter's option set.
+Express platform. `forRoot` mounts the protocol middleware and the `bindOnLogin` step for every route; Nest middleware already runs after the session middleware `main.ts` installed. `expectSessionId` / `expectUserId` given to `forRoot` apply to `DbscGuard` and every `createDbscGuard()` unless the guard passes its own. Nest parses bodies before any module middleware, so a guarded POST still needs `NestFactory.create(AppModule, { rawBody: true })`. 403s carry `code` and `hint`.
 
 ## `dbsc-toolkit/koa`
 
@@ -700,20 +844,26 @@ Express platform. The guard reads `res.locals.dbsc` set by the middleware. A gua
 dbsc(opts: DbscKoaOptions): Middleware
 bindSession(ctx, sessionId, storage, opts): Promise<void>
 requireProof(opts?: RequireProofOptions): Middleware
-createDbsc(opts): { install(app), middleware(), bind(ctx, sessionId, opts), requireProof(opts?) }
+createDbsc(opts): {
+  install(app), middleware(),
+  bind(ctx, sessionId, opts), bind(ctx, { userId }),   // second form derives a per-device id
+  requireProof(opts?), requireDpop(opts?), protect(patterns, opts?), clientScript(opts?)
+}
 ```
 
-Delegates to the `node:http` handler over `ctx.req` / `ctx.res`; sets `ctx.respond = false` when it answers a protocol route. The session lands on `ctx.state.dbsc`. The guard reads the raw body from `ctx.request.rawBody` when present.
+Delegates to the `node:http` handler over `ctx.req` / `ctx.res`; sets `ctx.respond = false` when it answers a protocol route. The session lands on `ctx.state.dbsc`. The guard reads the raw body from `ctx.request.rawBody` when present. `install(app)` also serves the browser SDK at `/dbsc-client` and mounts the `bindOnLogin` step.
 
 ## `dbsc-toolkit/sveltekit`
 
 ```ts
-dbscHandle(opts: DbscSvelteKitOptions): Handle            // src/hooks.server.ts
+dbscHandle(opts: DbscSvelteKitOptions): DbscHandle        // src/hooks.server.ts
+// DbscSvelteKitOptions adds expectSessionId, expectUserId, bindOnLogin (needs expectSessionId)
+// and protect: string[] | { paths, except?, methods?, ...RequireProofOptions }
 bindSession(event, sessionId, storage, opts): Promise<void>
 requireProof(opts?: RequireProofOptions): (event) => Promise<void>  // throws error(403) on failure
 ```
 
-The hook resolves the session onto `event.locals.dbsc`. Protocol routes return a `Response` directly with manual `Set-Cookie`; `bindSession` uses `event.cookies` (it runs inside an action/handler that goes through `resolve`).
+The hook resolves the session onto `event.locals.dbsc`. Protocol routes return a `Response` directly with manual `Set-Cookie`; `bindSession` uses `event.cookies` (it runs inside an action/handler that goes through `resolve`). `expectSessionId` / `expectUserId` on the handle apply to every `requireProof()`. `protect` runs the guard in the handle, before the route; a failure is `error(403, { message, code, hint })`.
 
 ## `dbsc-toolkit/node`
 
@@ -723,10 +873,16 @@ getDbscSession(req): DbscNodeSession | undefined
 bindSession(res, sessionId, storage, opts): Promise<void>
 readJsonBody(req): Promise<Record<string, unknown>>
 requireProof(opts?): (req, res) => Promise<boolean>          // true = passed; false = 403 already written
-createDbsc(opts): { handler(), getSession(req), bind(res, sessionId, opts), requireProof(opts?) }
+createDbsc(opts): {
+  handler(), getSession(req),
+  bind(res, sessionId, opts), bind(res, { userId, req }),   // second form derives a per-device id
+  requireProof(opts?), requireDpop(opts?),
+  protect(patterns, opts?): (req, res) => Promise<boolean>,  // true = continue (not protected, or passed)
+  clientScript(opts?)
+}
 ```
 
-Generic raw `node:http`. No `install()` — branch on the handler's boolean return. The guard caches the verified raw body on the request so a downstream handler can re-read it via `readJsonBody`.
+Generic raw `node:http`. No `install()` — branch on the handler's boolean return. The kit's `handler()` also serves the browser SDK at `/dbsc-client` and runs the `bindOnLogin` step; it returns `true` when it answered the request. The guard caches the verified raw body on the request so a downstream handler can re-read it via `readJsonBody`.
 
 ---
 
@@ -753,7 +909,33 @@ The bridge builds a minimal request/response shim and runs the same node handler
 
 ## `dbsc-toolkit/client`
 
-Browser-side SDK for the bound polyfill. Load on every page that needs `tier: "bound"` on non-Chromium browsers; Chromium 145+ users see no effect (the SDK detects the native binding and steps back).
+Browser-side SDK. Load it on every page users reach after signing in, on every browser, Chromium included: it registers the polyfill key that per-request proofs use.
+
+### `startDbsc` (start here)
+
+```ts
+interface StartDbscOptions extends InitBoundDbscOptions {
+  sign?: string[];        // path prefixes to sign; default: every same-origin request
+  signQuery?: boolean;    // match the server's signQuery
+}
+
+interface DbscClient {
+  readonly ready: Promise<BoundDbscOutcome>;          // the current registration run
+  readonly outcome: BoundDbscOutcome | null;          // null while the first run is going
+  subscribe(listener: (o: BoundDbscOutcome) => void): () => void;
+  restart(): Promise<BoundDbscOutcome>;
+  stop(): void;                                       // remove the interceptor, stop refresh
+}
+
+function startDbsc(options?: StartDbscOptions): DbscClient;   // idempotent: later calls return the first client
+function getDbscClient(): DbscClient | null;
+```
+
+`startDbsc()` runs `initBoundDbsc()`, keeps the key refreshed, and replaces `globalThis.fetch` with an interceptor that signs same-origin requests under `sign` (cross-origin requests are never signed; the SDK's own protocol calls are skipped; `ReadableStream` bodies go out unsigned). When any same-origin response carries `Secure-Session-Registration` (a login done with `fetch`), it registers again on its own. Each new outcome is also dispatched as a `dbsc:change` event on `window`. Responses with `X-Dbsc-Debug` are logged with `console.warn`.
+
+Without a bundler: `<script type="module" src="/dbsc-client/auto.js?sign=/api/,/account/&signQuery=1"></script>`. Query parameters are optional; the client is exposed as `window.dbsc`. A kit's `clientScript()` builds this tag for you. With a bundler, `import "dbsc-toolkit/client/auto"` does the same with defaults.
+
+### Lower-level pieces
 
 ```ts
 interface InitBoundDbscOptions {
@@ -824,7 +1006,38 @@ installFetchInterceptor({ pathPrefixes: ["/api/secure/"] });
 // from now on `fetch("/api/secure/...")` carries the proof header.
 ```
 
+`wrapFetch` sends the exact bytes it hashed and keeps the Content-Type fetch would have set (multipart boundary included for `FormData`). A `Request` passed as input is signed with its own method, headers and body.
+
 See [polyfill.md](./polyfill.md) for the wire protocol and threat coverage.
+
+---
+
+## `dbsc-toolkit/react`
+
+```ts
+interface DbscState {
+  status: "starting" | "bound" | "unbound" | "error";
+  tier: "dbsc" | "bound" | null;
+  skipReason: string | undefined;
+  outcome: BoundDbscOutcome | null;
+}
+function useDbsc(options?: StartDbscOptions): DbscState;
+```
+
+Calls `startDbsc(options)` on first subscribe (options apply to the first call per page) and re-renders on each outcome. Renders as `starting` on the server. React 18+ is an optional peer dependency.
+
+---
+
+## CLI
+
+```sh
+npx dbsc-toolkit doctor <url> [--cookie "<Cookie header>"] [--guard /path] [--client-path /dbsc-client]
+npx dbsc-toolkit init [--framework express|fastify|hono|koa|nextjs|sveltekit|nestjs|node|better-auth] [--write <file>]
+```
+
+`doctor` checks HTTPS, `GET /dbsc-bound/state`, server clock skew (`X-Server-Time`), the client SDK, and `POST /dbsc/refresh` without a session. With `--cookie` it reports the session's state; with `--cookie` and `--guard` it requests the guarded path with the cookie and no proof and fails unless the answer is `403`. Exit code 1 on any failure.
+
+`init` picks the framework and storage from `package.json` (Better Auth first, then Next.js, SvelteKit, NestJS, Fastify, Hono, Koa, Express, plain node; `ioredis` then `pg` then memory; the Passport preset when `passport` and `express-session` are both present) and prints the setup. `--write` saves it to a new file and refuses to overwrite.
 
 ---
 
@@ -836,7 +1049,7 @@ class MemoryStorage implements StorageAdapter {
 }
 ```
 
-No constructor arguments. Lives in process memory only.
+No constructor arguments. Lives in process memory only. Has `ephemeral = true`, which makes `createDbsc()` warn under `NODE_ENV=production`. A custom `StorageAdapter` can set `readonly ephemeral?: boolean` the same way.
 
 ---
 
@@ -886,3 +1099,15 @@ Storage: `StorageAdapter.setBoundKeyIfAbsent?(key)` is optional; when present, r
 Client: `wrapFetch({ signQuery })`, `installFetchInterceptor({ signQuery })`. `initBoundDbsc()` can now resolve with `skipReason: "local-key-missing"` when the server holds a polyfill key this browser lost (site data cleared). Treat it as signed out.
 
 Electron: `protocolRoute(request)` results carry `guard(kit.requireProof())`, which resolves `null` when the request may proceed or the error `Response` to return.
+
+## Added in the next release
+
+- Kits: `expectSessionId`, `expectUserId`, `bindOnLogin`, `maxProofBodyBytes`, `clientPath` (Fastify, Koa, node); methods `protect()`, `clientScript()`, `loginMiddleware()` (Express), `guard()` (Next.js); `protect` option on Next.js and SvelteKit. See [the kit](#the-kit-createdbsc).
+- `secure` defaults to `false` when `NODE_ENV === "development"`.
+- Express `captureProofBody()` and Fastify body capture: guarded routes no longer need a raw parser.
+- `passportSession()` preset.
+- Koa and node `bind()` derive a per-device id when no session id is given.
+- Diagnostics: `code` + `hint` on every guard 403, `X-Dbsc-Debug`, `NO_BINDING`.
+- Client: `startDbsc()`, `getDbscClient()`, `/dbsc-client/auto.js`, `dbsc-toolkit/client/auto`; `wrapFetch` encodes `FormData`, `URLSearchParams` and `Request` bodies correctly.
+- `dbsc-toolkit/react` (`useDbsc`), `npx dbsc-toolkit doctor|init`.
+- `autoBind` is deprecated in favor of `bindOnLogin`.

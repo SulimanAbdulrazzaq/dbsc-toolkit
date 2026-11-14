@@ -2,6 +2,36 @@
 
 Symptoms, diagnostic commands, fixes for the failures we have actually hit during real-world testing.
 
+## Start with the doctor
+
+```sh
+npx dbsc-toolkit doctor https://your-site.example
+npx dbsc-toolkit doctor https://your-site.example --cookie "<Cookie header from a signed-in browser>" --guard /api/some-guarded-route
+```
+
+It checks HTTPS, that the protocol routes answer, server clock skew, that the client SDK is served, and that `/dbsc/refresh` rejects a request without a session. With a signed-in browser's `Cookie` header (copy it from DevTools, Network, any request, Request Headers) it reports whether that session is bound, and with `--guard` it sends the cookie to the guarded route without a proof, the way a stolen cookie arrives. Anything but a `403` there fails the run.
+
+## Reading a 403
+
+Every rejection from `requireProof()`, `protect()` and the guards built on them is a `403` whose JSON body has a `code` and a `hint`:
+
+```json
+{ "error": "proof header missing", "code": "MISSING_PROOF", "hint": "The request has no X-Dbsc-Bound-Proof header, so ..." }
+```
+
+Set `DBSC_DEBUG=1` (or run with `NODE_ENV=development`) and the hint also comes back as an `X-Dbsc-Debug` response header, which the client SDK prints to the browser console. `DBSC_DEBUG=0` turns the header off in development.
+
+| `code` | What it usually means | Fix |
+|---|---|---|
+| `NO_BINDING` | The request has no active binding: signed out, the login never called `bind()` (or `bindOnLogin` never fired), or the browser hasn't registered yet. | Load the client on the pages users land on after sign-in; check the login response carries `Secure-Session-Registration`; for `bindOnLogin`, check the kit runs after your session middleware and `loginAt` is recent. |
+| `MISSING_PROOF` | The request carries the cookie but no `X-Dbsc-Bound-Proof` header. | The page didn't load the client, the path isn't in its `sign` list, or the call didn't use `fetch` (a plain form post or `<img>` can't be signed). |
+| `MALFORMED_PROOF` | The header didn't parse, or the server couldn't read the raw body. | Behind the Express and Fastify kits, bodies over `maxProofBodyBytes` (1 MiB) or without a `Content-Length` aren't captured; raise the limit or put a raw parser on the route. NestJS needs `{ rawBody: true }`. |
+| `SIGNATURE_INVALID` | Something changed the request after signing. | A proxy rewrote the path (check `basePath` / mount prefixes), a middleware re-serialized the body, or `signQuery` differs between client and server. A hint mentioning the timestamp means clock skew. |
+| `PROOF_REPLAY` | The same proof arrived twice. | See [below](#proof_replay-403-on-a-guarded-route-v28). |
+| `KEY_NOT_FOUND_BOUND` | The session has no polyfill key. | The client never finished registering (load it), or storage lost the key (`MemoryStorage` restart). The user signs in again. |
+| `SESSION_MISMATCH` | The binding belongs to a different login than the one on this request. | `expectSessionId` must return exactly the id passed to `bind()`. If it does, someone is pairing a stolen app cookie with their own binding. |
+| `REGISTRATION_WINDOW_CLOSED` | A polyfill key tried to register more than five minutes after the binding started. | The client loaded too late after login. Load it on the page right after sign-in; the user signs in again. |
+
 ## "tier always stays at none"
 
 The bound cookie is never being set, or it's being set but Chrome rejects it.
@@ -20,7 +50,9 @@ Open DevTools → Network → POST `/login`. Check the response:
 
 - Deploy to HTTPS (Render, Fly, Railway, Cloudflare Tunnel)
 - Use `local-ssl-proxy --source 3001 --target 3000`
-- Set `secure: false` in the middleware to switch to non-prefixed cookies (DBSC won't work but you can test the rest)
+- Run with `NODE_ENV=development` (which turns `secure` off by default) or pass `secure: false`, to use non-prefixed cookies. Native DBSC won't run over plain http, but the polyfill and everything else will.
+
+**`bindOnLogin` never fires.** The kit has to run after the middleware that puts the user on the request. On Express, call `install()` after your session middleware, or mount `dbsc.loginMiddleware()` after it. Also check that `loginAt` returns the sign-in time: a value older than five minutes means "too late to bind", and `null` means "unknown, skip".
 
 **Wrong header name.** Make sure you set both `Sec-Session-Registration` AND `Secure-Session-Registration`. The library reads both inbound; older Chrome builds may write under the legacy name.
 
@@ -253,10 +285,10 @@ client bug that re-sends the same signed proof.
 
 Common causes when it's not an attack:
 
-1. **Client retried after a network error.** `wrapFetch` signs once per
-   call — if the application logic retries the same request without
-   re-signing, the second attempt carries the original `ts` and `sig` and
-   gets rejected. Re-call `wrapFetch` on the retry.
+1. **Client retried after a network error.** The client signs once per
+   `fetch` call. Retry logic that replays the same `Request` with its
+   headers carries the original `ts` and `sig` and gets rejected. Issue a
+   new `fetch` for the retry so it is signed again.
 2. **A Service Worker cached a request.** Caches that intercept a guarded
    request can replay it; the proof header is bound to `(method, path,
    ts, body)` so a delayed replay always 403s. Mark guarded routes as
@@ -267,8 +299,8 @@ Common causes when it's not an attack:
 
 If you do *not* want the replay cache (e.g. legacy clients that legitimately
 retry without re-signing), pass `replayCache: new NoopReplayCache()` to
-`createDbsc` to disable it explicitly. The default `Noop` cache is the
-v2.6/v2.7 behavior — no replay check.
+`createDbsc` to disable it explicitly. Since 2.15 the default is an
+in-process `MemoryReplayCache`.
 
 ## `polyfill_missing` telemetry event firing (v2.8+)
 
@@ -279,10 +311,11 @@ reads `tier: "dbsc"` but every `requireProof()` call 403s with
 
 Causes:
 
-1. **Client SDK not loaded.** Confirm the page mounts `/dbsc-client/index.js`
-   and calls `initBoundDbsc()` on first load.
-2. **Co-registration failed silently.** Check the outcome promise from
-   `initBoundDbsc()` for `skipReason: "polyfill-co-registration-failed"`.
+1. **Client SDK not loaded.** Confirm the page loads `/dbsc-client/auto.js`
+   (or `clientScript()`, or calls `startDbsc()`). `npx dbsc-toolkit doctor`
+   tells you whether the SDK is served at all.
+2. **Co-registration failed silently.** Check `client.outcome` (or
+   `useDbsc().skipReason`) for `"polyfill-co-registration-failed"`.
 3. **A Chromium quota / sandbox issue.** Check the Application →
    IndexedDB → `dbsc-toolkit` database in DevTools. If empty, the key
    generation failed. `chrome://settings/clearBrowserData` for the origin

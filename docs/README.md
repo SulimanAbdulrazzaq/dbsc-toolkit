@@ -13,8 +13,8 @@ Server-side W3C Device Bound Session Credentials (DBSC) for Node.js. The on-site
 ## Integrate
 
 - [Framework Adapters](./adapters.md) — Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, raw `node:http`, and writing your own.
-- [Integration Recipes](./recipes.md) — copy-paste wiring for express-session, NextAuth (JWT), iron-session, Lucia, OAuth callbacks, multi-device, rate limiting.
-- [Per-Request Signing](./request-signing.md) — `wrapFetch()`, `requireProof()`, the body-hash proof, the replay cache, clock skew.
+- [Integration Recipes](./recipes.md) — copy-paste wiring for Passport, express-session, NextAuth (JWT), iron-session, Lucia, OAuth callbacks, bind-on-login, multi-device, rate limiting.
+- [Per-Request Signing](./request-signing.md) — `startDbsc()`, `protect()` / `requireProof()`, the body-hash proof, the replay cache, clock skew.
 - [Bound Polyfill](./polyfill.md) — the Web Crypto path for Firefox / Safari / older Chromium. Wire protocol, key storage, threat coverage.
 - [DPoP (RFC 9449)](./dpop.md) — optional bearer-token binding, alongside DBSC's cookie binding.
 
@@ -23,7 +23,7 @@ Server-side W3C Device Bound Session Credentials (DBSC) for Node.js. The on-site
 - [Storage](./storage.md) — memory, Redis, Postgres, and implementing `StorageAdapter` against any backend.
 - [Deployment](./deployment.md) — Railway, Fly, Render, Vercel, Cloudflare. HTTPS, reverse-proxy headers, monitoring.
 - [Telemetry](./telemetry.md) — typed event hooks, OpenTelemetry mapping, suggested metrics.
-- [Troubleshooting](./troubleshooting.md) — symptoms, diagnostic commands, fixes for the common failures.
+- [Troubleshooting](./troubleshooting.md) — `npx dbsc-toolkit doctor`, what every 403 `code` means, fixes for the common failures.
 
 ## Reference
 

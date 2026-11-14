@@ -79,50 +79,56 @@ npm install express ioredis              # Express + Redis
 npm install fastify @fastify/cookie pg   # Fastify + Postgres
 ```
 
-## Integration in 3 lines
+## Integration
 
-Drop into an existing Express app — no rewrite of your login or session store:
+Four calls on the server, one tag in the page. No rewrite of your login or session store:
 
 ```ts
-const dbsc = createDbsc({ storage });   // 1. configure once
-dbsc.install(app);                      // 2. mount protocol routes + SDK
-await dbsc.bind(res, sessionId, { userId });   // 3. bind, in your login route
+const dbsc = createDbsc({ storage, expectSessionId: (req) => req.sessionID }); // 1. configure once
+dbsc.install(app);                                   // 2. protocol routes, SDK, body capture
+await dbsc.bind(res, req.sessionID, { userId });     // 3. in your login route
+app.use(dbsc.protect(["/api/*"]));                   // 4. guard by path
 ```
 
-Then guard sensitive routes with `requireProof()`. The full picture:
+```html
+<script type="module" src="/dbsc-client/auto.js"></script>   <!-- or ${dbsc.clientScript()} -->
+```
+
+On express-session + Passport even step 3 goes away: `createDbsc({ storage, ...passportSession() })` binds on the first request after each login. Other auth libraries get the same through `bindOnLogin` ([recipes](./docs/recipes.md)).
 
 ## Quick start
 
 ```ts
 import express from "express";
-import { randomUUID } from "node:crypto";
+import session from "express-session";
 import { createDbsc } from "dbsc-toolkit/express";
 import { MemoryStorage } from "dbsc-toolkit/storage/memory";
 
 const app = express();
-app.use(express.json());
+app.use(session({ secret: process.env.SESSION_SECRET!, resave: false, saveUninitialized: false }));
 
-const dbsc = createDbsc({ storage: new MemoryStorage() });  // Redis/Postgres in prod
-dbsc.install(app);                                          // mounts protocol routes + SDK
+const dbsc = createDbsc({
+  storage: new MemoryStorage(),             // Redis/Postgres in prod
+  expectSessionId: (req) => req.sessionID,  // ties the device binding to this login
+});
+dbsc.install(app);                          // before your routes and body parsers
+app.use(express.json());                    // keeps working on guarded routes
 
 app.post("/login", async (req, res) => {
-  await dbsc.bind(res, randomUUID(), { userId: req.body.username });   // the one new line
+  const user = await checkPassword(req.body);
+  await dbsc.bind(res, req.sessionID, { userId: user.id });   // the one new line
   res.json({ ok: true });
 });
 
-app.post("/payment", express.raw({ type: "*/*" }), dbsc.requireProof(), payHandler);
+app.use(dbsc.protect(["/api/*"]));          // every /api/ route needs a bound device + proof
+app.post("/api/payment", payHandler);
 ```
 
-Load the polyfill in your HTML so non-Chromium browsers reach `tier: "bound"`:
+In the page, `dbsc.clientScript()` (or the tag above) registers the device key, refreshes it, and signs every same-origin `fetch()` under the protected paths. Bundled apps call `startDbsc()` from `dbsc-toolkit/client`; React apps call `useDbsc()` from `dbsc-toolkit/react`.
 
-```html
-<script type="module">
-  import { initBoundDbsc } from "/dbsc-client/index.js";
-  initBoundDbsc();
-</script>
-```
+Not sure it's wired right? `npx dbsc-toolkit doctor https://your-site` checks the deployment from outside, and with a signed-in cookie it replays that cookie without a proof to confirm the guard turns it away. Every `403` also explains itself: a `code` plus a plain-language `hint`, and an `X-Dbsc-Debug` header in development.
 
-Full walk-through, failure modes, and migration timeline: **[docs/quickstart.md](./docs/quickstart.md)** and **[docs/guide.md](./docs/guide.md)**.
+Full walk-through: **[docs/quickstart.md](./docs/quickstart.md)** · existing apps: **[docs/guide.md](./docs/guide.md)** · `npx dbsc-toolkit init` prints the setup for your framework.
 
 ### Any framework
 
@@ -224,7 +230,9 @@ app.get("/api/resource", requireDpop({ getBoundJkt }), handler);
 |---|---|
 | `dbsc-toolkit` | Core + adapters for Express, Fastify, Hono, Next.js, NestJS, Koa, SvelteKit, Electron & raw `node:http`; memory/Redis/Postgres storage |
 | `dbsc-toolkit/dpop` | Optional DPoP (RFC 9449) — bind bearer/access tokens to a device key |
-| `dbsc-toolkit/client` | Browser SDK + Web Crypto polyfill |
+| `dbsc-toolkit/client` | Browser SDK + Web Crypto polyfill (`startDbsc()`, or `/dbsc-client/auto.js`) |
+| `dbsc-toolkit/react` | `useDbsc()` hook |
+| `npx dbsc-toolkit` | `doctor` (check a live site) and `init` (print your setup) |
 | [`@dbsc-toolkit/better-auth`](./packages/better-auth/) | First-class [Better Auth](https://better-auth.com) plugin — binds every sign-in method automatically |
 
 ```ts
@@ -250,6 +258,7 @@ The wire protocol is documented as a language-neutral spec in [`spec/`](./spec/)
 - [x] Better Auth plugin
 - [x] NestJS, Koa, SvelteKit, Electron & generic `node:http` adapters
 - [x] DPoP (RFC 9449) for bearer-token binding
+- [x] One-tag client, path-based `protect()`, bind-on-login, `doctor` CLI, React hook
 - [ ] Bun / Deno native paths
 - [ ] Third-party security audit
 
@@ -261,6 +270,8 @@ The wire protocol is documented as a language-neutral spec in [`spec/`](./spec/)
 | `dbsc-toolkit/express` · `/fastify` · `/hono` · `/nextjs` · `/nestjs` · `/koa` · `/sveltekit` · `/electron` · `/node` | Framework adapters |
 | `dbsc-toolkit/dpop` | Optional DPoP (RFC 9449) verifier + `requireDpop` per adapter |
 | `dbsc-toolkit/client` | Browser SDK + polyfill |
+| `dbsc-toolkit/client/auto` | Side-effect import that calls `startDbsc()` |
+| `dbsc-toolkit/react` | `useDbsc()` hook |
 | `dbsc-toolkit/storage/{memory,redis,postgres}` | Storage adapters |
 
 ## Docs

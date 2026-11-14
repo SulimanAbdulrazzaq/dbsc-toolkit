@@ -122,7 +122,7 @@ The underlying encrypted blob still lives in the browser's profile directory on 
 
 ## When the SDK kicks in
 
-`initBoundDbsc()` runs once per page load:
+`startDbsc()` (and `/dbsc-client/auto.js`, which calls it) runs `initBoundDbsc()` once per page load, and again whenever a same-origin response starts a binding:
 
 1. `GET /dbsc-bound/state`.
 2. **`phase: "unbound"`** → clear any stale IndexedDB record, return. User isn't logged in.
@@ -144,13 +144,13 @@ type BoundDbscOutcome =
   | { phase: "error"; error: string };
 ```
 
-Consumers should await this instead of polling `/me` for the tier — that polling pattern races the SDK's internal probe window and produces misleading "no binding" UX even when the polyfill is succeeding. The outcome is deterministic: it resolves once and reflects the actual end state. See the live demo's `awaitBindingOutcome` for the exact pattern.
+With `startDbsc()`, the same value is `client.outcome`, `await client.ready`, the `dbsc:change` window event, or `useDbsc()` in React. Consumers should wait on it instead of polling `/me` for the tier — that polling pattern races the SDK's internal probe window and produces misleading "no binding" UX even when the polyfill is succeeding. The outcome is deterministic: it resolves once and reflects the actual end state. See the live demo's `awaitBindingOutcome` for the exact pattern.
 
 ## Closing the ride-along gap
 
 The bound tier signs *refresh* requests but not every individual request. Between refreshes, the cookie alone is the credential — a copy of it pasted into another browser will work as the legitimate user until the next refresh fails. Native DBSC has the same window in principle but Chromium enforces the cookie-to-key association browser-side, so the cookie naturally dies on a profile that has no DBSC state. The bound polyfill lives in JavaScript and has no equivalent enforcement.
 
-If you need same-time stolen-cookie protection on Firefox / Safari for specific sensitive routes (payment, admin, password change), v2.1.0 ships per-request signing as an opt-in feature: `wrapFetch()` on the client signs every outgoing request, `requireBoundProof()` on the server verifies. v2.3.0 adds opt-in body signing (`signBody: true`) so an MITM cannot substitute the request body within the timestamp window. Use it only where it matters — see [request-signing.md](./request-signing.md) for the full design, threat boundary, and integration recipe.
+Per-request signing closes it: the client signs each guarded request with the polyfill key (body included), and `requireProof()` / `protect()` on the server verify it. `startDbsc()` signs same-origin `fetch` calls automatically, so a stolen cookie fails on its first guarded request. See [request-signing.md](./request-signing.md) for the design and threat boundary.
 
 ## Clearing the key on logout (v2.3.0+)
 
@@ -161,40 +161,26 @@ await fetch("/logout", { method: "POST", credentials: "include" });
 await clearBoundKey();
 ```
 
-### Re-invoke after login
+### Logins that don't reload the page
 
-If your login flow doesn't reload the page (most SPA logins), the page-load `initBoundDbsc()` already ran while the user was unauthenticated, saw `phase: "unbound"`, and exited. To pick up the new registration cookies set by `bindSession`, call `initBoundDbsc()` again after a successful login:
-
-```js
-const r = await fetch("/login", { ... });
-if (r.ok && typeof window.initBoundDbsc === "function") {
-  window.initBoundDbsc();
-}
-```
-
-Expose the function on `window` from your module script so non-module code can reach it. Chrome doesn't need this — its native DBSC client reacts to the `Secure-Session-Registration` response header from `/login` directly — but Firefox and Safari do.
+Single-page apps that sign in with `fetch()` need nothing extra. The client watches same-origin responses; when one carries `Secure-Session-Registration` (what `bind()` sets on the login response), it runs registration again right away. If your login goes through something the interceptor can't see (an iframe, a popup that posts back), call `getDbscClient()?.restart()` after it completes.
 
 ## Mounting the SDK
 
-The SDK is a plain ES module. The simplest deployment is to serve the built artifact from `node_modules/dbsc-toolkit/dist/client/` and import it from your HTML:
-
-```js
-// In your Express setup
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-const require = createRequire(import.meta.url);
-const clientDir = join(dirname(require.resolve("dbsc-toolkit/package.json")), "dist", "client");
-app.use("/dbsc-client", express.static(clientDir));
-```
+The kits serve the built client at `/dbsc-client` (Express, Fastify, Koa, node). One tag loads it:
 
 ```html
-<script type="module">
-  import { initBoundDbsc } from "/dbsc-client/index.js";
-  initBoundDbsc();
-</script>
+<script type="module" src="/dbsc-client/auto.js"></script>
 ```
 
-The live demo at [examples/express/src/server.js](../examples/express/src/server.js) wires it exactly this way.
+`kit.clientScript()` builds that tag with the `sign` prefixes from `protect()`. Bundled apps import it instead:
+
+```js
+import { startDbsc } from "dbsc-toolkit/client";
+startDbsc();
+```
+
+On a server without a kit, serve `node_modules/dbsc-toolkit/dist/client/` at `/dbsc-client` yourself (Express: `express.static`).
 
 ## Configuration
 
@@ -210,7 +196,7 @@ initBoundDbsc({
 });
 ```
 
-Match these to whatever paths you passed into the server middleware. Default paths line up across both layers so the call usually takes no arguments.
+`startDbsc()` takes the same options plus `sign` and `signQuery`. Match the paths to whatever you passed into the server middleware. Default paths line up across both layers so the call usually takes no arguments.
 
 ## Disabling the polyfill (`bound: false`)
 
@@ -222,7 +208,7 @@ const dbsc = createDbsc({ storage, bound: false });
 
 What changes:
 
-- The three bound routes (`/dbsc-bound/challenge`, `/dbsc-bound/registration`, `/dbsc-bound/refresh`) are not mounted. The `/dbsc-bound/state` route still answers `{ phase: "unbound" }`, so a client that loaded `initBoundDbsc()` stands down cleanly instead of erroring.
+- The three bound routes (`/dbsc-bound/challenge`, `/dbsc-bound/registration`, `/dbsc-bound/refresh`) are not mounted. The `/dbsc-bound/state` route still answers `{ phase: "unbound" }`, so a page that loads the client stands down cleanly instead of erroring.
 - Non-Chromium browsers (Firefox, Safari, older Chromium) never bind. They stay at `tier: "none"`, and `requireProof()` 403s them. That is the point of native-only mode — you are choosing to support only hardware-backed binding.
 - Chromium sessions reach `tier: "dbsc"` exactly as before. But because no bound key is ever registered, there is nothing for the per-request proof to verify against. So `requireProof()` **auto-relaxes**: a native `dbsc` session passes without a per-request proof, relying on the refresh-cycle binding (the pre-v2.7 posture). You don't set anything extra — `bound: false` implies it. An explicit `allowDbscWithoutProof` still wins if you pass one.
 
