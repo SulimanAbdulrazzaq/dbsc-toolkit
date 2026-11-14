@@ -31,24 +31,36 @@ export function wrapFetch(opts: WrapFetchOptions = {}): typeof fetch {
     const rec = await getKeyRecord().catch(() => null);
     if (!rec) return base(input, init);
 
+    const req = typeof Request !== "undefined" && input instanceof Request ? input : null;
     const url = new URL(
       typeof input === "string" || input instanceof URL ? input.toString() : input.url,
       typeof window !== "undefined" ? window.location.href : "http://localhost",
     );
-    const method = (init.method ?? "GET").toUpperCase();
+    const method = (init.method ?? req?.method ?? "GET").toUpperCase();
     const offset = rec.clockOffsetMs ?? 0;
     const ts = Date.now() + offset;
+    // fetch(request, { headers }) replaces the Request's headers, so start from them.
+    const headers = new Headers(init.headers ?? req?.headers);
 
     let bodyHash = "";
     let finalBody: BodyInit | null | undefined = init.body;
     if (signBody) {
-      const bodyBytes = init.body === undefined || init.body === null
-        ? new Uint8Array(0)
-        : await readBodyBytes(init.body);
-      if (bodyBytes.byteLength > 0) {
-        finalBody = new Blob([bodyBytes as BlobPart]);
+      let encoded: EncodedBody;
+      if (init.body !== undefined && init.body !== null) {
+        encoded = await encodeBody(init.body);
+      } else if (req && req.body !== null) {
+        encoded = { bytes: new Uint8Array(await req.clone().arrayBuffer()), contentType: null };
+      } else {
+        encoded = { bytes: new Uint8Array(0), contentType: null };
       }
-      bodyHash = await sha256B64Url(bodyBytes);
+      if (encoded.bytes.byteLength > 0) {
+        // Send exactly the bytes that were hashed.
+        finalBody = encoded.bytes as BodyInit;
+        if (encoded.contentType && !headers.has("content-type")) {
+          headers.set("content-type", encoded.contentType);
+        }
+      }
+      bodyHash = await sha256B64Url(encoded.bytes);
     }
 
     const target = signQuery ? url.pathname + url.search : url.pathname;
@@ -63,36 +75,79 @@ export function wrapFetch(opts: WrapFetchOptions = {}): typeof fetch {
     );
     const sig = base64url(new Uint8Array(sigBytes));
 
-    const headers = new Headers(init.headers);
     const headerValue = signBody
       ? `ts=${ts};sig=${sig};bh=${bodyHash}`
       : `ts=${ts};sig=${sig}`;
     headers.set(headerName, headerValue);
 
     const nextInit: RequestInit = {
+      ...(req && signBody ? requestInitOf(req) : {}),
       ...init,
+      method,
       headers,
-      credentials: init.credentials ?? "include",
+      credentials: init.credentials ?? req?.credentials ?? "include",
     };
     if (finalBody !== undefined && finalBody !== null) {
       nextInit.body = finalBody as BodyInit;
     }
-    return base(input, nextInit);
+    // A signed Request is rebuilt from its URL so the hashed bytes are the body sent.
+    return base(req && signBody ? req.url : input, nextInit);
   }) as typeof fetch;
 }
 
-async function readBodyBytes(body: BodyInit): Promise<Uint8Array> {
-  if (body instanceof Uint8Array) return body;
-  if (body instanceof ArrayBuffer) return new Uint8Array(body);
-  if (typeof body === "string") return new TextEncoder().encode(body);
-  if (body instanceof Blob) return new Uint8Array(await body.arrayBuffer());
-  if (body instanceof FormData || body instanceof URLSearchParams) {
-    return new TextEncoder().encode(body.toString());
+/** The parts of a Request that survive rebuilding it from its URL. */
+function requestInitOf(req: Request): RequestInit {
+  return {
+    signal: req.signal,
+    mode: req.mode,
+    cache: req.cache,
+    redirect: req.redirect,
+    referrerPolicy: req.referrerPolicy,
+    integrity: req.integrity,
+    keepalive: req.keepalive,
+  };
+}
+
+interface EncodedBody {
+  bytes: Uint8Array;
+  /** The Content-Type fetch would have set for this body, when it sets one. */
+  contentType: string | null;
+}
+
+/**
+ * Turns a fetch body into the exact bytes and Content-Type the browser would
+ * send. FormData goes through Response so the multipart boundary in the
+ * header matches the bytes that were hashed.
+ */
+async function encodeBody(body: BodyInit): Promise<EncodedBody> {
+  if (typeof body === "string") {
+    return { bytes: new TextEncoder().encode(body), contentType: "text/plain;charset=UTF-8" };
   }
-  if (body instanceof ReadableStream) {
+  if (body instanceof Uint8Array) return { bytes: body, contentType: null };
+  if (body instanceof ArrayBuffer) return { bytes: new Uint8Array(body), contentType: null };
+  if (ArrayBuffer.isView(body)) {
+    return { bytes: new Uint8Array(body.buffer, body.byteOffset, body.byteLength), contentType: null };
+  }
+  if (body instanceof URLSearchParams) {
+    return {
+      bytes: new TextEncoder().encode(body.toString()),
+      contentType: "application/x-www-form-urlencoded;charset=UTF-8",
+    };
+  }
+  if (body instanceof Blob) {
+    return { bytes: new Uint8Array(await body.arrayBuffer()), contentType: body.type || null };
+  }
+  if (typeof ReadableStream !== "undefined" && body instanceof ReadableStream) {
     throw new Error("wrapFetch with signBody: ReadableStream body is not supported");
   }
-  return new TextEncoder().encode(String(body));
+  if (typeof FormData !== "undefined" && body instanceof FormData) {
+    const res = new Response(body);
+    return {
+      bytes: new Uint8Array(await res.arrayBuffer()),
+      contentType: res.headers.get("content-type"),
+    };
+  }
+  return { bytes: new TextEncoder().encode(String(body)), contentType: "text/plain;charset=UTF-8" };
 }
 
 async function sha256B64Url(bytes: Uint8Array): Promise<string> {
