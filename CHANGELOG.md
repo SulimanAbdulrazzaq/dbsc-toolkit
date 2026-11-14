@@ -2,6 +2,14 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/).
 
+## [2.15.2] — 2026-11-14
+
+A security release for apps that use the `autoBind` option. Apps that bind only with `bind()` / `bindSession()` in their login route are not affected.
+
+### Security
+
+- **`autoBind` could restart a binding.** The middleware called `autoBind` on any request without DBSC cookies and, when it returned a session, started a new binding for it, which deletes that session's device keys. Anyone holding only the app's session cookie could send it without the DBSC cookies, reset the victim's binding, and register a key of their own. `autoBind` now starts a binding only for a session id that has no DBSC session yet; an existing binding is never restarted. A DBSC session expires after `sessionTtl` (24 h by default), so keep that at least as long as your app sessions live. Found in an internal review.
+
 ## [2.15.1] — 2026-11-13
 
 ### Fixed
