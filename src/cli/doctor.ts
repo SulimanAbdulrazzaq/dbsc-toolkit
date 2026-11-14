@@ -13,21 +13,34 @@ export interface DoctorOptions {
   guard?: string;
   /** Path the client SDK is served from. Default "/dbsc-client". */
   clientPath?: string;
+  /** Per-request timeout in ms. Default 30 s, enough for a cold-starting free-tier host. */
+  timeoutMs?: number;
   fetch?: typeof fetch;
 }
 
 const SKEW_WARN_MS = 60_000;
-const TIMEOUT_MS = 10_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 function isLocal(url: URL): boolean {
   return ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) || url.hostname.endsWith(".localhost");
 }
 
-async function get(f: typeof fetch, url: string, init: RequestInit = {}): Promise<Response | Error> {
+/** Turns a fetch failure into a message that says what actually went wrong. */
+export function describeFetchError(err: unknown, timeoutMs: number): Error {
+  if (!(err instanceof Error)) return new Error(String(err));
+  if (err.name === "TimeoutError" || err.name === "AbortError") {
+    return new Error(`no response within ${Math.round(timeoutMs / 1000)}s (a cold-starting host can take longer; raise --timeout)`);
+  }
+  const cause = (err as { cause?: { code?: string; message?: string } }).cause;
+  const detail = cause?.code ?? cause?.message;
+  return new Error(detail ? `${err.message} (${detail})` : err.message);
+}
+
+async function get(f: typeof fetch, timeoutMs: number, url: string, init: RequestInit = {}): Promise<Response | Error> {
   try {
-    return await f(url, { redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS), ...init });
+    return await f(url, { redirect: "manual", signal: AbortSignal.timeout(timeoutMs), ...init });
   } catch (err) {
-    return err instanceof Error ? err : new Error(String(err));
+    return describeFetchError(err, timeoutMs);
   }
 }
 
@@ -48,6 +61,7 @@ async function readJson(res: Response): Promise<Record<string, unknown> | null> 
  */
 export async function runDoctor(target: string, opts: DoctorOptions = {}): Promise<CheckResult[]> {
   const f = opts.fetch ?? fetch;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const results: CheckResult[] = [];
   let base: URL;
   try {
@@ -74,7 +88,7 @@ export async function runDoctor(target: string, opts: DoctorOptions = {}): Promi
     });
   }
 
-  const state = await get(f, at("/dbsc-bound/state"), { headers: cookieHeaders });
+  const state = await get(f, timeoutMs, at("/dbsc-bound/state"), { headers: cookieHeaders });
   if (state instanceof Error) {
     results.push({ status: "fail", title: "Protocol routes", detail: `could not reach ${at("/dbsc-bound/state")}: ${state.message}` });
     return results;
@@ -101,7 +115,7 @@ export async function runDoctor(target: string, opts: DoctorOptions = {}): Promi
   }
 
   const clientPath = (opts.clientPath ?? "/dbsc-client").replace(/\/$/, "");
-  const sdk = await get(f, at(`${clientPath}/auto.js`));
+  const sdk = await get(f, timeoutMs, at(`${clientPath}/auto.js`));
   const sdkType = sdk instanceof Error ? "" : (sdk.headers.get("content-type") ?? "");
   if (!(sdk instanceof Error) && sdk.ok && /javascript/.test(sdkType)) {
     results.push({ status: "ok", title: "Client SDK", detail: `${clientPath}/auto.js is served` });
@@ -113,7 +127,7 @@ export async function runDoctor(target: string, opts: DoctorOptions = {}): Promi
     });
   }
 
-  const refresh = await get(f, at("/dbsc/refresh"), { method: "POST" });
+  const refresh = await get(f, timeoutMs, at("/dbsc/refresh"), { method: "POST" });
   if (!(refresh instanceof Error) && refresh.status >= 400 && refresh.status < 500) {
     results.push({ status: "ok", title: "Refresh route", detail: `POST /dbsc/refresh without a session answers ${refresh.status}` });
   } else {
@@ -141,9 +155,15 @@ export async function runDoctor(target: string, opts: DoctorOptions = {}): Promi
     if (!opts.cookie) {
       results.push({ status: "warn", title: "Stolen-cookie replay", detail: "--guard needs --cookie from a signed-in browser" });
     } else {
-      const replay = await get(f, at(opts.guard), { headers: cookieHeaders });
+      const replay = await get(f, timeoutMs, at(opts.guard), { headers: cookieHeaders });
       if (replay instanceof Error) {
         results.push({ status: "fail", title: "Stolen-cookie replay", detail: replay.message });
+      } else if (replay.status === 401) {
+        results.push({
+          status: "warn",
+          title: "Stolen-cookie replay",
+          detail: `${opts.guard} answered 401: the app's own login check ran first and rejected the cookie. Pass the app's session cookie in --cookie too, so the request reaches the DBSC guard.`,
+        });
       } else if (replay.status === 403) {
         const body = await readJson(replay);
         results.push({

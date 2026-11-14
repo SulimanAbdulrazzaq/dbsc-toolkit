@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import express from "express";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { runDoctor } from "./doctor.js";
+import { runDoctor, describeFetchError } from "./doctor.js";
 import { detectFramework, detectStorage, snippet, usesPassport } from "./init.js";
 import { createDbsc } from "../express/index.js";
 import { MemoryStorage } from "../storage/memory/index.js";
@@ -44,6 +44,26 @@ describe("doctor", () => {
     expect(local.find((r) => r.title === "Protocol routes")?.status).toBe("fail");
     const remote = await runDoctor("http://example.invalid", { fetch: (async () => { throw new Error("offline"); }) as typeof fetch });
     expect(remote.find((r) => r.title === "HTTPS")?.status).toBe("fail");
+  });
+});
+
+describe("doctor errors", () => {
+  it("names the cause of a failed request and explains timeouts", () => {
+    const refused = Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+    expect(describeFetchError(refused, 30_000).message).toBe("fetch failed (ECONNREFUSED)");
+    const timeout = Object.assign(new Error("timed out"), { name: "TimeoutError" });
+    expect(describeFetchError(timeout, 30_000).message).toMatch(/30s.*--timeout/);
+  });
+
+  it("warns instead of failing when the app's own login check answers 401", async () => {
+    const app = express();
+    const kit = createDbsc({ storage: new MemoryStorage(), secure: false });
+    kit.install(app);
+    app.get("/api/me", (_req, res) => res.status(401).json({ error: "not logged in" }));
+    const srv = await serve(app);
+    const results = await runDoctor(srv.base, { cookie: "x=1", guard: "/api/me" });
+    srv.close();
+    expect(results.find((r) => r.title === "Stolen-cookie replay")?.status).toBe("warn");
   });
 });
 

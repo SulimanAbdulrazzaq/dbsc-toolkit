@@ -9,7 +9,7 @@ npx dbsc-toolkit doctor https://your-site.example
 npx dbsc-toolkit doctor https://your-site.example --cookie "<Cookie header from a signed-in browser>" --guard /api/some-guarded-route
 ```
 
-It checks HTTPS, that the protocol routes answer, server clock skew, that the client SDK is served, and that `/dbsc/refresh` rejects a request without a session. With a signed-in browser's `Cookie` header (copy it from DevTools, Network, any request, Request Headers) it reports whether that session is bound, and with `--guard` it sends the cookie to the guarded route without a proof, the way a stolen cookie arrives. Anything but a `403` there fails the run.
+It checks HTTPS, that the protocol routes answer, server clock skew, that the client SDK is served, and that `/dbsc/refresh` rejects a request without a session. With a signed-in browser's `Cookie` header (copy it from DevTools, Network, any request, Request Headers) it reports whether that session is bound, and with `--guard` it sends the cookie to the guarded route without a proof, the way a stolen cookie arrives. Anything but a `403` there fails the run; a `401` means your app's own login check ran first, so include the app's session cookie in `--cookie`. On hosts that sleep when idle (Render free tier) the first request can take 20 seconds or more; `--timeout 60` gives it room. In Git Bash on Windows, prefix the command with `MSYS_NO_PATHCONV=1`, or the shell rewrites `--guard /path` into a Windows path.
 
 ## Reading a 403
 

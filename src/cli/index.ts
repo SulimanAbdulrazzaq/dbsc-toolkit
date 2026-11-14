@@ -8,10 +8,11 @@ import { detectFramework, detectStorage, snippet, usesPassport, type Framework }
 const USAGE = `dbsc-toolkit <command>
 
 Commands:
-  doctor <url> [--cookie "<Cookie header>"] [--guard /api/route]
+  doctor <url> [--cookie "<Cookie header>"] [--guard /api/route] [--timeout <seconds>]
       Check a running site: HTTPS, protocol routes, clock skew, the client
       SDK. With a signed-in browser's Cookie header and a guarded route, also
-      checks that the cookie alone (no proof) is turned away.
+      checks that the cookie alone (no proof) is turned away. --timeout
+      (default 30) is per request; raise it for hosts that sleep when idle.
 
   init [--framework express|fastify|hono|koa|nextjs|sveltekit|nestjs|node|better-auth]
        [--write <file>]
@@ -29,6 +30,7 @@ async function doctor(args: string[]): Promise<number> {
       cookie: { type: "string" },
       guard: { type: "string" },
       "client-path": { type: "string" },
+      timeout: { type: "string" },
     },
   });
   const url = positionals[0];
@@ -36,7 +38,19 @@ async function doctor(args: string[]): Promise<number> {
     process.stderr.write(USAGE);
     return 2;
   }
+  if (values.guard !== undefined && !values.guard.startsWith("/")) {
+    process.stderr.write(
+      `--guard must be a path starting with "/", got "${values.guard}". Git Bash on Windows rewrites a leading "/" into a Windows path; run with MSYS_NO_PATHCONV=1 or write the path as //api/route.\n`,
+    );
+    return 2;
+  }
+  const timeoutSec = values.timeout === undefined ? undefined : Number(values.timeout);
+  if (timeoutSec !== undefined && !(timeoutSec > 0)) {
+    process.stderr.write("--timeout must be a positive number of seconds\n");
+    return 2;
+  }
   const results = await runDoctor(url, {
+    ...(timeoutSec !== undefined && { timeoutMs: timeoutSec * 1000 }),
     ...(values.cookie !== undefined && { cookie: values.cookie }),
     ...(values.guard !== undefined && { guard: values.guard }),
     ...(values["client-path"] !== undefined && { clientPath: values["client-path"] }),

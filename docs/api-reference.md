@@ -1031,11 +1031,11 @@ Calls `startDbsc(options)` on first subscribe (options apply to the first call p
 ## CLI
 
 ```sh
-npx dbsc-toolkit doctor <url> [--cookie "<Cookie header>"] [--guard /path] [--client-path /dbsc-client]
+npx dbsc-toolkit doctor <url> [--cookie "<Cookie header>"] [--guard /path] [--client-path /dbsc-client] [--timeout 30]
 npx dbsc-toolkit init [--framework express|fastify|hono|koa|nextjs|sveltekit|nestjs|node|better-auth] [--write <file>]
 ```
 
-`doctor` checks HTTPS, `GET /dbsc-bound/state`, server clock skew (`X-Server-Time`), the client SDK, and `POST /dbsc/refresh` without a session. With `--cookie` it reports the session's state; with `--cookie` and `--guard` it requests the guarded path with the cookie and no proof and fails unless the answer is `403`. Exit code 1 on any failure.
+`doctor` checks HTTPS, `GET /dbsc-bound/state`, server clock skew (`X-Server-Time`), the client SDK, and `POST /dbsc/refresh` without a session. With `--cookie` it reports the session's state; with `--cookie` and `--guard` it requests the guarded path with the cookie and no proof and fails unless the answer is `403` (a `401` from the app's own login check is a warning: add the app's session cookie to `--cookie`). `--timeout` is per request, in seconds, default 30. A failed request reports its cause (`ECONNREFUSED`, a timeout, ...). Exit code 1 on any failure, 2 on bad arguments. In Git Bash on Windows, set `MSYS_NO_PATHCONV=1` (or write `//api/route`), or the shell turns `--guard /api/route` into a Windows path.
 
 `init` picks the framework and storage from `package.json` (Better Auth first, then Next.js, SvelteKit, NestJS, Fastify, Hono, Koa, Express, plain node; `ioredis` then `pg` then memory; the Passport preset when `passport` and `express-session` are both present) and prints the setup. `--write` saves it to a new file and refuses to overwrite.
 
