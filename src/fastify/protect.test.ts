@@ -1,7 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { createDbsc } from "./index.js";
 import { MemoryStorage } from "../storage/memory/index.js";
+
+// Fastify loads most of its internals on the first ready(). Pay that once
+// here so it doesn't count against the first test's 5s timeout.
+beforeAll(async () => {
+  const app = Fastify();
+  await app.register((await import("@fastify/cookie")).default);
+  await app.ready();
+  await app.inject({ url: "/" });
+  await app.close();
+}, 30_000);
 
 describe("fastify protect() and bindOnLogin", () => {
   it("guards matching paths only", async () => {

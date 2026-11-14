@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import Koa from "koa";
@@ -8,6 +8,16 @@ import { createDbsc as createKoaDbsc } from "../koa/index.js";
 import { createDbsc as createFastifyDbsc } from "../fastify/index.js";
 import { readClientAsset } from "./client-assets.js";
 import { MemoryStorage } from "../storage/memory/index.js";
+
+// Fastify loads most of its internals on the first ready(). Pay that once
+// here so it doesn't count against the first test's 5s timeout.
+beforeAll(async () => {
+  const app = Fastify();
+  await app.register((await import("@fastify/cookie")).default);
+  await app.ready();
+  await app.inject({ url: "/" });
+  await app.close();
+}, 30_000);
 
 // Run from src/, the SDK directory holds .ts files; index.test.ts stands in
 // for a real .js asset name in the traversal checks below.

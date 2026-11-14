@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
@@ -13,6 +13,16 @@ import { dbsc as nodeDbsc } from "../../node/index.js";
 import { createDbscMiddleware } from "../../nextjs/index.js";
 import { autoBindAllowed } from "./start-binding.js";
 import { MemoryStorage } from "../../storage/memory/index.js";
+
+// Fastify loads most of its internals on the first ready(). Pay that once
+// here so it doesn't count against the first test's 5s timeout.
+beforeAll(async () => {
+  const app = Fastify();
+  await app.register((await import("@fastify/cookie")).default);
+  await app.ready();
+  await app.inject({ url: "/" });
+  await app.close();
+}, 30_000);
 
 // The app identifies the user from its own cookie ("app"); autoBind maps it
 // to the DBSC session id. A thief holding that cookie sends it without any

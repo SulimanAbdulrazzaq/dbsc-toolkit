@@ -1,9 +1,19 @@
-import { describe, it, expect } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import fastifyCookie from "@fastify/cookie";
 import { createHash } from "node:crypto";
 import { dbsc, bindSession, requireBoundProof, requireProof, createDbsc } from "./index.js";
 import { MemoryStorage } from "../core/testing/memory-storage-stub.js";
+
+// Fastify loads most of its internals on the first ready(). Pay that once
+// here so it doesn't count against the first test's 5s timeout.
+beforeAll(async () => {
+  const app = Fastify();
+  await app.register((await import("@fastify/cookie")).default);
+  await app.ready();
+  await app.inject({ url: "/" });
+  await app.close();
+}, 30_000);
 
 async function startServer(register: (app: FastifyInstance, storage: MemoryStorage) => void) {
   const storage = new MemoryStorage();
