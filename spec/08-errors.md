@@ -9,11 +9,14 @@ strict (02): missing or invalid proof is **403**, never 401.
 
 | Situation | HTTP status |
 |---|---|
+| Native refresh for a session the server does not know (unknown, expired, revoked) | **401**, no challenge (02 step 0) |
 | Native refresh, no proof yet (first leg) | **403** + `Secure-Session-Challenge` |
 | Native refresh/registration, proof invalid | the route still answers **403** so Chromium re-challenges; the verify failure also demotes the session to `none` |
 | Bound challenge, no session | 403 |
 | Bound registration, missing cookie or body | 400 |
+| Bound registration rejected (bad signature, window closed, key already registered) | 400 |
 | Per-request proof missing/invalid on a guarded route | 403 |
+| Guarded route, binding belongs to another login | 403 (`SESSION_MISMATCH`) |
 | DPoP proof missing/invalid on a guarded route (10) | **401** + `WWW-Authenticate: DPoP error="invalid_dpop_proof"` |
 | Rate limit tripped | 429 |
 | Registration/refresh success | 200 + JSON |
@@ -39,10 +42,12 @@ the session dies.
 | `KEY_NOT_FOUND` | Legacy, kind-agnostic key-missing code; retained for back-compat, superseded by the two above | — |
 | `SESSION_NOT_FOUND` | An operation referenced a session that does not exist | general |
 | `SESSION_ALREADY_REGISTERED` | A registration tried to add a key of a kind the session already has | 02, 03 |
+| `REGISTRATION_WINDOW_CLOSED` | A bound key tried to register after the registration window (default 5 minutes from the binding's start) | 03 |
 | `RATE_LIMITED` | The unauthenticated registration/refresh surface tripped a rate limit | 03 |
 | `MISSING_PROOF` | A guarded route received no `X-Dbsc-Bound-Proof` header | 04 |
 | `MALFORMED_PROOF` | The proof header violated a parse rule, or carried `bh` without body signing, or omitted `bh` with it | 04 |
-| `PROOF_REPLAY` | A per-request proof's `(sessionId, ts, sig)` tuple was seen before | 04 |
+| `PROOF_REPLAY` | A per-request proof's `(sessionId, ts, r)` tuple was seen before (`r` is the first half of the ECDSA signature, so a re-encoded signature is still a replay) | 04 |
+| `SESSION_MISMATCH` | The DBSC session on a guarded request is not the one the application bound for the authenticated user | 04 |
 
 ### DPoP codes (optional layer, 10)
 

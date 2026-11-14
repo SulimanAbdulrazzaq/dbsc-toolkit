@@ -84,6 +84,19 @@ Samples (both with and without body): [`vectors/per-request-proof.json`](./vecto
 The body-hash binding (step 5) stops an active attacker who captured one valid
 proof from reusing it on a modified body within the timestamp window.
 
+## Binding to the application's login
+
+A valid proof shows the request came from the device bound to the DBSC session
+named by the request's cookie. It does not show that this DBSC session belongs
+to the user the application authenticated from its own cookie or token. An
+attacker with an account can send a victim's stolen application cookie next to
+their own DBSC cookie and their own proof.
+
+A server that identifies users by a separate credential MUST therefore check,
+before step 1, that the DBSC session on the request is the one it bound for the
+authenticated login (same session id, or same user id), and reject a mismatch
+or an unauthenticated request with `SESSION_MISMATCH` (403).
+
 ## Replay defense (optional)
 
 The window in step 3 still allows an attacker who captured one valid proof to
