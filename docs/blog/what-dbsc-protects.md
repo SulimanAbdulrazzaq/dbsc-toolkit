@@ -24,12 +24,12 @@ This is the part that matters most and gets glossed over. DBSC binding comes in 
 |---|---|---|
 | Remote cookie theft + replay | Stopped | Stopped |
 | MFA bypass via stolen cookie | Stopped | Stopped |
-| Infostealer reading the browser profile on disk | Stopped (key is in hardware) | **Not stopped** (encrypted blob on disk is recoverable) |
+| Infostealer reading the browser profile on disk | Stopped (key is in hardware) | **Not stopped** (the key sits in the profile in software and is recoverable) |
 | Malware running inside the browser process | Not stopped | Not stopped |
 
 The native tier (`dbsc`) puts the private key inside a TPM or Secure Enclave. No software on the machine — including malware running as the user — can read it. That's the strong form, and it's Chromium on supported hardware: Windows from Chrome 145 (TPM), Apple Silicon macOS from Chrome 147 (Secure Enclave).
 
-The `bound` tier is a polyfill for everyone else (Firefox, Safari, older Chromium). It uses a non-extractable Web Crypto key in IndexedDB. The JavaScript API genuinely can't export that key — so XSS can't steal it, which is why remote theft is still defeated. But the encrypted key blob does sit in the browser profile directory on disk. Infostealer malware running with the victim's privileges can read that directory and, depending on the OS keystore, decrypt it. So the polyfill defends against *remote* theft but not against *on-device* malware with disk access.
+The `bound` tier is a polyfill for everyone else (Firefox, Safari, older Chromium). It uses a non-extractable Web Crypto key in IndexedDB. The JavaScript API genuinely can't export that key — so XSS can't steal it, which is why remote theft is still defeated. But `extractable: false` restricts the JavaScript API, not the file: the browser still writes the key material into the profile directory on disk, in software. Infostealer malware running with the victim's privileges can copy that directory and take the key with it. So the polyfill defends against *remote* theft but not against *on-device* malware with disk access.
 
 If you treat `bound` as if it were `dbsc`, you've overstated your protection to the one audience (security reviewers) who will check. Be precise: `bound` defeats remote cookie theft; only `dbsc` additionally defeats local infostealers.
 

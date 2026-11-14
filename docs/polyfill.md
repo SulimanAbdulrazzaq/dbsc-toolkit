@@ -13,7 +13,7 @@ Sessions bound via the polyfill carry `tier: "bound"`. They share storage, cooki
 | Network capture / TLS-stripping proxy | Defeated | Defeated |
 | Server log leak that captured the cookie | Defeated | Defeated |
 | Cookie pasted into a different browser on a different machine | Defeated within one refresh cycle | Defeated within one refresh cycle |
-| Infostealer malware reading the browser profile directory | Defeated (key never leaves TPM / Secure Enclave) | **Vulnerable**. The encrypted key blob is on disk; the OS keystore protects it but malware running as the victim can usually decrypt |
+| Infostealer malware reading the browser profile directory | Defeated (key never leaves TPM / Secure Enclave) | **Vulnerable**. The key is stored in software in the profile directory, so a copied profile carries it ([details](#where-the-key-lives-on-the-client)) |
 | Malware running inside the browser process (rogue extension, browser RCE) | Vulnerable | Vulnerable |
 
 The single row that matters: infostealer malware. For every realistic cookie-theft attack, the normal guard — `requireProof()`, which works on every browser — is sufficient. The **one exception** is infostealer malware: if your threat model specifically includes RedLine / Vidar / similar credential stealers, a route can additionally require `tier === "dbsc"`. That deliberately excludes Firefox and Safari (they can only reach `tier: "bound"`), so use it only on the rare route that genuinely needs hardware-key isolation — not as the default.
@@ -118,7 +118,7 @@ indexedDB.open("dbsc-toolkit") → objectStore("bound") → key "key-record"
 
 The `CryptoKeyPair` is generated with `crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"])`. The `false` is the critical bit. `extractable: false` means even with full XSS, no JavaScript can call `crypto.subtle.exportKey()` to get the private bytes out. The key is usable for `sign()` but not exportable.
 
-The underlying encrypted blob still lives in the browser's profile directory on disk. The browser keystore wraps it, but malware running as the victim can usually decrypt. That's the threat boundary native DBSC raises and the bound polyfill doesn't.
+`extractable: false` is a rule of the JavaScript API, not of storage. To survive a restart the browser has to write the private key into the profile directory, and it does that in software. Firefox serializes it as PKCS#8 inside the IndexedDB record whether or not the key is extractable. Chromium writes the key bytes into its IndexedDB store with `extractable` kept as a flag beside them. Safari wraps the stored key with a master key, but that master key is kept on the same machine. So malware running as the victim can copy the profile and take the key with it. That's the threat boundary native DBSC raises and the bound polyfill doesn't.
 
 ## When the SDK kicks in
 

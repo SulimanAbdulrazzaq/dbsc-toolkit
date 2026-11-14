@@ -74,7 +74,7 @@ JWKs (public keys) appear in logs.
 Mitigation: The library does not log JWKs or challenge values. The `onEvent` handler receives only session IDs, tiers, and error codes.
 
 **I2: Key material exfiltration from the browser profile (bound tier only)**
-The bound polyfill stores a non-extractable ECDSA private key in IndexedDB. The JavaScript API cannot export it, but the encrypted key blob lives on disk in the browser profile directory. Infostealer malware running as the victim can read the profile directory and (depending on the OS keystore protections) decrypt it.
+The bound polyfill stores a non-extractable ECDSA private key in IndexedDB. The JavaScript API cannot export it, but the browser writes the key material into the profile directory in software. Firefox and Chromium serialize it into the IndexedDB store with no hardware protection; Safari wraps it with a master key kept on the same machine. Infostealer malware running as the victim can copy the profile directory and take the key with it.
 
 Mitigation: The normal guard is `requireProof()` (works on every browser). For the rare route that must additionally defeat *on-device infostealer malware*, require `tier === "dbsc"` on top — native DBSC keeps the private key inside TPM (Windows) or Secure Enclave (macOS) where no on-device attacker can read it. This deliberately excludes Firefox and Safari (they reach only `tier: "bound"`), so it is an exception for hardware-isolation-critical routes, not general routing advice. The `bound` tier is honest about defending against remote cookie theft only.
 
@@ -108,7 +108,7 @@ Mitigation: Documentation distinguishes the two tiers explicitly. The route guar
 |--------|-----------------|-------------------------------|
 | Remote cookie theft + replay | Mitigated | Mitigated |
 | MFA bypass via stolen cookies | Mitigated | Mitigated |
-| Infostealer malware reading the browser profile | Mitigated (key in TPM / Secure Enclave) | **Not mitigated** — encrypted blob in IndexedDB, recoverable by attacker with disk access |
+| Infostealer malware reading the browser profile | Mitigated (key in TPM / Secure Enclave) | **Not mitigated** — key stored in software in the browser profile, recoverable by an attacker with disk access |
 | Malware running inside the browser process | Not mitigated | Not mitigated |
 | Key exfiltration | Mitigated (hardware key store) | Mitigated (platform) | N/A |
 

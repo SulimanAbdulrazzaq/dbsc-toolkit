@@ -32,7 +32,7 @@ It does **not** protect against:
 
 ## Tier-specific guarantees
 
-The `bound` tier (Firefox, Safari, mobile, older Chromium) defeats remote cookie theft — XSS, network capture, log leaks, paste-into-other-browser. It does **not** defeat infostealer malware reading the browser profile directory. The IndexedDB-stored key is `extractable: false` so JavaScript cannot export it, but the encrypted blob still lives on disk and a sufficiently privileged on-device attacker can reach it.
+The `bound` tier (Firefox, Safari, mobile, older Chromium) defeats remote cookie theft — XSS, network capture, log leaks, paste-into-other-browser. It does **not** defeat infostealer malware reading the browser profile directory. The IndexedDB-stored key is `extractable: false` so JavaScript cannot export it, but the browser stores the key material in software in the profile directory, and an on-device attacker running as the user can reach it.
 
 Native DBSC (`tier: "dbsc"`) keeps the private key inside the TPM or Secure Enclave. Software running on the device — including code with admin access — cannot extract it. This is the one threat the polyfill does not match.
 
