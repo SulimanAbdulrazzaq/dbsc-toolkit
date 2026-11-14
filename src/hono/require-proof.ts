@@ -5,8 +5,9 @@ import {
   SESSION_MISMATCH_MESSAGE,
   ErrorCodes,
   type RequireProofOptions,
+  NO_BINDING,
 } from "../core/index.js";
-import { requireBoundProof } from "./proof.js";
+import { requireBoundProof, rejection } from "./proof.js";
 import { DBSC_INTERNAL, type DbscInternal } from "./index.js";
 
 /**
@@ -24,15 +25,12 @@ export function requireProof(opts: RequireProofOptions<Context> = {}): Middlewar
     const tier = dbsc?.tier ?? "none";
     const skipped = dbsc?.skipped ?? [];
     if (tier === "none") {
-      return c.json(
-        {
-          error: "device-bound session required",
-          currentTier: "none",
-          reason: noBindingReason(skipped),
-          skipped,
-        },
-        403,
-      );
+      return rejection(c, NO_BINDING, {
+        error: "device-bound session required",
+        currentTier: "none",
+        reason: noBindingReason(skipped),
+        skipped,
+      });
     }
     const internal = (dbsc as unknown as Record<PropertyKey, unknown> | undefined)?.[
       DBSC_INTERNAL
@@ -48,7 +46,7 @@ export function requireProof(opts: RequireProofOptions<Context> = {}): Middlewar
       );
     }
     if (!(await sessionBindingMatches(opts, c, dbsc!.sessionId!, storage))) {
-      return c.json({ error: SESSION_MISMATCH_MESSAGE, code: ErrorCodes.SESSION_MISMATCH }, 403);
+      return rejection(c, ErrorCodes.SESSION_MISMATCH, { error: SESSION_MISMATCH_MESSAGE });
     }
     // bound polyfill off → no bound key exists → auto-relax the dbsc tier.
     // Resolved per request — boundEnabled can differ between requests (e.g. two

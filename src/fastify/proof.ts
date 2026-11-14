@@ -7,8 +7,23 @@ import {
   type StorageAdapter,
   type ProofReplayCache,
   proofTarget,
+  describeRejection,
+  DEBUG_HEADER,
+  NO_BINDING,
 } from "../core/index.js";
 import { capturedProofBody } from "./capture-body.js";
+
+/** Sends a 403 with the error code, a plain-language hint and, when debugging, X-Dbsc-Debug. */
+export function sendRejection(
+  reply: FastifyReply,
+  code: string,
+  body: Record<string, unknown>,
+  message?: string,
+): void {
+  const { hint, debugHeader } = describeRejection(code, message);
+  if (debugHeader) reply.header(DEBUG_HEADER, debugHeader);
+  reply.status(403).send({ ...body, code, ...(hint !== undefined && { hint }) });
+}
 
 export interface RequireBoundProofOptions {
   storage: StorageAdapter;
@@ -39,7 +54,7 @@ export function requireBoundProof(opts: RequireBoundProofOptions): preHandlerAsy
   return async function preHandler(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const dbsc = req.dbsc;
     if (!dbsc?.sessionId || dbsc.tier === "none") {
-      reply.status(403).send({ error: "no active binding", tier: dbsc?.tier ?? "none" });
+      sendRejection(reply, NO_BINDING, { error: "no active binding", tier: dbsc?.tier ?? "none" });
       return;
     }
     if (dbsc.tier === "dbsc" && allowDbsc) return;
@@ -69,7 +84,7 @@ export function requireBoundProof(opts: RequireBoundProofOptions): preHandlerAsy
       );
     } catch (err) {
       if (err instanceof DbscVerificationError) {
-        reply.status(403).send({ error: err.message, code: err.code });
+        sendRejection(reply, err.code, { error: err.message }, err.message);
         return;
       }
       throw err;

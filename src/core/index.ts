@@ -88,6 +88,15 @@ export {
 } from "./protect-paths.js";
 export type { ProtectOptions } from "./protect-paths.js";
 
+export {
+  rejectionHint,
+  describeRejection,
+  debugEnabled,
+  NO_BINDING,
+  DEBUG_HEADER,
+} from "./diagnostics.js";
+export type { RejectionDetails } from "./diagnostics.js";
+
 export { parseCookieHeader } from "./protocol/cookies.js";
 export { readJsonObject, MAX_PROTOCOL_BODY_BYTES } from "./protocol/body.js";
 

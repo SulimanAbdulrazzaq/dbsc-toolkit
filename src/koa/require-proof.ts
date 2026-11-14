@@ -9,6 +9,9 @@ import {
   DbscVerificationError,
   type RequireProofOptions,
   proofTarget,
+  describeRejection,
+  DEBUG_HEADER,
+  NO_BINDING,
 } from "../core/index.js";
 import { DBSC_INTERNAL, type DbscInternal, type DbscNodeSession } from "../node/index.js";
 
@@ -38,14 +41,26 @@ async function readRawBody(ctx: Context): Promise<Uint8Array | null> {
  * `ctx.state.dbsc`. Reads the raw body from `ctx.request.rawBody` when a body
  * parser populated it, else from the socket.
  */
+/** Sets a 403 with the error code, a plain-language hint and, when debugging, X-Dbsc-Debug. */
+function reject(ctx: Context, code: string, body: Record<string, unknown>, message?: string): void {
+  const { hint, debugHeader } = describeRejection(code, message);
+  if (debugHeader) ctx.set(DEBUG_HEADER, debugHeader);
+  ctx.status = 403;
+  ctx.body = { ...body, code, ...(hint !== undefined && { hint }) };
+}
+
 export function requireProof(opts: RequireProofOptions<Context> = {}): Middleware {
   return async (ctx, next) => {
     const session = (ctx.state as { dbsc?: DbscNodeSession }).dbsc;
     const tier = session?.tier ?? "none";
     const skipped = session?.skipped ?? [];
     if (!session?.sessionId || tier === "none") {
-      ctx.status = 403;
-      ctx.body = { error: "device-bound session required", currentTier: "none", reason: noBindingReason(skipped), skipped };
+      reject(ctx, NO_BINDING, {
+        error: "device-bound session required",
+        currentTier: "none",
+        reason: noBindingReason(skipped),
+        skipped,
+      });
       return;
     }
 
@@ -58,8 +73,7 @@ export function requireProof(opts: RequireProofOptions<Context> = {}): Middlewar
     }
 
     if (!(await sessionBindingMatches(opts, ctx, session.sessionId, storage))) {
-      ctx.status = 403;
-      ctx.body = { error: SESSION_MISMATCH_MESSAGE, code: ErrorCodes.SESSION_MISMATCH };
+      reject(ctx, ErrorCodes.SESSION_MISMATCH, { error: SESSION_MISMATCH_MESSAGE });
       return;
     }
 
@@ -95,8 +109,7 @@ export function requireProof(opts: RequireProofOptions<Context> = {}): Middlewar
       await next();
     } catch (err) {
       if (err instanceof DbscVerificationError) {
-        ctx.status = 403;
-        ctx.body = { error: err.message, code: err.code };
+        reject(ctx, err.code, { error: err.message }, err.message);
         return;
       }
       throw err;

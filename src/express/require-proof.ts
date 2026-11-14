@@ -4,9 +4,10 @@ import {
   sessionBindingMatches,
   SESSION_MISMATCH_MESSAGE,
   ErrorCodes,
+  NO_BINDING,
   type RequireProofOptions,
 } from "../core/index.js";
-import { requireBoundProof } from "./proof.js";
+import { requireBoundProof, sendRejection } from "./proof.js";
 import { DBSC_INTERNAL, type DbscInternal } from "./index.js";
 
 /**
@@ -33,7 +34,7 @@ export function requireProof(opts: RequireProofOptions<Request> = {}): RequestHa
     const tier = dbsc?.tier ?? "none";
     const skipped = dbsc?.skipped ?? [];
     if (tier === "none") {
-      res.status(403).json({
+      sendRejection(res, NO_BINDING, {
         error: "device-bound session required",
         currentTier: "none",
         reason: noBindingReason(skipped),
@@ -53,7 +54,7 @@ export function requireProof(opts: RequireProofOptions<Request> = {}): RequestHa
       return;
     }
     if (!(await sessionBindingMatches(opts, req, dbsc!.sessionId!, storage))) {
-      res.status(403).json({ error: SESSION_MISMATCH_MESSAGE, code: ErrorCodes.SESSION_MISMATCH });
+      sendRejection(res, ErrorCodes.SESSION_MISMATCH, { error: SESSION_MISMATCH_MESSAGE });
       return;
     }
     // When the bound polyfill is disabled, no bound key is ever registered, so a

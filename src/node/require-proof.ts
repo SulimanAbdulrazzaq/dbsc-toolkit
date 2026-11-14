@@ -8,6 +8,9 @@ import {
   DbscVerificationError,
   type RequireProofOptions,
   proofTarget,
+  describeRejection,
+  DEBUG_HEADER,
+  NO_BINDING,
 } from "../core/index.js";
 import { getDbscSession, DBSC_INTERNAL, type DbscInternal } from "./index.js";
 
@@ -43,16 +46,28 @@ async function readRawBody(req: IncomingMessage): Promise<Uint8Array | null> {
  * cached on the request, so a downstream handler can re-read it via
  * `readJsonBody(req)`.
  */
+/** Writes a 403 with the error code, a plain-language hint and, when debugging, X-Dbsc-Debug. */
+function reject(res: ServerResponse, code: string, body: Record<string, unknown>, message?: string): false {
+  const { hint, debugHeader } = describeRejection(code, message);
+  if (debugHeader) res.setHeader(DEBUG_HEADER, debugHeader);
+  res.setHeader("Content-Type", "application/json");
+  res.statusCode = 403;
+  res.end(JSON.stringify({ ...body, code, ...(hint !== undefined && { hint }) }));
+  return false;
+}
+
 export function requireProof(opts: RequireProofOptions<IncomingMessage> = {}): NodeProofGuard {
   return async (req, res) => {
     const session = getDbscSession(req);
     const tier = session?.tier ?? "none";
     const skipped = session?.skipped ?? [];
     if (!session?.sessionId || tier === "none") {
-      res.setHeader("Content-Type", "application/json");
-      res.statusCode = 403;
-      res.end(JSON.stringify({ error: "device-bound session required", currentTier: "none", reason: noBindingReason(skipped), skipped }));
-      return false;
+      return reject(res, NO_BINDING, {
+        error: "device-bound session required",
+        currentTier: "none",
+        reason: noBindingReason(skipped),
+        skipped,
+      });
     }
 
     const internal = (session as unknown as Record<PropertyKey, unknown>)[DBSC_INTERNAL] as DbscInternal | undefined;
@@ -65,10 +80,7 @@ export function requireProof(opts: RequireProofOptions<IncomingMessage> = {}): N
     }
 
     if (!(await sessionBindingMatches(opts, req, session.sessionId, storage))) {
-      res.setHeader("Content-Type", "application/json");
-      res.statusCode = 403;
-      res.end(JSON.stringify({ error: SESSION_MISMATCH_MESSAGE, code: ErrorCodes.SESSION_MISMATCH }));
-      return false;
+      return reject(res, ErrorCodes.SESSION_MISMATCH, { error: SESSION_MISMATCH_MESSAGE });
     }
 
     const allowDbscWithoutProof =
@@ -105,10 +117,7 @@ export function requireProof(opts: RequireProofOptions<IncomingMessage> = {}): N
       return true;
     } catch (err) {
       if (err instanceof DbscVerificationError) {
-        res.setHeader("Content-Type", "application/json");
-        res.statusCode = 403;
-        res.end(JSON.stringify({ error: err.message, code: err.code }));
-        return false;
+        return reject(res, err.code, { error: err.message }, err.message);
       }
       throw err;
     }

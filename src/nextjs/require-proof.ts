@@ -8,8 +8,9 @@ import {
   type RequireProofOptions,
   type ProtectionTier,
   type SkippedEntry,
+  NO_BINDING,
 } from "../core/index.js";
-import { requireBoundProof } from "./proof.js";
+import { requireBoundProof, rejectionResponse } from "./proof.js";
 import { MemoryReplayCache } from "../storage/memory/replay-cache.js";
 
 // requireProof() here has no shared middleware context, so it keeps one
@@ -45,15 +46,12 @@ export async function requireProof(
   if (session.tier === "none") {
     return {
       ok: false,
-      response: NextResponse.json(
-        {
-          error: "device-bound session required",
-          currentTier: "none",
-          reason: noBindingReason(skipped),
-          skipped,
-        },
-        { status: 403 },
-      ),
+      response: rejectionResponse(NO_BINDING, {
+        error: "device-bound session required",
+        currentTier: "none",
+        reason: noBindingReason(skipped),
+        skipped,
+      }),
     };
   }
   if (!opts.storage) {
@@ -68,7 +66,7 @@ export async function requireProof(
   if (!session.sessionId || !(await sessionBindingMatches(opts, req, session.sessionId, opts.storage))) {
     return {
       ok: false,
-      response: NextResponse.json({ error: SESSION_MISMATCH_MESSAGE, code: ErrorCodes.SESSION_MISMATCH }, { status: 403 }),
+      response: rejectionResponse(ErrorCodes.SESSION_MISMATCH, { error: SESSION_MISMATCH_MESSAGE }),
     };
   }
   // bound polyfill off → no bound key exists → auto-relax the dbsc tier.

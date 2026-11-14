@@ -5,7 +5,22 @@ import {
   type StorageAdapter,
   type ProofReplayCache,
   proofTarget,
+  describeRejection,
+  DEBUG_HEADER,
+  NO_BINDING,
 } from "../core/index.js";
+
+/** A 403 with the error code, a plain-language hint and, when debugging, X-Dbsc-Debug. */
+export function rejection(
+  c: Context,
+  code: string,
+  body: Record<string, unknown>,
+  message?: string,
+): Response {
+  const { hint, debugHeader } = describeRejection(code, message);
+  if (debugHeader) c.header(DEBUG_HEADER, debugHeader);
+  return c.json({ ...body, code, ...(hint !== undefined && { hint }) }, 403);
+}
 
 export interface RequireBoundProofOptions {
   storage: StorageAdapter;
@@ -32,7 +47,7 @@ export function requireBoundProof(opts: RequireBoundProofOptions): MiddlewareHan
   return async (c: Context, next): Promise<Response | void> => {
     const dbsc = c.get("dbsc");
     if (!dbsc?.sessionId || dbsc.tier === "none") {
-      return c.json({ error: "no active binding", tier: dbsc?.tier ?? "none" }, 403);
+      return rejection(c, NO_BINDING, { error: "no active binding", tier: dbsc?.tier ?? "none" });
     }
     if (dbsc.tier === "dbsc" && allowDbsc) {
       await next();
@@ -62,7 +77,7 @@ export function requireBoundProof(opts: RequireBoundProofOptions): MiddlewareHan
       await next();
     } catch (err) {
       if (err instanceof DbscVerificationError) {
-        return c.json({ error: err.message, code: err.code }, 403);
+        return rejection(c, err.code, { error: err.message }, err.message);
       }
       throw err;
     }

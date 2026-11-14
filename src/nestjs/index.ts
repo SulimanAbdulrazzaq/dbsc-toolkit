@@ -24,6 +24,8 @@ import {
   type KitSessionBinding,
   proofTarget,
   withKitBinding,
+  rejectionHint,
+  NO_BINDING,
 } from "../core/index.js";
 import {
   runDpopGuard,
@@ -111,7 +113,14 @@ async function runProof(req: Request, res: Response, guardOpts: RequireProofOpti
   const tier = dbscLocals?.tier ?? "none";
   const skipped = dbscLocals?.skipped ?? [];
   if (!dbscLocals?.sessionId || tier === "none") {
-    throw new ForbiddenException({ error: "device-bound session required", currentTier: "none", reason: noBindingReason(skipped), skipped });
+    throw new ForbiddenException({
+      error: "device-bound session required",
+      code: NO_BINDING,
+      currentTier: "none",
+      reason: noBindingReason(skipped),
+      skipped,
+      hint: rejectionHint(NO_BINDING),
+    });
   }
 
   const internal = (res.locals as Record<PropertyKey, unknown>)[DBSC_INTERNAL] as DbscInternal | undefined;
@@ -121,7 +130,11 @@ async function runProof(req: Request, res: Response, guardOpts: RequireProofOpti
   }
 
   if (!(await sessionBindingMatches(opts, req, dbscLocals.sessionId, storage))) {
-    throw new ForbiddenException({ error: SESSION_MISMATCH_MESSAGE, code: ErrorCodes.SESSION_MISMATCH });
+    throw new ForbiddenException({
+      error: SESSION_MISMATCH_MESSAGE,
+      code: ErrorCodes.SESSION_MISMATCH,
+      hint: rejectionHint(ErrorCodes.SESSION_MISMATCH),
+    });
   }
 
   const allowDbscWithoutProof =
@@ -154,7 +167,7 @@ async function runProof(req: Request, res: Response, guardOpts: RequireProofOpti
     );
   } catch (err) {
     if (err instanceof DbscVerificationError) {
-      throw new ForbiddenException({ error: err.message, code: err.code });
+      throw new ForbiddenException({ error: err.message, code: err.code, hint: rejectionHint(err.code, err.message) });
     }
     throw err;
   }

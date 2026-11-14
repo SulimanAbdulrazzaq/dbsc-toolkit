@@ -7,7 +7,18 @@ import {
   type ProofReplayCache,
   type ProtectionTier,
   proofTarget,
+  describeRejection,
+  DEBUG_HEADER,
+  NO_BINDING,
 } from "../core/index.js";
+
+/** A 403 with the error code, a plain-language hint and, when debugging, X-Dbsc-Debug. */
+export function rejectionResponse(code: string, body: Record<string, unknown>, message?: string): NextResponse {
+  const { hint, debugHeader } = describeRejection(code, message);
+  const res = NextResponse.json({ ...body, code, ...(hint !== undefined && { hint }) }, { status: 403 });
+  if (debugHeader) res.headers.set(DEBUG_HEADER, debugHeader);
+  return res;
+}
 
 export interface RequireBoundProofOptions {
   storage: StorageAdapter;
@@ -44,10 +55,7 @@ export async function requireBoundProof(
   if (!session.sessionId || session.tier === "none") {
     return {
       ok: false,
-      response: NextResponse.json(
-        { error: "no active binding", tier: session.tier },
-        { status: 403 },
-      ),
+      response: rejectionResponse(NO_BINDING, { error: "no active binding", tier: session.tier }),
     };
   }
   if (session.tier === "dbsc" && allowDbsc) return { ok: true };
@@ -77,7 +85,7 @@ export async function requireBoundProof(
     if (err instanceof DbscVerificationError) {
       return {
         ok: false,
-        response: NextResponse.json({ error: err.message, code: err.code }, { status: 403 }),
+        response: rejectionResponse(err.code, { error: err.message }, err.message),
       };
     }
     throw err;

@@ -100,6 +100,9 @@ export function startDbsc(opts: StartDbscOptions = {}): DbscClient {
       return prefixes.some((p) => url.pathname.startsWith(p));
     },
     onResponse: (res) => {
+      // The server explains rejections in X-Dbsc-Debug when debugging is on.
+      const debug = res.headers.get("x-dbsc-debug");
+      if (debug) console.warn(`[dbsc-toolkit] ${res.status} ${res.url}: ${debug}`);
       // A login done with fetch starts a binding on its response. Register
       // right away instead of waiting for the next page load.
       if (restartQueued || !REGISTRATION_HEADERS.some((h) => res.headers.has(h))) return;

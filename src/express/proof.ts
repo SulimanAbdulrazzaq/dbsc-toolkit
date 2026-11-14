@@ -7,6 +7,9 @@ import {
   type StorageAdapter,
   type ProofReplayCache,
   proofTarget,
+  describeRejection,
+  DEBUG_HEADER,
+  NO_BINDING,
 } from "../core/index.js";
 import { capturedProofBody } from "./capture-body.js";
 
@@ -40,6 +43,18 @@ export interface RequireBoundProofOptions {
   replayCache?: ProofReplayCache;
 }
 
+/** Sends a 403 with the error code, a plain-language hint and, when debugging, X-Dbsc-Debug. */
+export function sendRejection(
+  res: Response,
+  code: string,
+  body: Record<string, unknown>,
+  message?: string,
+): void {
+  const { hint, debugHeader } = describeRejection(code, message);
+  if (debugHeader) res.setHeader(DEBUG_HEADER, debugHeader);
+  res.status(403).json({ ...body, code, ...(hint !== undefined && { hint }) });
+}
+
 /** Gates a route on a fresh bound-key proof. */
 export function requireBoundProof(opts: RequireBoundProofOptions): RequestHandler {
   const allowDbsc = opts.allowDbscWithoutProof ?? false;
@@ -47,7 +62,7 @@ export function requireBoundProof(opts: RequireBoundProofOptions): RequestHandle
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const dbsc = res.locals.dbsc;
     if (!dbsc?.sessionId || dbsc.tier === "none") {
-      res.status(403).json({ error: "no active binding", tier: dbsc?.tier ?? "none" });
+      sendRejection(res, NO_BINDING, { error: "no active binding", tier: dbsc?.tier ?? "none" });
       return;
     }
     if (dbsc.tier === "dbsc" && allowDbsc) {
@@ -81,7 +96,7 @@ export function requireBoundProof(opts: RequireBoundProofOptions): RequestHandle
       next();
     } catch (err) {
       if (err instanceof DbscVerificationError) {
-        res.status(403).json({ error: err.message, code: err.code });
+        sendRejection(res, err.code, { error: err.message }, err.message);
         return;
       }
       throw err;

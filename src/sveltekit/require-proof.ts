@@ -7,6 +7,10 @@ import {
   type RequireProofOptions,
   proofTarget,
   withKitBinding,
+  describeRejection,
+  ErrorCodes,
+  DEBUG_HEADER,
+  NO_BINDING,
 } from "../core/index.js";
 import { DBSC_INTERNAL, type DbscInternal, type DbscSvelteKitSession } from "./index.js";
 
@@ -21,12 +25,30 @@ import { DBSC_INTERNAL, type DbscInternal, type DbscSvelteKitSession } from "./i
  *
  * Throws a SvelteKit `error(403)` when there is no binding or the proof fails.
  */
+/**
+ * A 403 `error()` whose body carries the code and a plain-language hint
+ * (`{ message, code, hint }`); X-Dbsc-Debug is added when debugging.
+ */
+function deny(event: RequestEvent, code: string, message: string): ReturnType<typeof error> {
+  const { hint, debugHeader } = describeRejection(code, message);
+  if (debugHeader) {
+    try {
+      event.setHeaders({ [DEBUG_HEADER]: debugHeader });
+    } catch {
+      // Already set by an earlier guard on this request.
+    }
+  }
+  const body: { message: string; code: string; hint?: string } = { message, code };
+  if (hint !== undefined) body.hint = hint;
+  return error(403, body);
+}
+
 export function requireProof(guardOpts: RequireProofOptions<RequestEvent> = {}) {
   return async (event: RequestEvent): Promise<void> => {
     const session = (event.locals as Record<string, unknown>).dbsc as DbscSvelteKitSession | undefined;
     const tier = session?.tier ?? "none";
     if (!session?.sessionId || tier === "none") {
-      throw error(403, "device-bound session required");
+      throw deny(event, NO_BINDING, "device-bound session required");
     }
 
     const internal = (session as unknown as Record<PropertyKey, unknown>)[DBSC_INTERNAL] as DbscInternal | undefined;
@@ -38,7 +60,7 @@ export function requireProof(guardOpts: RequireProofOptions<RequestEvent> = {}) 
     }
 
     if (!(await sessionBindingMatches(opts, event, session.sessionId, storage))) {
-      throw error(403, SESSION_MISMATCH_MESSAGE);
+      throw deny(event, ErrorCodes.SESSION_MISMATCH, SESSION_MISMATCH_MESSAGE);
     }
 
     const allowDbscWithoutProof =
@@ -63,7 +85,7 @@ export function requireProof(guardOpts: RequireProofOptions<RequestEvent> = {}) 
       );
     } catch (err) {
       if (err instanceof DbscVerificationError) {
-        throw error(403, err.message);
+        throw deny(event, err.code, err.message);
       }
       throw err;
     }

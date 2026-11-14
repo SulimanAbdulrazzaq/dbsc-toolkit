@@ -4,9 +4,10 @@ import {
   sessionBindingMatches,
   SESSION_MISMATCH_MESSAGE,
   ErrorCodes,
+  NO_BINDING,
   type RequireProofOptions,
 } from "../core/index.js";
-import { requireBoundProof } from "./proof.js";
+import { requireBoundProof, sendRejection } from "./proof.js";
 import { DBSC_INTERNAL, type DbscInternal } from "./index.js";
 
 /**
@@ -25,7 +26,7 @@ export function requireProof(opts: RequireProofOptions<FastifyRequest> = {}): pr
     const tier = dbsc?.tier ?? "none";
     const skipped = dbsc?.skipped ?? [];
     if (tier === "none") {
-      reply.status(403).send({
+      sendRejection(reply, NO_BINDING, {
         error: "device-bound session required",
         currentTier: "none",
         reason: noBindingReason(skipped),
@@ -45,7 +46,7 @@ export function requireProof(opts: RequireProofOptions<FastifyRequest> = {}): pr
       return;
     }
     if (!(await sessionBindingMatches(opts, req, dbsc!.sessionId!, storage))) {
-      reply.status(403).send({ error: SESSION_MISMATCH_MESSAGE, code: ErrorCodes.SESSION_MISMATCH });
+      sendRejection(reply, ErrorCodes.SESSION_MISMATCH, { error: SESSION_MISMATCH_MESSAGE });
       return;
     }
     // bound polyfill off → no bound key exists → auto-relax the dbsc tier.
